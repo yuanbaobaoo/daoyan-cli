@@ -8,7 +8,7 @@
 #   DAYOAN_REF=v0.1.0 curl -fsSL .../install.sh | bash
 #
 # 原理：npm install -g git+https://github.com/yuanbaobaoo/daoyan-cli.git
-#       （package.json 的 prepare 钩子在安装时自动构建 dist）。
+#       （dist 产物随仓库分发，安装即用，无需在用户机上构建）。
 # 要求：node >= 22、npm、git。
 set -euo pipefail
 

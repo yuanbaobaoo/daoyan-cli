@@ -35,7 +35,7 @@ var DaoyanCliError = class extends Error {
 };
 
 // src/shared/version.mts
-var VERSION = "0.1.0";
+var VERSION = "0.0.1";
 
 // src/shared/groups.mts
 var GROUP_LABEL = {

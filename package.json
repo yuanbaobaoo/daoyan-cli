@@ -1,6 +1,6 @@
 {
   "name": "daoyan-cli",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "description": "daoyan-cli —— 面向 AI Agent 的 ComfyUI 生产编排 CLI：剧本进，成片出。An agent-native orchestration CLI on top of ComfyUI: storyboards in, finished videos out.",
   "type": "module",
   "license": "Apache-2.0",

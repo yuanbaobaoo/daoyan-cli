@@ -1,7 +1,7 @@
 # 错误码
 
 全部错误码为稳定字符串枚举（`src/shared/errors.mts`），同时登记在
-`daoyan-cli discover --json` 的 `errorCodes` 字段中。`--json` 模式下失败信封为：
+`daoyan-cli help --json` 的 `errorCodes` 字段中。`--json` 模式下失败信封为：
 
 ```json
 { "ok": false, "error": { "code": "relay_upstream_missing", "message": "…", "details": {} } }
@@ -24,10 +24,12 @@
 | `shot_failed` | 1 | 引擎返回 error / cancelled，或产物落位失败 |
 | `shot_timeout` | 1 | 单镜等待超时（`--timeout`，默认 3 小时） |
 | `external_tool_missing` | 1 | 外部组件缺失：python3 / git / npm / ffmpeg / k3s crictl 等 |
-| `update_failed` | 1 | 自升级的 npm 进程失败（含 EACCES 权限指引） |
+| `update_failed` | 1 | 自升级失败（GitHub 检测 / npm pack / npm install，含 EACCES 权限指引） |
+| `provision_failed` | 1 | 引擎供应失败：venv 创建 / git clone / pip 安装 / 版本不存在 |
+| `wrap_failed` | 1 | 合片失败：镜头不足 / ffmpeg 退出非零 |
 
 ## 约定
 
-- 新增错误码必须同步三处：`errors.mts` 枚举、本文件、discover 输出（自动来自枚举）。
+- 新增错误码必须同步三处：`errors.mts` 枚举、本文件、`help --json` 输出（自动来自枚举）。
 - code 一旦发布即冻结，只能新增不能改义——下游 agent 依赖它做分支决策。
 - 人类可读模式输出格式：`ERROR[code] message`（stderr）。

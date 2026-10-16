@@ -1,4 +1,4 @@
-/** 命令分组（帮助与 discover 共用的标签）。 */
+/** 命令分组（帮助输出共用的标签）。 */
 export type CommandGroup = "project" | "production" | "engine" | "ops" | "meta";
 
 export const GROUP_LABEL: Record<CommandGroup, string> = {

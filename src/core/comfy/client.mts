@@ -26,7 +26,7 @@ export interface QueueSnapshot {
 }
 
 export class ComfyClient {
-  private readonly base: string;
+  readonly base: string;
 
   constructor(base: string) {
     this.base = base;

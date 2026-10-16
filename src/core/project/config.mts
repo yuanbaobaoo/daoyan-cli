@@ -2,10 +2,11 @@
  *  - 找不到返回 null（调用方决定报 project_not_found 还是静默）；
  *  - 找到但非法抛 config_invalid；
  *  - 相对路径一律锚到项目根（项目内相对布局的直觉）。 */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { DaoyanCliError } from "../../shared/errors.mts";
-import { PROJECT_FILE, type ProjectConfig } from "./types.mts";
+import type { CliContext } from "../../shared/context.mts";
+import { PROJECT_FILE, SHOTS_FILE, type ProjectConfig, type ShotsFile } from "./types.mts";
 
 export interface FoundProject {
   root: string;
@@ -85,4 +86,32 @@ function absolutize(cfg: ProjectConfig, root: string): ProjectConfig {
           }
         : cfg.engine,
   };
+}
+
+/** 从命令上下文解析项目：--project 指定，否则自 cwd 向上寻找。 */
+export function projectFromContext(ctx: CliContext): FoundProject | null {
+  return findProject(ctx.projectPath ?? process.cwd());
+}
+
+/** 加载项目根下的 shots.json（解析失败抛 config_invalid）。 */
+export function loadShotsFile(root: string): ShotsFile {
+  const file = join(root, SHOTS_FILE);
+  if (!existsSync(file)) {
+    throw new DaoyanCliError({ code: "config_invalid", message: `缺少 ${file}（init 生成或手工创建）` });
+  }
+  try {
+    const raw: unknown = JSON.parse(readFileSync(file, "utf8"));
+    if (typeof raw !== "object" || raw === null) throw new Error("顶层不是对象");
+    return raw as ShotsFile;
+  } catch (e) {
+    throw new DaoyanCliError({
+      code: "config_invalid",
+      message: `${file} 不是合法的 shots.json：${e instanceof Error ? e.message : String(e)}`,
+    });
+  }
+}
+
+/** 回写 project.json（engine use 等命令用）。 */
+export function saveProjectConfig(root: string, cfg: ProjectConfig): void {
+  writeFileSync(join(root, PROJECT_FILE), JSON.stringify(cfg, null, 2) + "\n");
 }

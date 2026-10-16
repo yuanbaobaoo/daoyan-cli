@@ -1,4 +1,4 @@
-/** daoyan-cli 结构化错误码 —— 全部登记项见 docs/ERROR-CODES.md 与 `daoyan-cli discover --json`。
+/** daoyan-cli 结构化错误码 —— 全部登记项见 docs/ERROR-CODES.md 与 `daoyan-cli help --json`。
  *  约定：code 一旦发布即冻结，只能新增不能改义（下游 agent 依赖它做分支决策）。 */
 export const ERROR_CODES = [
   "usage",
@@ -17,6 +17,8 @@ export const ERROR_CODES = [
   "shot_timeout",
   "external_tool_missing",
   "update_failed",
+  "provision_failed",
+  "wrap_failed",
 ] as const satisfies readonly string[];
 
 export type ErrCode = (typeof ERROR_CODES)[number];

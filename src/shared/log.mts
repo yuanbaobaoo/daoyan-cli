@@ -1,5 +1,8 @@
-/** 日志 —— M0 简化版：stdout 即时输出 + 可挂载的文件 sink。
- *  三路日志（stdout + 任务流 daoyan-cli.log + 单镜 gen_*.log）在 M1 的 obs 模块挂载。 */
+/** 日志 —— stdout 即时输出 + 可挂载的文件 sink。
+ *  任务流落盘：attachFileSink(logs/daoyan-cli.log)；单镜 gen_*.log 由 pipeline 挂载。 */
+import { appendFileSync, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
+
 type Sink = (line: string) => void;
 
 const sinks: Sink[] = [];
@@ -7,6 +10,14 @@ const ts = (): string => new Date().toTimeString().slice(0, 8);
 
 export function attachSink(fn: Sink): void {
   sinks.push(fn);
+}
+
+/** 追加写文件 sink（自动建目录）。 */
+export function attachFileSink(file: string): void {
+  mkdirSync(dirname(file), { recursive: true });
+  sinks.push((line) => {
+    appendFileSync(file, line + "\n");
+  });
 }
 
 export function detachSinks(): void {
@@ -28,9 +39,4 @@ export function say(msg: string): void {
 
 export function warn(msg: string): void {
   process.stderr.write(`[${ts()}] WARN ${msg}\n`);
-}
-
-export function die(msg: string, code = 1): never {
-  process.stderr.write(`ERROR: ${msg}\n`);
-  process.exit(code);
 }

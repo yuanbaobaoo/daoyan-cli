@@ -1,5 +1,5 @@
 /** --json 信封输出：成功 {"ok":true,"data":…}；失败 {"ok":false,"error":{code,message,details?}}。
- *  信封形状是公开契约，登记于 daoyan-cli discover 与 docs/PLAN.md。 */
+ *  信封形状是公开契约，登记于 daoyan-cli help --json 与 docs/PLAN.md。 */
 import type { DaoyanCliError } from "./errors.mts";
 
 export function emitData(data: unknown): void {

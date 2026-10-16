@@ -56,7 +56,7 @@ daoyan-cli/
 ├── tsconfig.json / tsup.config.mts
 ├── src/
 │   ├── cli.mts             # 入口：参数解析(--json/--project)、命令分发、帮助
-│   ├── commands/           # 命令注册表 + discover / update（其余按里程碑交付）
+│   ├── commands/           # 命令注册表（help/update/init/validate/shot/wrap/logs/status/engine 已实现）
 │   ├── core/
 │   │   ├── comfy/          # 引擎 REST 客户端（/prompt /history /queue /object_info /system_stats）
 │   │   │                   # + WS 进度订阅（M2）+ 引擎生命周期(up/down/PID/就绪探测，M1)
@@ -84,7 +84,7 @@ daoyan-cli/
 |---|---|---|
 | `cli.mts` | 参数解析、命令分发、帮助；零依赖手写 | M0 ✅ |
 | `commands/registry.mts` | 全部命令的元信息与占位实现 | M0 ✅ |
-| `commands/discover.mts` | agent 自描述文档 | M0 ✅ |
+| `commands/help.mts` | 帮助与 agent 自描述（替代早期 discover） | ✅ |
 | `commands/update.mts` | npm 自升级 | M0 ✅ |
 | `core/project/` | project.json / shots.json 类型与加载（向上寻找） | M0 ✅ |
 | `core/comfy/client.mts` | 引擎 REST 客户端 | M0 ✅ |
@@ -99,7 +99,7 @@ daoyan-cli/
 
 - **输出信封**（`--json`）：成功 `{"ok":true,"data":…}`；失败 `{"ok":false,"error":{"code","message","details?"}}`。
 - **退出码**：0 成功；1 业务失败；2 用法错误；130 被中断。
-- **错误码**：稳定字符串枚举，全量登记于 [ERROR-CODES.md](ERROR-CODES.md) 与 `daoyan-cli discover --json`。
+- **错误码**：稳定字符串枚举，全量登记于 [ERROR-CODES.md](ERROR-CODES.md) 与 `daoyan-cli help --json`。
 - **依赖政策**：运行时零第三方依赖；开发依赖仅 typescript / tsup / @types/node。
   新增运行时依赖需要充分理由（目前唯一预期候选：若 M2 采纳 `ws` 而不用 Node 内置 WebSocket）。
 - **路径约定**：project.json 中的相对路径一律相对项目根解析（`core/project/config.mts` 负责）。
@@ -122,7 +122,7 @@ daoyan-cli/
 | `daoyan-cli doctor` | 环境自检（引擎/节点/模型/显存/ffmpeg） |
 | `daoyan-cli wrap` | 杀青合片 → `final/`（预留转场扩展点） |
 | `daoyan-cli update` | 自升级（检测 npm prefix 权限，EACCES 给指引） |
-| `daoyan-cli discover [--json]` | agent 自描述：命令树/schema/错误码/退出码约定 |
+| `daoyan-cli help [命令] [--json]` | 帮助与 agent 自描述：命令树/schema/错误码/退出码约定（替代早期 discover） |
 | `daoyan-cli engine ls/install <ver>/use <ver>` | ComfyUI 外部组件的版本管理 |
 | `daoyan-cli gpu status [/ evict / restore]` | GPU 编排可见化（运维用） |
 
@@ -167,7 +167,7 @@ project.json 写 `engine.mode = "remote"`。
 4. **首帧/接力**：锚点 key → 复制进引擎 input；relay → ffmpeg 抽上游尾帧（mtime 缓存）；上游缺片时开机前即报 `relay_upstream_missing`。
 5. **进度**：优先 WS `/ws?clientId=` 订阅进度事件；引擎旧版本/WS 不可用时降级为引擎日志 tqdm 解析 + mtime 外推（生产验证过的兜底逻辑；remote 模式无本地日志，仅 WS）。
 6. **断点续跑**：按输出前缀找产物，存在即跳过；`retake` 强制重拍。
-7. **错误码**：每类错误一个稳定 code（`anchor_not_found` / `relay_upstream_missing` / `engine_not_ready` / `gpu_evict_failed` / `shot_timeout` / `lock_held` …），`--json` 下输出 `{code, message, details}`；全部错误码登记进 `discover`。
+7. **错误码**：每类错误一个稳定 code（`anchor_not_found` / `relay_upstream_missing` / `engine_not_ready` / `gpu_evict_failed` / `shot_timeout` / `lock_held` …），`--json` 下输出 `{code, message, details}`；全部错误码登记进 `help --json`。
 8. **manifest**：每镜完成即落盘，返工归因与 A/B 重跑有据可查。
 
 ## 10. 里程碑
@@ -176,7 +176,7 @@ project.json 写 `engine.mode = "remote"`。
 |---|---|---|
 | M0 骨架 | TS 工程/命令注册/--json 框架/错误码框架/npm 占位包 | `daoyan-cli --help` 可安装可用 |
 | M1 核心对齐 | 引擎生命周期/锁/shot/batch/接力锚点/GPU 编排/status/logs/wrap | `init --use-existing` 接管既有 ComfyUI 项目后，`validate → status → shot → wrap` 全流程跑通且 `--json` 可用 |
-| M2 规则层 | validate/manifest/WS 进度/remote 模式细化 | `discover --json` 驱动 agent 完成一次盲操作 |
+| M2 规则层 | validate/manifest/WS 进度/remote 模式细化 | `help --json` 驱动 agent 完成一次盲操作 |
 | M3 项目化 | init 全流程（venv/版本选择/clone）/模板/多项目 | 新机器空目录 → 新项目跑通一镜 |
 | M4 开源打磨 | 文档/completion/e2e/发布流程 | 对外发布 1.0 |
 

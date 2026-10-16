@@ -1,6 +1,6 @@
-# daoyan-cli（导演）
+# daoyan-cli
 
-构建在 ComfyUI 之上的生产编排 CLI，面向 AI Agent 与自动化流水线：剧本进，成片出。
+构建在 ComfyUI 之上的生产编排 CLI，面向 AI Agent 与自动化流水线。
 
 > 🚧 **开发中**：核心命令已可用（见下表 ✅），其余按里程碑推进，计划见 [docs/PLAN.md](docs/PLAN.md)。
 > 未实现的命令执行时报 `not_implemented`。GPU 编排与 remote 模式的生成链路尚未接入。

@@ -1,6 +1,6 @@
-# daoyan-cli（导演）
+# daoyan-cli
 
-构建在 ComfyUI 之上的生产编排 CLI，面向 AI Agent 与自动化流水线：剧本进，成片出。
+构建在 ComfyUI 之上的生产编排 CLI，面向 AI Agent 与自动化流水线。
 
 > 🚧 **开发中（M0 骨架阶段）**：目前仅 `discover` 与 `update` 可用，其余命令尚未实现
 > （执行会报 `not_implemented` 并指向计划交付的里程碑）。核心能力按里程碑推进，
@@ -17,8 +17,6 @@ curl -fsSL https://raw.githubusercontent.com/yuanbaobaoo/daoyan-cli/master/insta
 # 方式二：npm 直装 GitHub 仓库
 npm i -g git+https://github.com/yuanbaobaoo/daoyan-cli.git
 
-# 方式三：npm registry（包发布后可用）
-npm i -g daoyan-cli
 ```
 
 指定版本安装（接受 git tag / 分支 / commit）：

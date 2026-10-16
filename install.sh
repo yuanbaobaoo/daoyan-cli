@@ -44,9 +44,9 @@ if ! npm install -g "$tmpdir/$tgz"; then
   die "npm 安装失败。若是 EACCES 权限错误，推荐用 nvm（免 sudo），或：npm config set prefix ~/.npm-global 并把 ~/.npm-global/bin 加入 PATH 后重试"
 fi
 
-command -v daoyan-cli >/dev/null 2>&1 \
+command -v dycli >/dev/null 2>&1 \
   || die "安装完成，但 npm 全局 bin 目录不在 PATH。查看：npm prefix -g，其下 bin/ 子目录需加入 PATH"
 
-say "==> 完成：$(daoyan-cli --version)"
-say "    上手：daoyan-cli --help（短命令 dyc 等价）"
-say "    Agent 自描述：daoyan-cli discover --json"
+say "==> 完成：$(dycli --version)"
+say "    上手：daoyan --help（短命令 dycli 等价）"
+say "    Agent 自描述：daoyan help --json"

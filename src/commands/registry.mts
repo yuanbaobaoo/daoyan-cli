@@ -15,34 +15,60 @@ import { runLogs } from "./logs.mts";
 import { runStatus } from "./status.mts";
 import { runEngine } from "./engine.mts";
 
+/**
+ * 单个命令的注册信息（help 输出与分发都以它为准）。
+ */
 export interface CommandMeta {
-  /** 子命令用空格分隔，如 "engine install" */
+  /**
+   * 子命令用空格分隔，如 "engine install"
+   */
   name: string;
+  /**
+   * 所属分组（help 按组输出）。
+   */
   group: CommandGroup;
+  /**
+   * 一句话说明（help 列表用）。
+   */
   summary: string;
+  /**
+   * 用法字符串（help 输出与 --json 自描述用）。
+   */
   usage: string;
+  /**
+   * 单命令帮助的补充说明行（可选）。
+   */
   detail?: string[];
-  /** help 据此标注 ✅/⬜ */
+  /**
+   * help 据此标注 ✅/⬜
+   */
   implemented?: boolean;
+  /**
+   * 命令实现（接收已解析的上下文与命令级参数）。
+   */
   run: (ctx: CliContext, args: string[]) => void | Promise<void>;
 }
 
-const planned =
-  (milestone: string) =>
-  (_ctx: CliContext, _args: string[]): void => {
+/**
+ * 未实现命令的占位 run：抛 not_implemented 并提示交付里程碑。
+ */
+function planned(milestone: string): CommandMeta["run"] {
+  return (_ctx: CliContext, _args: string[]): void => {
     throw new DaoyanCliError({
       code: "not_implemented",
       message: `该命令计划在 ${milestone} 交付（docs/PLAN.md §10 里程碑）。`,
     });
   };
+}
 
+// 全部命令的注册表：help 输出、命令查找与 --json 自描述的唯一来源
 export const COMMANDS: CommandMeta[] = [
   // ---- 项目 ----
   {
     name: "init",
     group: "project",
     summary: "立项：本地装引擎（venv/clone）或 --remote 直连远端 ComfyUI",
-    usage: "daoyan-cli init <名称> [--version <tag>] [--use-existing <路径>] [--remote <url>] [--mirror <镜像>]",
+    usage: "daoyan init <名称> [--version <tag>] [--use-existing <路径>] [--remote <url>] [--mirror <镜像>]",
     detail: [
       "ComfyUI 是外部组件：init 只编排（clone / 装依赖），不捆绑。",
       "--use-existing 接管既有安装，跳过引擎安装步骤。",
@@ -55,7 +81,7 @@ export const COMMANDS: CommandMeta[] = [
     name: "validate",
     group: "project",
     summary: "项目规则全量校验（接力闭合/锚点存在/尺寸 32 倍数/seed 冲突）",
-    usage: "daoyan-cli validate [--json]",
+    usage: "daoyan validate [--json]",
     implemented: true,
     run: (ctx) => runValidate(ctx),
   },
@@ -65,7 +91,7 @@ export const COMMANDS: CommandMeta[] = [
     name: "shot",
     group: "production",
     summary: "拍指定镜头（自动 up→首帧注入→提交→轮询→落位；已有产物跳过）",
-    usage: "daoyan-cli shot <镜号...> [--steps N] [--timeout 小时] [--no-evict] [--no-up]",
+    usage: "daoyan shot <镜号...> [--steps N] [--timeout 小时] [--no-evict] [--no-up]",
     detail: ["--no-evict 当前为默认行为（GPU 编排未接入，参数仅为兼容保留）。"],
     implemented: true,
     run: (ctx, args) => runShot(ctx, args),
@@ -74,7 +100,7 @@ export const COMMANDS: CommandMeta[] = [
     name: "retake",
     group: "production",
     summary: "重拍（等价 shot --force）",
-    usage: "daoyan-cli retake <镜号...>",
+    usage: "daoyan retake <镜号...>",
     implemented: true,
     run: (ctx, args) => runShot(ctx, args, true),
   },
@@ -82,14 +108,14 @@ export const COMMANDS: CommandMeta[] = [
     name: "batch",
     group: "production",
     summary: "连拍全部未完成镜头（断点续跑）",
-    usage: "daoyan-cli batch [--no-evict] [--timeout 小时]",
+    usage: "daoyan batch [--no-evict] [--timeout 小时]",
     run: planned("M1"),
   },
   {
     name: "wrap",
     group: "production",
     summary: "杀青：ffmpeg 合片交付到 final/（libx264/crf18/faststart）",
-    usage: "daoyan-cli wrap",
+    usage: "daoyan wrap",
     implemented: true,
     run: (ctx) => runWrap(ctx),
   },
@@ -99,21 +125,21 @@ export const COMMANDS: CommandMeta[] = [
     name: "up",
     group: "engine",
     summary: "引擎就位（local：拉起进程+就绪探测；shot 会自动执行）",
-    usage: "daoyan-cli up",
+    usage: "daoyan up",
     run: planned("M1"),
   },
   {
     name: "down",
     group: "engine",
     summary: "停止引擎（local 模式；remote 模式引擎由远端管理，本命令不适用）",
-    usage: "daoyan-cli down [--force]",
+    usage: "daoyan down [--force]",
     run: planned("M1"),
   },
   {
     name: "engine ls",
     group: "engine",
     summary: "列出可用 ComfyUI 版本（本地 engine/versions/ + GitHub tags）",
-    usage: "daoyan-cli engine ls",
+    usage: "daoyan engine ls",
     implemented: true,
     run: (ctx, args) => runEngine(ctx, ["ls", ...args]),
   },
@@ -121,7 +147,7 @@ export const COMMANDS: CommandMeta[] = [
     name: "engine install",
     group: "engine",
     summary: "安装指定版本的 ComfyUI（外部组件，local 模式）",
-    usage: "daoyan-cli engine install <版本 tag>",
+    usage: "daoyan engine install <版本 tag>",
     implemented: true,
     run: (ctx, args) => runEngine(ctx, ["install", ...args]),
   },
@@ -129,7 +155,7 @@ export const COMMANDS: CommandMeta[] = [
     name: "engine use",
     group: "engine",
     summary: "切换项目使用的 ComfyUI 版本（local 模式）",
-    usage: "daoyan-cli engine use <版本 tag|路径>",
+    usage: "daoyan engine use <版本 tag|路径>",
     implemented: true,
     run: (ctx, args) => runEngine(ctx, ["use", ...args]),
   },
@@ -139,7 +165,7 @@ export const COMMANDS: CommandMeta[] = [
     name: "status",
     group: "ops",
     summary: "场记汇报：引擎/队列/任务锁/GPU/内存/镜头完成度",
-    usage: "daoyan-cli status [--json]",
+    usage: "daoyan status [--json]",
     implemented: true,
     run: (ctx) => runStatus(ctx),
   },
@@ -147,7 +173,7 @@ export const COMMANDS: CommandMeta[] = [
     name: "logs",
     group: "ops",
     summary: "查看日志（docker logs 语义，-f 跟随；清洗 ANSI 与 tqdm 刷屏）",
-    usage: "daoyan-cli logs [-f] [-n N] [--src daoyan-cli|engine|all]",
+    usage: "daoyan logs [-f] [-n N] [--src daoyan-cli|engine|all]",
     implemented: true,
     run: (ctx, args) => runLogs(ctx, args),
   },
@@ -155,35 +181,35 @@ export const COMMANDS: CommandMeta[] = [
     name: "list",
     group: "ops",
     summary: "打印分镜表",
-    usage: "daoyan-cli list [--json]",
+    usage: "daoyan list [--json]",
     run: planned("M1"),
   },
   {
     name: "doctor",
     group: "ops",
     summary: "环境自检（local：引擎/venv/模型/ffmpeg；remote：连通/节点/模型可见性）",
-    usage: "daoyan-cli doctor [--json]",
+    usage: "daoyan doctor [--json]",
     run: planned("M1"),
   },
   {
     name: "gpu status",
     group: "ops",
     summary: "GPU 与容器模型占用一览",
-    usage: "daoyan-cli gpu status",
+    usage: "daoyan gpu status",
     run: planned("M1"),
   },
   {
     name: "gpu evict",
     group: "ops",
     summary: "手动弹出容器模型（通常由 shot 自动执行）",
-    usage: "daoyan-cli gpu evict",
+    usage: "daoyan gpu evict",
     run: planned("M1"),
   },
   {
     name: "gpu restore",
     group: "ops",
     summary: "恢复被弹出的容器模型",
-    usage: "daoyan-cli gpu restore",
+    usage: "daoyan gpu restore",
     run: planned("M1"),
   },
 
@@ -192,7 +218,7 @@ export const COMMANDS: CommandMeta[] = [
     name: "help",
     group: "meta",
     summary: "帮助与 agent 自描述：help [命令]；--json 输出命令树/信封/错误码",
-    usage: "daoyan-cli help [命令] [--json]",
+    usage: "daoyan help [命令] [--json]",
     implemented: true,
     run: (ctx, args) => runHelp(ctx, args, COMMANDS, VERSION),
   },
@@ -200,21 +226,25 @@ export const COMMANDS: CommandMeta[] = [
     name: "update",
     group: "meta",
     summary: "自升级（检测 GitHub 最新 tag；--check 仅检测）",
-    usage: "daoyan-cli update [--check]",
+    usage: "daoyan update [--check]",
     implemented: true,
     run: (ctx, args) => runUpdate(ctx, args),
   },
 ];
 
-/** 命令查找：优先子命令全名（"engine install"），再退回主命令。 */
+/**
+ * 命令查找：优先子命令全名（"engine install"），再退回主命令。
+ */
 export function findCommand(
   name: string,
   args: readonly string[],
 ): { meta: CommandMeta; rest: string[] } | null {
   if (args.length > 0) {
+    // 首参拼出的子命令全名（如 "engine install"）
     const sub = COMMANDS.find((c) => c.name === `${name} ${args[0]}`);
     if (sub) return { meta: sub, rest: args.slice(1) };
   }
+  // 主命令回退匹配
   const main = COMMANDS.find((c) => c.name === name);
   return main ? { meta: main, rest: [...args] } : null;
 }

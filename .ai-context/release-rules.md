@@ -1,7 +1,7 @@
 # 发版规则（daoyan-cli）
 
 > 本项目以 **GitHub 为分发主通道**：用户经 `install.sh` / `npm i -g git+…` 安装，
-> `daoyan-cli update` 检测 GitHub tags 自升级。npm registry 为可选通道。
+> `daoyan update` 检测 GitHub tags 自升级。npm registry 为可选通道。
 > 本文是发版的唯一操作依据，AI 代理发版前必须逐条核对。
 
 ## 1. 版本号管理（双处同步，缺一不可）
@@ -56,8 +56,8 @@ git push origin master vX.Y.Z
 发版后验证（人工或代理执行）：
 
 ```bash
-daoyan-cli update --check          # 应显示"有新版本 vX.Y.Z"
-daoyan-cli update                  # 升级后 --version 应等于新版本
+daoyan update --check          # 应显示"有新版本 vX.Y.Z"
+daoyan update                  # 升级后 --version 应等于新版本
 ```
 
 ## 5. 不可违反的规则

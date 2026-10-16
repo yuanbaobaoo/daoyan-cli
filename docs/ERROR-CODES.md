@@ -1,7 +1,7 @@
 # 错误码
 
 全部错误码为稳定字符串枚举（`src/shared/errors.mts`），同时登记在
-`daoyan-cli help --json` 的 `errorCodes` 字段中。`--json` 模式下失败信封为：
+`daoyan help --json` 的 `errorCodes` 字段中。`--json` 模式下失败信封为：
 
 ```json
 { "ok": false, "error": { "code": "relay_upstream_missing", "message": "…", "details": {} } }

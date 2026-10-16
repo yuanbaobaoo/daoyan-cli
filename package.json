@@ -11,8 +11,8 @@
   "homepage": "https://github.com/yuanbaobaoo/daoyan-cli#readme",
   "bugs": "https://github.com/yuanbaobaoo/daoyan-cli/issues",
   "bin": {
-    "daoyan-cli": "./dist/cli.mjs",
-    "dyc": "./dist/cli.mjs"
+    "daoyan": "./dist/cli.mjs",
+    "dycli": "./dist/cli.mjs"
   },
   "engines": {
     "node": ">=22"

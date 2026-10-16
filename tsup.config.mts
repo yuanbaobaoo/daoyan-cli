@@ -1,6 +1,6 @@
 import { defineConfig } from "tsup";
 
-// 单文件打包：dist/cli.mjs 由两个 bin（daoyan-cli / dyc）共享。
+// 单文件打包：dist/cli.mjs 由两个 bin（daoyan / dycli）共享。
 // banner 的 shebang 使其可直接执行；npm 安装 bin 时会自动加执行位。
 export default defineConfig({
   entry: ["src/cli.mts"],

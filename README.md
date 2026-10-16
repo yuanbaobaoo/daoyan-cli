@@ -30,10 +30,10 @@ DAYOAN_REF=v0.2.0 curl -fsSL https://raw.githubusercontent.com/yuanbaobaoo/daoya
 
 ```bash
 # 检测新版本（GitHub tags，仅检测不安装）
-daoyan-cli update --check
+daoyan update --check
 
 # 升级到 GitHub 最新 tag（自动完成，无需 npm registry）
-daoyan-cli update
+daoyan update
 
 # 或重跑安装脚本（效果等同 update）
 curl -fsSL https://raw.githubusercontent.com/yuanbaobaoo/daoyan-cli/master/install.sh | bash
@@ -44,21 +44,21 @@ curl -fsSL https://raw.githubusercontent.com/yuanbaobaoo/daoyan-cli/master/insta
 ## 命令
 
 全局参数：`--json`（机器可读输出信封）· `--project <路径>` · `--no-color` · `-h/--help` · `-v/--version`。
-`dyc` 是 `daoyan-cli` 的短命令，完全等价。
+`dycli` 是 `daoyan` 的短命令，完全等价。
 
 | 命令 | 说明 | 状态 |
 |---|---|---|
-| `daoyan-cli help [命令] [--json]` | 帮助；`--json` 输出 agent 自描述（命令树 / 信封 / 错误码 / 退出码） | ✅ 可用 |
-| `daoyan-cli update [--check]` | 自升级 / 检测 GitHub 最新 tag | ✅ 可用 |
-| `daoyan-cli init <名称>` | 立项：本地装引擎（venv/clone/依赖）或 `--use-existing <路径>` 接管既有安装或 `--remote <url>` 直连远端 | ✅ 可用 |
-| `daoyan-cli validate [--json]` | 项目规则全量校验（接力链 / 锚点 / 尺寸 / seed / workflow 节点约定） | ✅ 可用 |
-| `daoyan-cli shot <镜号...>` / `retake` | 拍摄 / 重拍（自动拉起引擎、首帧注入、15s 轮询、断点续跑、manifest） | ✅ 可用 |
-| `daoyan-cli wrap` | 合片交付到 `final/`（ffmpeg concat，libx264/crf18/faststart） | ✅ 可用 |
-| `daoyan-cli logs [-f] [-n N]` | 日志查看（docker logs 语义，清洗 ANSI/tqdm） | ✅ 可用 |
-| `daoyan-cli status [--json]` | 引擎 / 队列 / 任务锁 / GPU / 内存 / 镜头完成度 | ✅ 可用 |
-| `daoyan-cli engine ls / install / use` | ComfyUI 版本管理（本地 engine/versions/ + GitHub tags） | ✅ 可用 |
-| `daoyan-cli batch` | 连拍全部未完成镜头 | ⬜ 计划中 |
-| `daoyan-cli up` / `down` | 引擎独立启停（shot 已内置自动拉起） | ⬜ 计划中 |
-| `daoyan-cli list [--json]` | 打印分镜表 | ⬜ 计划中 |
+| `daoyan help [命令] [--json]` | 帮助；`--json` 输出 agent 自描述（命令树 / 信封 / 错误码 / 退出码） | ✅ 可用 |
+| `daoyan update [--check]` | 自升级 / 检测 GitHub 最新 tag | ✅ 可用 |
+| `daoyan init <名称>` | 立项：本地装引擎（venv/clone/依赖）或 `--use-existing <路径>` 接管既有安装或 `--remote <url>` 直连远端 | ✅ 可用 |
+| `daoyan validate [--json]` | 项目规则全量校验（接力链 / 锚点 / 尺寸 / seed / workflow 节点约定） | ✅ 可用 |
+| `daoyan shot <镜号...>` / `retake` | 拍摄 / 重拍（自动拉起引擎、首帧注入、15s 轮询、断点续跑、manifest） | ✅ 可用 |
+| `daoyan wrap` | 合片交付到 `final/`（ffmpeg concat，libx264/crf18/faststart） | ✅ 可用 |
+| `daoyan logs [-f] [-n N]` | 日志查看（docker logs 语义，清洗 ANSI/tqdm） | ✅ 可用 |
+| `daoyan status [--json]` | 引擎 / 队列 / 任务锁 / GPU / 内存 / 镜头完成度 | ✅ 可用 |
+| `daoyan engine ls / install / use` | ComfyUI 版本管理（本地 engine/versions/ + GitHub tags） | ✅ 可用 |
+| `daoyan batch` | 连拍全部未完成镜头 | ⬜ 计划中 |
+| `daoyan up` / `down` | 引擎独立启停（shot 已内置自动拉起） | ⬜ 计划中 |
+| `daoyan list [--json]` | 打印分镜表 | ⬜ 计划中 |
 
 命令与数据格式规范见 [docs/COMMANDS.md](docs/COMMANDS.md) 与 [docs/DATA-MODEL.md](docs/DATA-MODEL.md)。

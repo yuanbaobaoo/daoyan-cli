@@ -7,33 +7,49 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { DaoyanCliError } from "../shared/errors.mts";
+import { execInherit } from "../shared/exec.mts";
 import { emitData } from "../shared/json.mts";
 import { say } from "../shared/log.mts";
 import { VERSION } from "../shared/version.mts";
 import type { CliContext } from "../shared/context.mts";
 
+// 本仓库地址（自升级的 npm pack 源）
 const REPO_URL = "https://github.com/yuanbaobaoo/daoyan-cli.git";
 
+/**
+ * 解析 vX.Y.Z 语义化版本（不合法返回 null）。
+ */
 function parseSemver(v: string): [number, number, number] | null {
+  // 版本号匹配结果
   const m = /^v?(\d+)\.(\d+)\.(\d+)/.exec(v);
   return m !== null ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
 }
 
+/**
+ * 版本比较：a 是否比 b 新（按 major/minor/patch 依次比较）。
+ */
 function newer(a: [number, number, number], b: [number, number, number]): boolean {
   return a[0] !== b[0] ? a[0] > b[0] : a[1] !== b[1] ? a[1] > b[1] : a[2] > b[2];
 }
 
-/** GitHub tags 里找最新稳定版；无 tag / 不可达返回 null（note 附原因）。 */
+/**
+ * GitHub tags 里找最新稳定版；无 tag / 不可达返回 null（note 附原因）。
+ */
 async function latestTag(): Promise<{ tag: string | null; note: string }> {
   try {
+    // tags 接口响应
     const res = await fetch("https://api.github.com/repos/yuanbaobaoo/daoyan-cli/tags", {
       headers: { "user-agent": "daoyan-cli-update", accept: "application/vnd.github+json" },
       signal: AbortSignal.timeout(15_000),
     });
     if (!res.ok) return { tag: null, note: `GitHub API ${res.status}` };
+    // tags 列表（按 GitHub 返回顺序）
     const tags = (await res.json()) as Array<{ name?: string }>;
+    // 已扫描到的最新版本
     let best: { tag: string; v: [number, number, number] } | null = null;
+    // 逐个 tag 找最新语义化版本
     for (const t of tags) {
+      // 当前 tag 的解析版本
       const v = t.name !== undefined ? parseSemver(t.name) : null;
       if (v === null) continue;
       if (best === null || newer(v, best.v)) best = { tag: t.name as string, v };
@@ -46,9 +62,14 @@ async function latestTag(): Promise<{ tag: string | null; note: string }> {
   }
 }
 
+/**
+ * 运行命令并只收集 stdout（stderr 直连终端，便于看 npm 进度）。
+ */
 function spawnCapture(cmd: string, args: readonly string[], opts: { cwd?: string }): Promise<{ code: number; stdout: string }> {
   return new Promise((resolvePromise, rejectPromise) => {
+    // 子进程句柄（stdout 管道收集；stderr 继承终端）
     const child = spawn(cmd, args, { cwd: opts.cwd, stdio: ["ignore", "pipe", "inherit"] });
+    // stdout 累计
     let out = "";
     child.stdout?.on("data", (d: Buffer) => {
       out += d.toString();
@@ -60,20 +81,17 @@ function spawnCapture(cmd: string, args: readonly string[], opts: { cwd?: string
   });
 }
 
-function spawnInherit(cmd: string, args: readonly string[]): Promise<number> {
-  return new Promise((resolvePromise, rejectPromise) => {
-    const child = spawn(cmd, args, { stdio: "inherit" });
-    child.on("error", (e) =>
-      rejectPromise(new DaoyanCliError({ code: "external_tool_missing", message: `无法启动 ${cmd}：${e.message}` })),
-    );
-    child.on("close", (code) => resolvePromise(code ?? -1));
-  });
-}
-
+/**
+ * update 命令入口：--check 只检测；否则检测 + 两步安装自升级。
+ */
 export async function runUpdate(ctx: CliContext, args: string[]): Promise<void> {
+  // 是否只检测（--check）
   const checkOnly = args.includes("--check");
+  // 最新 tag 与备注
   const { tag, note } = await latestTag();
+  // 当前版本（解析结果，供比较）
   const current = parseSemver(VERSION);
+  // 当前版本的展示串
   const currentStr = `v${VERSION}`;
 
   if (tag === null) {
@@ -84,7 +102,9 @@ export async function runUpdate(ctx: CliContext, args: string[]): Promise<void> 
     say(`当前 ${currentStr}；无法确定最新版（${note}）`);
     return;
   }
+  // 最新 tag 的解析版本
   const latestV = parseSemver(tag);
+  // 是否存在可用更新
   const hasUpdate = current !== null && latestV !== null && newer(latestV, current);
 
   if (checkOnly || !hasUpdate) {
@@ -92,13 +112,15 @@ export async function runUpdate(ctx: CliContext, args: string[]): Promise<void> 
       emitData({ current: currentStr, latest: tag, updateAvailable: hasUpdate });
       return;
     }
-    if (hasUpdate) say(`有新版本 ${tag}（当前 ${currentStr}）。运行 daoyan-cli update 升级`);
+    if (hasUpdate) say(`有新版本 ${tag}（当前 ${currentStr}）。运行 daoyan update 升级`);
     else say(`已是最新（当前 ${currentStr}，GitHub 最新 tag ${tag}）`);
     return;
   }
 
   say(`检测到新版本 ${tag}（当前 ${currentStr}），开始自升级...`);
+  // npm 可执行文件（Windows 下为 npm.cmd）
   const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+  // 打包临时目录（finally 清理）
   const tmp = mkdtempSync(join(tmpdir(), "daoyan-cli-update-"));
   try {
     // 两步法：npm pack（生成 tgz）→ npm install -g tgz
@@ -109,11 +131,13 @@ export async function runUpdate(ctx: CliContext, args: string[]): Promise<void> 
         message: `npm pack 失败（退出码 ${pack.code}）。检查网络与 GitHub 可达性`,
       });
     }
+    // npm pack 产出的 tgz 文件名（取最后一行）
     const tgz = pack.stdout.trim().split("\n").filter((l) => l !== "").pop();
     if (tgz === undefined) {
       throw new DaoyanCliError({ code: "update_failed", message: "npm pack 未产出 tarball" });
     }
-    const code = await spawnInherit(npm, ["install", "-g", join(tmp, tgz)]);
+    // 全局安装的退出码
+    const code = await execInherit(npm, ["install", "-g", join(tmp, tgz)]);
     if (code !== 0) {
       throw new DaoyanCliError({
         code: "update_failed",
@@ -121,7 +145,7 @@ export async function runUpdate(ctx: CliContext, args: string[]): Promise<void> 
         details: { exit: code },
       });
     }
-    say(`升级完成：${tag}。验证：daoyan-cli --version`);
+    say(`升级完成：${tag}。验证：daoyan --version`);
     if (ctx.json) emitData({ updated: tag, previous: currentStr });
   } finally {
     rmSync(tmp, { recursive: true, force: true });

@@ -1,0 +1,11 @@
+{
+  "1_unet": { "class_type": "UNETLoader", "inputs": { "unet_name": "<unet>", "weight_dtype": "default" } },
+  "2_clip": { "class_type": "CLIPLoader", "inputs": { "clip_name": "<clip>", "type": "minimax" } },
+  "3_vae": { "class_type": "VAELoader", "inputs": { "vae_name": "<vae>" } },
+  "4_negative": { "class_type": "CLIPTextEncode", "inputs": { "text": "", "clip": ["2_clip", 0] } },
+  "5_cond": { "class_type": "MiniMaxH3ImageToVideo", "inputs": { "positive": "", "negative": ["4_negative", 0], "width": 768, "height": 1344, "length": 241, "unet": ["1_unet", 0], "clip": ["2_clip", 0], "vae": ["3_vae", 0] } },
+  "6_shift": { "class_type": "MiniMaxH3SigmaShift", "inputs": { "shift_video": 12.0, "shift_audio": 3.0 } },
+  "7_sample": { "class_type": "KSampler", "inputs": { "seed": 0, "steps": 30, "cfg": 4.0, "sampler_name": "euler", "scheduler": "simple" } },
+  "8_decode": { "class_type": "VAEDecode", "inputs": { "samples": ["7_sample", 0], "vae": ["3_vae", 0] } },
+  "9_save": { "class_type": "SaveVideo", "inputs": { "filename_prefix": "mydrama/", "fps": 24 } }
+}

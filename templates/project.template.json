@@ -1,0 +1,26 @@
+{
+  "name": "示例项目（init 时替换为你的项目名）",
+  "version": 1,
+  "output_prefix": "mydrama/",
+  "workflow": "workflow.api.json",
+  "engine": {
+    "mode": "local",
+    "comfyui_dir": "engine/ComfyUI",
+    "venv_dir": "engine/.venv",
+    "repo_url": "https://github.com/comfyanonymous/ComfyUI.git",
+    "host": "127.0.0.1",
+    "port": 8188,
+    "launch_extra": ["--listen", "0.0.0.0"],
+    "run_user": "ubuntu"
+  },
+  "models": {
+    "unet": "<模型文件名，位于 shared_models_dir/diffusion_models/>",
+    "clip": "<模型文件名，位于 shared_models_dir/text_encoders/>",
+    "vae": "<模型文件名，位于 shared_models_dir/vae/>",
+    "shared_models_dir": "/data/comfyui/models"
+  },
+  "gpu": {
+    "evict_targets": ["ollama", "xinference"]
+  },
+  "node_checks": ["UNETLoader", "KSampler", "VAELoader"]
+}

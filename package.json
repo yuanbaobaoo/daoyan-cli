@@ -1,0 +1,49 @@
+{
+  "name": "daoyan-cli",
+  "version": "0.1.0",
+  "description": "daoyan-cli —— 面向 AI Agent 的 ComfyUI 生产编排 CLI：剧本进，成片出。An agent-native orchestration CLI on top of ComfyUI: storyboards in, finished videos out.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/yuanbaobaoo/daoyan-cli.git"
+  },
+  "homepage": "https://github.com/yuanbaobaoo/daoyan-cli#readme",
+  "bugs": "https://github.com/yuanbaobaoo/daoyan-cli/issues",
+  "bin": {
+    "daoyan-cli": "./dist/cli.mjs",
+    "dyc": "./dist/cli.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "dist",
+    "templates",
+    "docs"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "prepare": "npm run build",
+    "prepublishOnly": "npm run typecheck && npm run build"
+  },
+  "keywords": [
+    "comfyui",
+    "ai-agent",
+    "agent-tools",
+    "cli",
+    "headless",
+    "pipeline",
+    "video-generation",
+    "storyboard",
+    "typescript",
+    "aigc"
+  ],
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2"
+  }
+}

@@ -32,7 +32,15 @@ command -v npm >/dev/null 2>&1 || die "未找到 npm（它随 Node 一同安装�
 command -v git >/dev/null 2>&1 || die "未找到 git（从 GitHub 安装需要它）：https://git-scm.com/downloads"
 
 say "==> 安装 daoyan-cli@$REF（来自 GitHub）"
-if ! npm install -g "git+${REPO}#${REF}"; then
+tmpdir="$(mktemp -d)"
+trap 'rm -rf "$tmpdir"' EXIT
+
+say "    1/2 拉取并打包源码"
+tgz="$(cd "$tmpdir" && npm pack --silent "git+${REPO}#${REF}")" \
+  || die "npm pack 失败：检查网络与 GitHub 可达性（git 必须已安装）"
+
+say "    2/2 全局安装 $tgz"
+if ! npm install -g "$tmpdir/$tgz"; then
   die "npm 安装失败。若是 EACCES 权限错误，推荐用 nvm（免 sudo），或：npm config set prefix ~/.npm-global 并把 ~/.npm-global/bin 加入 PATH 后重试"
 fi
 

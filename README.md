@@ -15,7 +15,7 @@
 # 方式一：curl 一键脚本（直接从 GitHub 安装）
 curl -fsSL https://raw.githubusercontent.com/yuanbaobaoo/daoyan-cli/master/install.sh | bash
 
-# 方式二：npm 直装 GitHub 仓库（脚本背后就是这一条）
+# 方式二：npm 直装 GitHub 仓库（等价于脚本内部的两步：npm pack 源码后安装 tgz）
 npm i -g git+https://github.com/yuanbaobaoo/daoyan-cli.git
 
 # 方式三：npm registry（包发布后可用）

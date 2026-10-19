@@ -5,6 +5,24 @@ import { spawn } from "node:child_process";
 import { DaoyanCliError } from "./errors.mts";
 
 /**
+ * 子进程执行选项。
+ */
+export interface ExecOptions {
+  /**
+   * 工作目录。
+   */
+  cwd?: string;
+  /**
+   * 超时（毫秒）。
+   */
+  timeoutMs?: number;
+  /**
+   * 额外环境变量（与当前环境合并）；用于代理等不进入 argv 的配置。
+   */
+  env?: NodeJS.ProcessEnv;
+}
+
+/**
  * 子进程执行结果快照。
  */
 export interface ExecResult {
@@ -28,11 +46,15 @@ export interface ExecResult {
 export function execCapture(
   cmd: string,
   args: readonly string[],
-  opts: { cwd?: string; timeoutMs?: number } = {},
+  opts: ExecOptions = {},
 ): Promise<ExecResult> {
   return new Promise((resolvePromise, rejectPromise) => {
     // 子进程句柄（stdout/stderr 走管道手动收集）
-    const child = spawn(cmd, args, { cwd: opts.cwd, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(cmd, args, {
+      cwd: opts.cwd,
+      env: opts.env !== undefined ? { ...process.env, ...opts.env } : undefined,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
     // stdout 累计
     let out = "";
     // stderr 累计
@@ -62,10 +84,18 @@ export function execCapture(
 /**
  * 运行并直连终端（npm install 等长输出场景）。
  */
-export function execInherit(cmd: string, args: readonly string[], opts: { cwd?: string } = {}): Promise<number> {
+export function execInherit(
+  cmd: string,
+  args: readonly string[],
+  opts: { cwd?: string; env?: NodeJS.ProcessEnv } = {},
+): Promise<number> {
   return new Promise((resolvePromise, rejectPromise) => {
     // 子进程句柄（stdio 直接继承当前终端）
-    const child = spawn(cmd, args, { cwd: opts.cwd, stdio: "inherit" });
+    const child = spawn(cmd, args, {
+      cwd: opts.cwd,
+      env: opts.env !== undefined ? { ...process.env, ...opts.env } : undefined,
+      stdio: "inherit",
+    });
     child.on("error", (e) =>
       rejectPromise(
         new DaoyanCliError({ code: "external_tool_missing", message: `无法启动 ${cmd}：${e.message}` }),
@@ -81,7 +111,7 @@ export function execInherit(cmd: string, args: readonly string[], opts: { cwd?: 
 export async function tryExecCapture(
   cmd: string,
   args: readonly string[],
-  opts: { cwd?: string; timeoutMs?: number } = {},
+  opts: ExecOptions = {},
 ): Promise<ExecResult | null> {
   try {
     return await execCapture(cmd, args, opts);

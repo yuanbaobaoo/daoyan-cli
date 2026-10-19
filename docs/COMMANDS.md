@@ -178,7 +178,32 @@ daoyan engine use <tag|路径>
 
 ```bash
 daoyan help [命令] [--json]
-daoyan update [--check]
+daoyan update [--check] [--manifest <url|路径>] [--from <路径|URL>] [--sha256 <hex>] [--proxy <url>]
+daoyan update source [<latest.json|url>|--unset]
+daoyan update proxy [<url>|--unset]
+```
+
+- 默认源：GitHub tags + `npm pack git+…`；
+- 自定义源：`latest.json` + 预构建 tgz，校验 SHA-256 后安装；
+- GitHub 用户也可用 `--manifest https://github.com/<owner>/<repo>/releases/latest/download/latest.json`，避免 GitHub API 限流；
+- `update source` / `update proxy` 持久化到 `~/.dycli/update.json`（0600）；
+- 一次性覆盖：`--manifest`、`--from`、`--sha256`、`--proxy`；
+- 环境变量：`DYCLI_UPDATE_MANIFEST` / `DYCLI_UPDATE_FROM` / `DYCLI_UPDATE_SHA256` / `DYCLI_UPDATE_PROXY`；
+- 未配置 dycli 代理时也兼容标准 `HTTPS_PROXY` / `ALL_PROXY`；
+- 远程 `--from` 必须提供 `--sha256`；远程 manifest 的 tgz 必须有 `sha256`；
+- 自定义 manifest 不可达时不会回退 GitHub（避免绕过用户选择）：`--check` 返回 `note`，安装时报 `update_failed`；
+- 配置代理时下载走 `curl`（Node fetch 默认不读代理环境变量）。
+
+`latest.json`：
+
+```json
+{
+  "schema_version": 1,
+  "version": "0.0.4",
+  "tag": "v0.0.4",
+  "tgz": "daoyan-cli-0.0.4.tgz",
+  "sha256": "<64 hex>"
+}
 ```
 
 `help --json` 包含：capabilities、modes、命令 args/flags/examples/output、错误目录（retryable/hint）、project/machine/workflow/bindings/graph_ops/task/run 的 JSON Schema、项目 Skill 状态。

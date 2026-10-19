@@ -471,11 +471,79 @@ export const COMMANDS: CommandMeta[] = [
   {
     name: "update",
     group: "meta",
-    summary: "自升级（检测 GitHub 最新 tag；--check 仅检测）",
-    usage: "daoyan update [--check]",
-    flags: [{ name: "--check", type: "boolean", description: "只检测不安装" }],
+    summary: "自升级（默认 GitHub；支持自定义 manifest / tgz / 代理）",
+    usage:
+      "daoyan update [--check] [--manifest <url|路径>] [--from <路径|URL>] [--sha256 <hex>] [--proxy <url>]",
+    flags: [
+      { name: "--check", type: "boolean", description: "只检测不安装" },
+      { name: "--manifest", type: "string", description: "自定义 latest.json（URL 或本地路径）" },
+      { name: "--from", type: "string", description: "直接安装指定 tgz（本地路径或 http(s) URL）" },
+      { name: "--sha256", type: "string", description: "--from 的 SHA-256 校验值（远程必填）" },
+      { name: "--proxy", type: "string", description: "本次更新使用的 http/https/socks5 代理" },
+    ],
+    examples: [
+      "daoyan update --check",
+      "daoyan update source https://mirror.example.com/daoyan/latest.json",
+      "daoyan update --manifest ./latest.json",
+      "daoyan update --from ./daoyan-cli-0.0.4.tgz",
+      "daoyan update proxy http://127.0.0.1:7890",
+    ],
     implemented: true,
+    jsonShape: {
+      current: "string",
+      latest: "string|null",
+      updateAvailable: "boolean",
+      source: "github|manifest|from",
+      manifest: "string|null",
+      note: "string|null",
+    },
     run: (ctx, args) => runUpdate(ctx, args),
+  },
+  {
+    name: "update proxy",
+    group: "meta",
+    summary: "查看/设置/清除自更新代理（~/.dycli/update.json）",
+    usage: "daoyan update proxy [<url>|--unset]",
+    args: [
+      {
+        name: "url",
+        type: "string",
+        required: false,
+        description: "http/https/socks5/socks5h 代理地址；省略时显示当前值",
+      },
+    ],
+    flags: [{ name: "--unset", type: "boolean", description: "清除已保存的代理" }],
+    examples: [
+      "daoyan update proxy http://127.0.0.1:7890",
+      "daoyan update proxy --unset",
+      "daoyan update proxy --json",
+    ],
+    implemented: true,
+    jsonShape: { proxy: "string|null", path: "string" },
+    run: (ctx, args) => runUpdate(ctx, ["proxy", ...args]),
+  },
+  {
+    name: "update source",
+    group: "meta",
+    summary: "查看/设置/清除自更新源（latest.json URL 或本地路径）",
+    usage: "daoyan update source [<manifest>|--unset]",
+    args: [
+      {
+        name: "manifest",
+        type: "string",
+        required: false,
+        description: "latest.json 的 http(s) URL 或本地路径；省略时显示当前值",
+      },
+    ],
+    flags: [{ name: "--unset", type: "boolean", description: "恢复默认 GitHub 源" }],
+    examples: [
+      "daoyan update source https://mirror.example.com/daoyan/latest.json",
+      "daoyan update source /data/mirror/daoyan/latest.json",
+      "daoyan update source --unset",
+    ],
+    implemented: true,
+    jsonShape: { manifest: "string|null", path: "string" },
+    run: (ctx, args) => runUpdate(ctx, ["source", ...args]),
   },
 ];
 

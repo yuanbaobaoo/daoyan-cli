@@ -1095,7 +1095,9 @@ worker:
 
 ```
 daoyan help [命令] [--json]
-daoyan update [--check]
+daoyan update [--check] [--manifest <url|路径>] [--from <路径|URL>] [--sha256 <hex>] [--proxy <url>]
+daoyan update source [<latest.json|url>|--unset]
+daoyan update proxy [<url>|--unset]
 
 daoyan init --mode=local [--modelpath <路径>] [--version <tag>] [--mirror <镜像>] [--no-skill]
 daoyan init --mode=remote --url <url> [--no-skill]

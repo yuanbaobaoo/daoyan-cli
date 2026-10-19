@@ -50,7 +50,8 @@ git push origin master vX.Y.Z
 1. `npm ci` → `npm run typecheck` → `npm run build`
 2. **dist 一致性校验**（与源码 diff，不一致失败）
 3. `npm pack` 打包 tgz
-4. 创建 GitHub Release（自动生成 release notes，附 `daoyan-cli-*.tgz` 产物）
+4. 生成 `latest.json` 与 `SHA256SUMS`
+5. 创建 GitHub Release（自动生成 release notes，附 tgz + `latest.json` + `SHA256SUMS`）
 
 不再执行 `npm publish`；npm registry 不是发布通道。
 
@@ -68,7 +69,51 @@ daoyan update                  # 升级后 --version 应等于新版本
 - **不许跳过 dist 校验**：即使本地验证过，CI 的 dist 一致性检查失败必须回根源码修复，禁止手改 dist 糊弄通过。
 - **唯一发布通道**：GitHub Release；不执行 `npm publish`，不发布到 npm registry。
 
-## 6. 回滚与修复
+## 6. 自定义更新源与代理
+
+`update` 默认仍走 GitHub；用户可持久化或一次性换源（用户级配置 `~/.dycli/update.json`，0600）：
+
+```bash
+daoyan update source https://mirror.example.com/daoyan/latest.json
+daoyan update source ./latest.json          # 本地镜像目录
+daoyan update source --unset                # 恢复 GitHub
+daoyan update proxy http://127.0.0.1:7890  # http/https/socks5/socks5h
+daoyan update proxy --unset
+```
+
+一次性参数：
+
+```bash
+daoyan update --check --manifest <url|路径>
+daoyan update --manifest <url|路径>
+daoyan update --from <tgz路径|URL> --sha256 <hex>
+daoyan update --proxy <url>
+```
+
+优先级：CLI > `DYCLI_UPDATE_*` 环境变量 > `~/.dycli/update.json` > GitHub。
+环境变量：`DYCLI_UPDATE_MANIFEST` / `DYCLI_UPDATE_FROM` / `DYCLI_UPDATE_SHA256` / `DYCLI_UPDATE_PROXY`。
+未配置 dycli 代理时也兼容标准 `HTTPS_PROXY` / `ALL_PROXY`。
+
+`latest.json`：
+
+```json
+{
+  "schema_version": 1,
+  "version": "0.0.4",
+  "tag": "v0.0.4",
+  "tgz": "daoyan-cli-0.0.4.tgz",
+  "sha256": "<64 hex>"
+}
+```
+
+- `tgz` 可为相对 manifest 的文件名/路径，或 http(s) URL；
+- 远程 tgz 必须有 `sha256`；本地 tgz 可省略；
+- 配置代理时下载走 `curl`（Node fetch 默认不读代理环境变量），缺少 curl 会报 `external_tool_missing`；
+- `install.sh` 同样支持 `DAYOAN_MANIFEST_URL` / `DAYOAN_TGZ_URL` / `DAYOAN_SHA256` / `DAYOAN_REPO` / `DAYOAN_REF` / `DAYOAN_PROXY`。
+
+镜像只需同步 Release 的 `daoyan-cli-*.tgz`、`latest.json`、`SHA256SUMS` 三个文件。
+
+## 7. 回滚与修复
 
 - 用户侧回滚：`DAYOAN_REF=vX.Y.Z-1 curl -fsSL …/install.sh | bash` 固定旧版本
 - 发了坏版本：修复 → 按流程升 patch 发新版；**不要**试图覆盖已发布版本

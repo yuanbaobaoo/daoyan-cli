@@ -37,8 +37,30 @@ jobs:
       - name: 打包 tarball
         run: npm pack
 
+      - name: 生成发布清单与校验和
+        run: |
+          tgz="$(ls daoyan-cli-*.tgz | head -n1)"
+          sha="$(sha256sum "$tgz" | awk '{print $1}')"
+          version="${GITHUB_REF_NAME#v}"
+          node -e '
+          const [tgz, sha, version, tag] = process.argv.slice(1);
+          process.stdout.write(JSON.stringify({
+            schema_version: 1,
+            version,
+            tag,
+            tgz,
+            sha256: sha,
+            published_at: new Date().toISOString()
+          }, null, 2) + "\n");
+          ' "$tgz" "$sha" "$version" "$GITHUB_REF_NAME" > latest.json
+          printf '%s  %s\n' "$sha" "$tgz" > SHA256SUMS
+          cat latest.json
+
       - name: 创建 GitHub Release（附产物）
         uses: softprops/action-gh-release@v2
         with:
-          files: daoyan-cli-*.tgz
+          files: |
+            daoyan-cli-*.tgz
+            latest.json
+            SHA256SUMS
           generate_release_notes: true

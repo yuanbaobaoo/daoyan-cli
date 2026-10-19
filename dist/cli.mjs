@@ -1889,11 +1889,54 @@ var init_help = __esm({
   }
 });
 
+// src/shared/args.mts
+function splitInlineFlag(arg) {
+  if (!arg.startsWith("--")) return { name: arg };
+  const i = arg.indexOf("=");
+  if (i < 0) return { name: arg };
+  return { name: arg.slice(0, i), inline: arg.slice(i + 1) };
+}
+function takeValue(args, index, inline, label) {
+  if (inline !== void 0) {
+    if (inline === "") usageError(`${label} \u9700\u8981\u53C2\u6570`);
+    return { value: inline, skip: 0 };
+  }
+  const v = args[index + 1];
+  if (v === void 0 || v === "" || v.startsWith("--")) {
+    usageError(`${label} \u9700\u8981\u53C2\u6570`);
+  }
+  return { value: v, skip: 1 };
+}
+function parseJsonValue(raw) {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return raw;
+  }
+}
+function usageError(message) {
+  throw new DaoyanCliError({ code: "usage", message, exit: 2 });
+}
+function requiredPositional(value, label) {
+  if (value === void 0 || value === "") usageError(`\u7F3A\u5C11${label}`);
+  return value;
+}
+var init_args = __esm({
+  "src/shared/args.mts"() {
+    "use strict";
+    init_errors();
+  }
+});
+
 // src/shared/exec.mts
 import { spawn } from "child_process";
 function execCapture(cmd, args, opts = {}) {
   return new Promise((resolvePromise, rejectPromise) => {
-    const child = spawn(cmd, args, { cwd: opts.cwd, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(cmd, args, {
+      cwd: opts.cwd,
+      env: opts.env !== void 0 ? { ...process.env, ...opts.env } : void 0,
+      stdio: ["ignore", "pipe", "pipe"]
+    });
     let out = "";
     let err = "";
     const timer = opts.timeoutMs !== void 0 ? setTimeout(() => child.kill("SIGKILL"), opts.timeoutMs) : void 0;
@@ -1917,7 +1960,11 @@ function execCapture(cmd, args, opts = {}) {
 }
 function execInherit(cmd, args, opts = {}) {
   return new Promise((resolvePromise, rejectPromise) => {
-    const child = spawn(cmd, args, { cwd: opts.cwd, stdio: "inherit" });
+    const child = spawn(cmd, args, {
+      cwd: opts.cwd,
+      env: opts.env !== void 0 ? { ...process.env, ...opts.env } : void 0,
+      stdio: "inherit"
+    });
     child.on(
       "error",
       (e) => rejectPromise(
@@ -1975,9 +2022,9 @@ var init_log = __esm({
 });
 
 // src/commands/update.mts
-import { mkdtempSync, rmSync as rmSync3 } from "fs";
-import { tmpdir } from "os";
-import { join as join3 } from "path";
+import { chmodSync, existsSync as existsSync5, mkdtempSync, readFileSync as readFileSync5, rmSync as rmSync3, statSync, writeFileSync as writeFileSync2 } from "fs";
+import { homedir, tmpdir } from "os";
+import { basename, dirname as dirname4, isAbsolute as isAbsolute2, join as join3, resolve as resolve2 } from "path";
 import { spawn as spawn2 } from "child_process";
 function parseSemver(v) {
   const m = /^v?(\d+)\.(\d+)\.(\d+)/.exec(v);
@@ -1986,28 +2033,323 @@ function parseSemver(v) {
 function newer(a, b) {
   return a[0] !== b[0] ? a[0] > b[0] : a[1] !== b[1] ? a[1] > b[1] : a[2] > b[2];
 }
-async function latestTag() {
+function nonEmpty(v) {
+  if (v === void 0) return void 0;
+  const t = v.trim();
+  return t === "" ? void 0 : t;
+}
+function expandHome(p) {
+  if (p === "~") return homedir();
+  if (p.startsWith("~/")) return join3(homedir(), p.slice(2));
+  return p;
+}
+function updateConfigPath() {
+  return join3(homedir(), ".dycli", "update.json");
+}
+function readUpdateConfig() {
+  const path = updateConfigPath();
+  if (!existsSync5(path)) return {};
+  let raw;
   try {
-    const res = await fetch("https://api.github.com/repos/yuanbaobaoo/daoyan-cli/tags", {
-      headers: { "user-agent": "daoyan-cli-update", accept: "application/vnd.github+json" },
-      signal: AbortSignal.timeout(15e3)
+    raw = JSON.parse(readFileSync5(path, "utf8"));
+  } catch (e) {
+    throw new DaoyanCliError({
+      code: "config_invalid",
+      message: `\u66F4\u65B0\u914D\u7F6E\u4E0D\u662F\u5408\u6CD5 JSON\uFF1A${path}\uFF08${e instanceof Error ? e.message : String(e)}\uFF09`
     });
-    if (!res.ok) return { tag: null, note: `GitHub API ${res.status}` };
-    const tags = await res.json();
+  }
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    throw new DaoyanCliError({ code: "config_invalid", message: `\u66F4\u65B0\u914D\u7F6E\u5FC5\u987B\u662F JSON \u5BF9\u8C61\uFF1A${path}` });
+  }
+  const o = raw;
+  if (o.manifest !== void 0 && typeof o.manifest !== "string") {
+    throw new DaoyanCliError({ code: "config_invalid", message: `\u66F4\u65B0\u914D\u7F6E manifest \u5FC5\u987B\u662F\u5B57\u7B26\u4E32\uFF1A${path}` });
+  }
+  if (o.proxy !== void 0 && typeof o.proxy !== "string") {
+    throw new DaoyanCliError({ code: "config_invalid", message: `\u66F4\u65B0\u914D\u7F6E proxy \u5FC5\u987B\u662F\u5B57\u7B26\u4E32\uFF1A${path}` });
+  }
+  const manifest = typeof o.manifest === "string" ? nonEmpty(o.manifest) : void 0;
+  const proxy = typeof o.proxy === "string" ? nonEmpty(o.proxy) : void 0;
+  return {
+    ...manifest !== void 0 ? { manifest } : {},
+    ...proxy !== void 0 ? { proxy } : {}
+  };
+}
+function saveUpdateConfig(config) {
+  const path = updateConfigPath();
+  writeJsonAtomic(path, {
+    ...config.manifest !== void 0 ? { manifest: config.manifest } : {},
+    ...config.proxy !== void 0 ? { proxy: config.proxy } : {}
+  });
+  try {
+    chmodSync(path, 384);
+  } catch {
+  }
+}
+function normalizeProxy(raw) {
+  const value = raw.trim();
+  if (value === "") usageError("proxy \u4E0D\u80FD\u4E3A\u7A7A");
+  const u = (() => {
+    try {
+      return new URL(value);
+    } catch {
+      usageError(`proxy \u4E0D\u662F\u5408\u6CD5 URL\uFF1A${value}`);
+    }
+  })();
+  if (!["http:", "https:", "socks5:", "socks5h:"].includes(u.protocol)) {
+    usageError(`proxy \u4EC5\u652F\u6301 http/https/socks5/socks5h\uFF08\u6536\u5230 ${u.protocol}\uFF09`);
+  }
+  if (u.hostname === "") usageError("proxy \u7F3A\u5C11\u4E3B\u673A\u540D");
+  return value;
+}
+function redactProxy(proxy) {
+  try {
+    const u = new URL(proxy);
+    if (u.username === "" && u.password === "") return proxy;
+    u.username = "***";
+    u.password = "";
+    return u.toString().replace(/\/$/, "");
+  } catch {
+    return "***";
+  }
+}
+function redactUrl(raw) {
+  try {
+    const u = new URL(raw);
+    if (u.username === "" && u.password === "") return raw;
+    u.username = "***";
+    u.password = "";
+    return u.toString();
+  } catch {
+    return raw;
+  }
+}
+function proxyEnv(proxy) {
+  return {
+    HTTPS_PROXY: proxy,
+    HTTP_PROXY: proxy,
+    ALL_PROXY: proxy,
+    https_proxy: proxy,
+    http_proxy: proxy,
+    all_proxy: proxy
+  };
+}
+function safeCurlDetail(stderr, url, proxy) {
+  let out = stderr.replaceAll(url, redactUrl(url));
+  if (proxy !== void 0) out = out.replaceAll(proxy, redactProxy(proxy));
+  return (out.trim().split("\n")[0] ?? "").slice(0, 200);
+}
+async function fetchText(url, proxy, timeoutMs, headers = {}) {
+  if (proxy !== void 0) {
+    const args = ["-fsSL", "--max-time", String(Math.ceil(timeoutMs / 1e3))];
+    for (const [k, v] of Object.entries(headers)) args.push("-H", `${k}: ${v}`);
+    args.push(url);
+    const r = await tryExecCapture("curl", args, {
+      timeoutMs: timeoutMs + 5e3,
+      env: proxyEnv(proxy)
+    });
+    if (r === null) {
+      throw new DaoyanCliError({
+        code: "external_tool_missing",
+        message: "\u914D\u7F6E\u4EE3\u7406\u540E\u66F4\u65B0\u9700\u8981 curl\uFF1B\u8BF7\u5B89\u88C5 curl\uFF0C\u6216\u6539\u7528\u672C\u5730 --from \u6587\u4EF6"
+      });
+    }
+    if (r.code !== 0) {
+      throw new DaoyanCliError({
+        code: "update_failed",
+        message: `\u8BF7\u6C42\u5931\u8D25\uFF1A${redactUrl(url)}\uFF08curl \u9000\u51FA\u7801 ${r.code}\uFF09`,
+        retryable: true,
+        hint: safeCurlDetail(r.stderr, url, proxy)
+      });
+    }
+    return r.stdout.replace(/^\uFEFF/, "");
+  }
+  let res;
+  try {
+    res = await fetch(url, { headers, signal: AbortSignal.timeout(timeoutMs) });
+  } catch (e) {
+    throw new DaoyanCliError({
+      code: "update_failed",
+      message: `\u8BF7\u6C42\u5931\u8D25\uFF1A${redactUrl(url)}\uFF08${e instanceof Error ? e.message : String(e)}\uFF09`,
+      retryable: true
+    });
+  }
+  if (!res.ok) {
+    throw new DaoyanCliError({
+      code: "update_failed",
+      message: `\u8BF7\u6C42\u5931\u8D25\uFF1A${redactUrl(url)}\uFF08HTTP ${res.status}\uFF09`,
+      retryable: true
+    });
+  }
+  return (await res.text()).replace(/^\uFEFF/, "");
+}
+async function downloadToFile(url, dest, proxy, timeoutMs) {
+  if (proxy !== void 0) {
+    const r = await tryExecCapture(
+      "curl",
+      [
+        "-fsSL",
+        "--max-time",
+        String(Math.ceil(timeoutMs / 1e3)),
+        "--max-filesize",
+        String(MAX_DOWNLOAD_BYTES),
+        "-o",
+        dest,
+        url
+      ],
+      { timeoutMs: timeoutMs + 5e3, env: proxyEnv(proxy) }
+    );
+    if (r === null) {
+      throw new DaoyanCliError({
+        code: "external_tool_missing",
+        message: "\u914D\u7F6E\u4EE3\u7406\u540E\u66F4\u65B0\u9700\u8981 curl\uFF1B\u8BF7\u5B89\u88C5 curl\uFF0C\u6216\u6539\u7528\u672C\u5730 --from \u6587\u4EF6"
+      });
+    }
+    if (r.code !== 0) {
+      throw new DaoyanCliError({
+        code: "update_failed",
+        message: `\u4E0B\u8F7D\u5931\u8D25\uFF1A${redactUrl(url)}\uFF08curl \u9000\u51FA\u7801 ${r.code}\uFF09`,
+        retryable: true,
+        hint: safeCurlDetail(r.stderr, url, proxy)
+      });
+    }
+    return;
+  }
+  let res;
+  try {
+    res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+  } catch (e) {
+    throw new DaoyanCliError({
+      code: "update_failed",
+      message: `\u4E0B\u8F7D\u5931\u8D25\uFF1A${redactUrl(url)}\uFF08${e instanceof Error ? e.message : String(e)}\uFF09`,
+      retryable: true
+    });
+  }
+  if (!res.ok) {
+    throw new DaoyanCliError({
+      code: "update_failed",
+      message: `\u4E0B\u8F7D\u5931\u8D25\uFF1A${redactUrl(url)}\uFF08HTTP ${res.status}\uFF09`,
+      retryable: true
+    });
+  }
+  const len = Number(res.headers.get("content-length"));
+  if (Number.isFinite(len) && len > MAX_DOWNLOAD_BYTES) {
+    throw new DaoyanCliError({
+      code: "update_failed",
+      message: `tgz \u8D85\u8FC7\u5927\u5C0F\u4E0A\u9650\uFF08${len} bytes\uFF09`
+    });
+  }
+  writeFileSync2(dest, Buffer.from(await res.arrayBuffer()));
+}
+function parseUpdateManifest(raw) {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    throw new DaoyanCliError({ code: "update_failed", message: "\u66F4\u65B0\u6E05\u5355\u5FC5\u987B\u662F JSON \u5BF9\u8C61" });
+  }
+  const o = raw;
+  if (o.schema_version !== void 0 && o.schema_version !== 1) {
+    throw new DaoyanCliError({
+      code: "update_failed",
+      message: `\u4E0D\u652F\u6301\u7684\u66F4\u65B0\u6E05\u5355 schema_version\uFF1A${String(o.schema_version)}`
+    });
+  }
+  const versionRaw = typeof o.version === "string" ? o.version.trim() : "";
+  if (parseSemver(versionRaw) === null) {
+    throw new DaoyanCliError({ code: "update_failed", message: "\u66F4\u65B0\u6E05\u5355\u7F3A\u5C11\u5408\u6CD5 version\uFF08X.Y.Z\uFF09" });
+  }
+  const tagRaw = typeof o.tag === "string" && o.tag.trim() !== "" ? o.tag.trim() : `v${versionRaw.replace(/^v/i, "")}`;
+  const tgzRaw = typeof o.tgz === "string" && o.tgz.trim() !== "" ? o.tgz.trim() : typeof o.asset === "string" ? o.asset.trim() : "";
+  if (tgzRaw === "") {
+    throw new DaoyanCliError({ code: "update_failed", message: "\u66F4\u65B0\u6E05\u5355\u7F3A\u5C11 tgz" });
+  }
+  const shaRaw = typeof o.sha256 === "string" ? o.sha256.trim().toLowerCase() : void 0;
+  if (shaRaw !== void 0 && !/^[0-9a-f]{64}$/.test(shaRaw)) {
+    throw new DaoyanCliError({ code: "update_failed", message: "\u66F4\u65B0\u6E05\u5355 sha256 \u5FC5\u987B\u662F 64 \u4F4D\u5341\u516D\u8FDB\u5236" });
+  }
+  return {
+    schema_version: 1,
+    version: versionRaw,
+    tag: tagRaw,
+    tgz: tgzRaw,
+    ...shaRaw !== void 0 ? { sha256: shaRaw } : {}
+  };
+}
+function resolveTgz(source, tgz) {
+  if (isHttpUrl(tgz)) return { location: tgz, remote: true };
+  if (isHttpUrl(source)) {
+    let u;
+    try {
+      u = new URL(tgz, source);
+    } catch {
+      throw new DaoyanCliError({ code: "update_failed", message: "\u65E0\u6CD5\u89E3\u6790\u6E05\u5355\u4E2D\u7684 tgz \u5730\u5740" });
+    }
+    if (u.protocol !== "http:" && u.protocol !== "https:") {
+      throw new DaoyanCliError({ code: "update_failed", message: "\u8FDC\u7A0B\u6E05\u5355\u53EA\u5141\u8BB8 http(s) tgz" });
+    }
+    return { location: u.toString(), remote: true };
+  }
+  return {
+    location: isAbsolute2(tgz) ? tgz : resolve2(dirname4(resolve2(source)), tgz),
+    remote: false
+  };
+}
+async function loadManifest(source, proxy) {
+  const remote = isHttpUrl(source);
+  const normalized = remote ? source : resolve2(expandHome(source));
+  let text;
+  if (remote) {
+    text = await fetchText(normalized, proxy, 15e3);
+  } else {
+    let st;
+    try {
+      st = statSync(normalized);
+    } catch {
+      throw new DaoyanCliError({ code: "update_failed", message: `\u66F4\u65B0\u6E05\u5355\u4E0D\u5B58\u5728\uFF1A${normalized}` });
+    }
+    if (!st.isFile()) {
+      throw new DaoyanCliError({ code: "update_failed", message: `\u66F4\u65B0\u6E05\u5355\u4E0D\u662F\u6587\u4EF6\uFF1A${normalized}` });
+    }
+    text = readFileSync5(normalized, "utf8");
+  }
+  let raw;
+  try {
+    raw = JSON.parse(text);
+  } catch (e) {
+    throw new DaoyanCliError({
+      code: "update_failed",
+      message: `\u66F4\u65B0\u6E05\u5355\u4E0D\u662F\u5408\u6CD5 JSON\uFF1A${remote ? redactUrl(normalized) : normalized}\uFF08${e instanceof Error ? e.message : String(e)}\uFF09`
+    });
+  }
+  return { manifest: parseUpdateManifest(raw), source: normalized };
+}
+async function latestTag(proxy) {
+  try {
+    const text = await fetchText(GITHUB_TAGS_API, proxy, 15e3, {
+      "user-agent": "daoyan-cli-update",
+      accept: "application/vnd.github+json"
+    });
+    const tags = JSON.parse(text);
+    if (!Array.isArray(tags)) return { tag: null, note: "GitHub tags \u54CD\u5E94\u683C\u5F0F\u5F02\u5E38" };
     let best = null;
     for (const t of tags) {
-      const v = t.name !== void 0 ? parseSemver(t.name) : null;
+      if (typeof t !== "object" || t === null) continue;
+      const name = t.name;
+      if (typeof name !== "string") continue;
+      const v = parseSemver(name);
       if (v === null) continue;
-      if (best === null || newer(v, best.v)) best = { tag: t.name, v };
+      if (best === null || newer(v, best.v)) best = { tag: name, v };
     }
     return best === null ? { tag: null, note: "\u4ED3\u5E93\u5C1A\u65E0\u8BED\u4E49\u5316 tag\uFF08vX.Y.Z\uFF09" } : { tag: best.tag, note: "" };
   } catch (e) {
-    return { tag: null, note: `GitHub \u4E0D\u53EF\u8FBE\uFF1A${e instanceof Error ? e.message : String(e)}` };
+    return { tag: null, note: e instanceof Error ? e.message : String(e) };
   }
 }
-function spawnCapture(cmd, args, opts) {
+function spawnCapture(cmd, args, opts = {}) {
   return new Promise((resolvePromise, rejectPromise) => {
-    const child = spawn2(cmd, args, { cwd: opts.cwd, stdio: ["ignore", "pipe", "inherit"] });
+    const child = spawn2(cmd, args, {
+      cwd: opts.cwd,
+      env: opts.env !== void 0 ? { ...process.env, ...opts.env } : void 0,
+      stdio: ["ignore", "pipe", "inherit"]
+    });
     let out = "";
     child.stdout?.on("data", (d) => {
       out += d.toString();
@@ -2019,14 +2361,271 @@ function spawnCapture(cmd, args, opts) {
     child.on("close", (code) => resolvePromise({ code: code ?? -1, stdout: out }));
   });
 }
-async function runUpdate(ctx2, args) {
-  const checkOnly = args.includes("--check");
-  const { tag, note } = await latestTag();
+function parseUpdateFlags(args) {
+  const out = { check: false };
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === void 0) break;
+    const { name, inline } = splitInlineFlag(a);
+    if (name === "--check") {
+      if (inline !== void 0) usageError("--check \u4E0D\u63A5\u53D7\u53C2\u6570");
+      out.check = true;
+      continue;
+    }
+    if (name === "--manifest") {
+      const v = takeValue(args, i, inline, "--manifest");
+      out.manifest = v.value;
+      i += v.skip;
+      continue;
+    }
+    if (name === "--from") {
+      const v = takeValue(args, i, inline, "--from");
+      out.from = v.value;
+      i += v.skip;
+      continue;
+    }
+    if (name === "--sha256") {
+      const v = takeValue(args, i, inline, "--sha256");
+      const sha = v.value.trim().toLowerCase();
+      if (!/^[0-9a-f]{64}$/.test(sha)) usageError("--sha256 \u9700\u8981 64 \u4F4D\u5341\u516D\u8FDB\u5236");
+      out.sha256 = sha;
+      i += v.skip;
+      continue;
+    }
+    if (name === "--proxy") {
+      const v = takeValue(args, i, inline, "--proxy");
+      out.proxy = normalizeProxy(v.value);
+      i += v.skip;
+      continue;
+    }
+    if (name.startsWith("-")) usageError(`\u672A\u77E5\u53C2\u6570 ${name}`);
+    usageError(`update \u4E0D\u63A5\u53D7\u4F4D\u7F6E\u53C2\u6570\uFF1A${a}`);
+  }
+  if (out.from !== void 0 && out.manifest !== void 0) {
+    usageError("--from \u4E0E --manifest \u4E0D\u80FD\u540C\u65F6\u4F7F\u7528");
+  }
+  if (out.check && out.from !== void 0) {
+    usageError("--check \u4E0D\u80FD\u4E0E --from \u4E00\u8D77\u4F7F\u7528");
+  }
+  if (out.sha256 !== void 0 && out.from === void 0) {
+    usageError("--sha256 \u53EA\u80FD\u4E0E --from \u4E00\u8D77\u4F7F\u7528");
+  }
+  return out;
+}
+function resolveUpdateSource(flags, env, config) {
+  const envProxyRaw = nonEmpty(env.DYCLI_UPDATE_PROXY);
+  const envProxy = envProxyRaw !== void 0 ? normalizeProxy(envProxyRaw) : void 0;
+  const standardProxy = nonEmpty(env.HTTPS_PROXY) ?? nonEmpty(env.https_proxy) ?? nonEmpty(env.ALL_PROXY) ?? nonEmpty(env.all_proxy);
+  const proxy = flags.proxy ?? envProxy ?? config.proxy ?? standardProxy;
+  const proxyField = proxy !== void 0 ? { proxy } : {};
+  if (flags.from !== void 0) {
+    return {
+      kind: "from",
+      from: flags.from,
+      ...flags.sha256 !== void 0 ? { sha256: flags.sha256 } : {},
+      ...proxyField
+    };
+  }
+  if (flags.manifest !== void 0) return { kind: "manifest", manifest: flags.manifest, ...proxyField };
+  const envFrom = nonEmpty(env.DYCLI_UPDATE_FROM);
+  if (envFrom !== void 0) {
+    const envShaRaw = nonEmpty(env.DYCLI_UPDATE_SHA256);
+    const envSha = envShaRaw !== void 0 ? envShaRaw.toLowerCase() : void 0;
+    if (envSha !== void 0 && !/^[0-9a-f]{64}$/.test(envSha)) {
+      throw new DaoyanCliError({
+        code: "config_invalid",
+        message: "DYCLI_UPDATE_SHA256 \u9700\u8981 64 \u4F4D\u5341\u516D\u8FDB\u5236"
+      });
+    }
+    return {
+      kind: "from",
+      from: envFrom,
+      ...envSha !== void 0 ? { sha256: envSha } : {},
+      ...proxyField
+    };
+  }
+  const envManifest = nonEmpty(env.DYCLI_UPDATE_MANIFEST);
+  if (envManifest !== void 0) return { kind: "manifest", manifest: envManifest, ...proxyField };
+  if (config.manifest !== void 0) return { kind: "manifest", manifest: config.manifest, ...proxyField };
+  return { kind: "github", ...proxyField };
+}
+async function installTgz(tgzPath) {
+  const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+  const r = await spawnCapture(npm, [
+    "install",
+    "-g",
+    "--ignore-scripts",
+    "--no-audit",
+    "--no-fund",
+    tgzPath
+  ]);
+  if (r.code !== 0) {
+    throw new DaoyanCliError({
+      code: "update_failed",
+      message: `npm install -g \u5931\u8D25\uFF08\u9000\u51FA\u7801 ${r.code}\uFF09`,
+      hint: "EACCES \u65F6\u8003\u8651 nvm \u6216\u81EA\u5B9A\u4E49 npm prefix",
+      details: { exit: r.code }
+    });
+  }
+}
+function tgzName(location, fallback) {
+  try {
+    const u = new URL(location);
+    const raw = decodeURIComponent(u.pathname.split("/").pop() ?? "");
+    const name = basename(raw);
+    return /\.(tgz|tar\.gz)$/i.test(name) ? name : fallback;
+  } catch {
+    const name = basename(location);
+    return /\.(tgz|tar\.gz)$/i.test(name) ? name : fallback;
+  }
+}
+async function materializeTgz(resolved, sha2562, proxy, version, tmp) {
+  let path;
+  if (resolved.remote) {
+    const fallback = `daoyan-cli-${version.replace(/^v/i, "")}.tgz`;
+    path = join3(tmp, tgzName(resolved.location, fallback));
+    await downloadToFile(resolved.location, path, proxy, 12e4);
+  } else {
+    path = resolve2(expandHome(resolved.location));
+    let st;
+    try {
+      st = statSync(path);
+    } catch {
+      throw new DaoyanCliError({ code: "update_failed", message: `tgz \u4E0D\u5B58\u5728\uFF1A${path}` });
+    }
+    if (!st.isFile()) throw new DaoyanCliError({ code: "update_failed", message: `tgz \u4E0D\u662F\u6587\u4EF6\uFF1A${path}` });
+  }
+  if (sha2562 !== void 0) {
+    const actual = sha256File(path);
+    if (actual !== sha2562) {
+      throw new DaoyanCliError({
+        code: "update_failed",
+        message: `SHA-256 \u6821\u9A8C\u5931\u8D25\uFF08\u671F\u671B ${sha2562} / \u5B9E\u9645 ${actual}\uFF09`,
+        hint: "\u786E\u8BA4\u4E0B\u8F7D\u6E90\u4E0E\u6E05\u5355\u662F\u5426\u5BF9\u5E94\u540C\u4E00\u7248\u672C"
+      });
+    }
+  }
+  return path;
+}
+async function updateFromManifest(ctx2, source, checkOnly) {
+  let loaded;
+  try {
+    loaded = await loadManifest(source.manifest, source.proxy);
+  } catch (e) {
+    if (!checkOnly) throw e;
+    const note = e instanceof Error ? e.message : String(e);
+    if (ctx2.json) {
+      emitData({
+        current: `v${VERSION}`,
+        latest: null,
+        updateAvailable: false,
+        source: "manifest",
+        manifest: isHttpUrl(source.manifest) ? redactUrl(source.manifest) : source.manifest,
+        note,
+        ...source.proxy !== void 0 ? { proxy: redactProxy(source.proxy) } : {}
+      });
+      return;
+    }
+    say(`\u5F53\u524D v${VERSION}\uFF1B\u65E0\u6CD5\u8BFB\u53D6\u66F4\u65B0\u6E90\uFF08${note}\uFF09`);
+    return;
+  }
+  const currentStr = `v${VERSION}`;
+  const currentV = parseSemver(VERSION);
+  const latestV = parseSemver(loaded.manifest.version);
+  const hasUpdate = currentV !== null && latestV !== null && newer(latestV, currentV);
+  const manifestLabel = isHttpUrl(loaded.source) ? redactUrl(loaded.source) : loaded.source;
+  const proxyField = source.proxy !== void 0 ? { proxy: redactProxy(source.proxy) } : {};
+  if (checkOnly || !hasUpdate) {
+    if (ctx2.json) {
+      emitData({
+        current: currentStr,
+        latest: loaded.manifest.tag,
+        updateAvailable: hasUpdate,
+        source: "manifest",
+        manifest: manifestLabel,
+        ...proxyField
+      });
+      return;
+    }
+    if (hasUpdate) say(`\u6709\u65B0\u7248\u672C ${loaded.manifest.tag}\uFF08\u5F53\u524D ${currentStr}\uFF09\u3002\u8FD0\u884C daoyan update \u5347\u7EA7`);
+    else say(`\u5DF2\u662F\u6700\u65B0\uFF08\u5F53\u524D ${currentStr}\uFF0C\u66F4\u65B0\u6E90\u6700\u65B0 ${loaded.manifest.tag}\uFF09`);
+    return;
+  }
+  const resolved = resolveTgz(loaded.source, loaded.manifest.tgz);
+  if (resolved.remote && loaded.manifest.sha256 === void 0) {
+    throw new DaoyanCliError({
+      code: "update_failed",
+      message: "\u66F4\u65B0\u6E05\u5355\u7F3A\u5C11 sha256\uFF1B\u8FDC\u7A0B tgz \u5FC5\u987B\u6821\u9A8C",
+      hint: "\u5728 latest.json \u4E2D\u52A0\u5165 sha256\uFF0C\u6216\u4F7F\u7528 daoyan update --from \u672C\u5730\u6587\u4EF6"
+    });
+  }
+  say(`\u68C0\u6D4B\u5230\u65B0\u7248\u672C ${loaded.manifest.tag}\uFF08\u5F53\u524D ${currentStr}\uFF09\uFF0C\u5F00\u59CB\u81EA\u5347\u7EA7...`);
+  const tmp = mkdtempSync(join3(tmpdir(), "daoyan-cli-update-"));
+  try {
+    const tgzPath = await materializeTgz(
+      resolved,
+      loaded.manifest.sha256,
+      source.proxy,
+      loaded.manifest.version,
+      tmp
+    );
+    await installTgz(tgzPath);
+    say(`\u5347\u7EA7\u5B8C\u6210\uFF1A${loaded.manifest.tag}\u3002\u9A8C\u8BC1\uFF1Adaoyan --version`);
+    if (ctx2.json) {
+      emitData({
+        updated: loaded.manifest.tag,
+        previous: currentStr,
+        source: "manifest",
+        manifest: manifestLabel,
+        ...proxyField
+      });
+    }
+  } finally {
+    rmSync3(tmp, { recursive: true, force: true });
+  }
+}
+async function updateFromTgz(ctx2, source) {
+  const remote = isHttpUrl(source.from);
+  if (remote && source.sha256 === void 0) {
+    throw new DaoyanCliError({
+      code: "usage",
+      message: "\u8FDC\u7A0B --from \u9700\u8981 --sha256",
+      hint: "\u4ECE\u53D1\u5E03\u9875\u7684 SHA256SUMS \u83B7\u53D6\u6821\u9A8C\u503C\uFF1B\u672C\u5730 tgz \u53EF\u7701\u7565",
+      exit: 2
+    });
+  }
+  const location = remote ? source.from : resolve2(expandHome(source.from));
+  say(`\u4ECE ${remote ? redactUrl(location) : location} \u5B89\u88C5...`);
+  const tmp = mkdtempSync(join3(tmpdir(), "daoyan-cli-update-"));
+  try {
+    const tgzPath = await materializeTgz(
+      { location, remote },
+      source.sha256,
+      source.proxy,
+      VERSION,
+      tmp
+    );
+    await installTgz(tgzPath);
+    say("\u5B89\u88C5\u5B8C\u6210\u3002\u9A8C\u8BC1\uFF1Adaoyan --version");
+    if (ctx2.json) {
+      emitData({
+        installed: true,
+        source: "from",
+        file: remote ? redactUrl(location) : location
+      });
+    }
+  } finally {
+    rmSync3(tmp, { recursive: true, force: true });
+  }
+}
+async function updateFromGitHub(ctx2, checkOnly, proxy) {
+  const { tag, note } = await latestTag(proxy);
   const current = parseSemver(VERSION);
   const currentStr = `v${VERSION}`;
+  const proxyField = proxy !== void 0 ? { proxy: redactProxy(proxy) } : {};
   if (tag === null) {
     if (ctx2.json) {
-      emitData({ current: currentStr, latest: null, note });
+      emitData({ current: currentStr, latest: null, note, source: "github", ...proxyField });
       return;
     }
     say(`\u5F53\u524D ${currentStr}\uFF1B\u65E0\u6CD5\u786E\u5B9A\u6700\u65B0\u7248\uFF08${note}\uFF09`);
@@ -2036,7 +2635,7 @@ async function runUpdate(ctx2, args) {
   const hasUpdate = current !== null && latestV !== null && newer(latestV, current);
   if (checkOnly || !hasUpdate) {
     if (ctx2.json) {
-      emitData({ current: currentStr, latest: tag, updateAvailable: hasUpdate });
+      emitData({ current: currentStr, latest: tag, updateAvailable: hasUpdate, source: "github", ...proxyField });
       return;
     }
     if (hasUpdate) say(`\u6709\u65B0\u7248\u672C ${tag}\uFF08\u5F53\u524D ${currentStr}\uFF09\u3002\u8FD0\u884C daoyan update \u5347\u7EA7`);
@@ -2047,80 +2646,141 @@ async function runUpdate(ctx2, args) {
   const npm = process.platform === "win32" ? "npm.cmd" : "npm";
   const tmp = mkdtempSync(join3(tmpdir(), "daoyan-cli-update-"));
   try {
-    const pack = await spawnCapture(npm, ["pack", "--silent", `git+${REPO_URL}#${tag}`], { cwd: tmp });
+    const pack = await spawnCapture(npm, ["pack", "--silent", `git+${REPO_URL}#${tag}`], {
+      cwd: tmp,
+      ...proxy !== void 0 ? { env: proxyEnv(proxy) } : {}
+    });
     if (pack.code !== 0) {
       throw new DaoyanCliError({
         code: "update_failed",
-        message: `npm pack \u5931\u8D25\uFF08\u9000\u51FA\u7801 ${pack.code}\uFF09\u3002\u68C0\u67E5\u7F51\u7EDC\u4E0E GitHub \u53EF\u8FBE\u6027`
+        message: `npm pack \u5931\u8D25\uFF08\u9000\u51FA\u7801 ${pack.code}\uFF09\u3002\u68C0\u67E5\u7F51\u7EDC\u4E0E GitHub \u53EF\u8FBE\u6027`,
+        hint: "\u53EF\u6539\u7528 daoyan update --manifest \u6216 --from \u6307\u5B9A\u955C\u50CF"
       });
     }
     const tgz = pack.stdout.trim().split("\n").filter((l) => l !== "").pop();
     if (tgz === void 0) {
       throw new DaoyanCliError({ code: "update_failed", message: "npm pack \u672A\u4EA7\u51FA tarball" });
     }
-    const code = await execInherit(npm, ["install", "-g", join3(tmp, tgz)]);
-    if (code !== 0) {
-      throw new DaoyanCliError({
-        code: "update_failed",
-        message: `npm install -g \u5931\u8D25\uFF08\u9000\u51FA\u7801 ${code}\uFF09\u3002EACCES \u65F6\u8003\u8651 nvm \u6216\u81EA\u5B9A\u4E49 npm prefix`,
-        details: { exit: code }
-      });
-    }
+    await installTgz(join3(tmp, tgz));
     say(`\u5347\u7EA7\u5B8C\u6210\uFF1A${tag}\u3002\u9A8C\u8BC1\uFF1Adaoyan --version`);
-    if (ctx2.json) emitData({ updated: tag, previous: currentStr });
+    if (ctx2.json) emitData({ updated: tag, previous: currentStr, source: "github", ...proxyField });
   } finally {
     rmSync3(tmp, { recursive: true, force: true });
   }
 }
-var REPO_URL;
+function runProxyCommand(ctx2, args) {
+  const config = readUpdateConfig();
+  if (args.length === 0) {
+    const proxy2 = config.proxy ?? null;
+    if (ctx2.json) {
+      emitData({ proxy: proxy2 !== null ? redactProxy(proxy2) : null, path: updateConfigPath() });
+      return;
+    }
+    say(proxy2 !== null ? `\u66F4\u65B0\u4EE3\u7406\uFF1A${redactProxy(proxy2)}` : "\u66F4\u65B0\u4EE3\u7406\uFF1A\u672A\u8BBE\u7F6E");
+    return;
+  }
+  if (args.length === 1 && args[0] === "--unset") {
+    delete config.proxy;
+    saveUpdateConfig(config);
+    if (ctx2.json) {
+      emitData({ proxy: null, path: updateConfigPath() });
+      return;
+    }
+    say("\u66F4\u65B0\u4EE3\u7406\u5DF2\u6E05\u9664");
+    return;
+  }
+  if (args.length !== 1) usageError("\u7528\u6CD5\uFF1Adaoyan update proxy [<url>|--unset]");
+  const proxy = normalizeProxy(args[0] ?? "");
+  config.proxy = proxy;
+  saveUpdateConfig(config);
+  if (ctx2.json) {
+    emitData({ proxy: redactProxy(proxy), path: updateConfigPath() });
+    return;
+  }
+  say(`\u66F4\u65B0\u4EE3\u7406\u5DF2\u8BBE\u7F6E\uFF1A${redactProxy(proxy)}`);
+}
+function runSourceCommand(ctx2, args) {
+  const config = readUpdateConfig();
+  if (args.length === 0) {
+    const manifest2 = config.manifest ?? null;
+    if (ctx2.json) {
+      emitData({ manifest: manifest2 !== null ? redactUrl(manifest2) : null, path: updateConfigPath() });
+      return;
+    }
+    say(
+      manifest2 !== null ? `\u66F4\u65B0\u6E90\uFF1A${redactUrl(manifest2)}` : "\u66F4\u65B0\u6E90\uFF1A\u9ED8\u8BA4 GitHub\uFF08\u7528 daoyan update source <manifest> \u66F4\u6362\uFF09"
+    );
+    return;
+  }
+  if (args.length === 1 && args[0] === "--unset") {
+    delete config.manifest;
+    saveUpdateConfig(config);
+    if (ctx2.json) {
+      emitData({ manifest: null, path: updateConfigPath() });
+      return;
+    }
+    say("\u66F4\u65B0\u6E90\u5DF2\u6062\u590D\u4E3A\u9ED8\u8BA4 GitHub");
+    return;
+  }
+  if (args.length !== 1) usageError("\u7528\u6CD5\uFF1Adaoyan update source [<manifest>|--unset]");
+  const raw = args[0] ?? "";
+  const manifest = isHttpUrl(raw) ? raw : resolve2(expandHome(raw));
+  if (!isHttpUrl(manifest)) {
+    let st;
+    try {
+      st = statSync(manifest);
+    } catch {
+      usageError(`\u66F4\u65B0\u6E05\u5355\u4E0D\u5B58\u5728\uFF1A${manifest}`);
+    }
+    if (!st.isFile()) usageError(`\u66F4\u65B0\u6E05\u5355\u4E0D\u662F\u6587\u4EF6\uFF1A${manifest}`);
+  }
+  config.manifest = manifest;
+  saveUpdateConfig(config);
+  if (ctx2.json) {
+    emitData({ manifest: redactUrl(manifest), path: updateConfigPath() });
+    return;
+  }
+  say(`\u66F4\u65B0\u6E90\u5DF2\u8BBE\u7F6E\uFF1A${redactUrl(manifest)}`);
+}
+async function runUpdate(ctx2, args) {
+  if (args[0] === "proxy") {
+    runProxyCommand(ctx2, args.slice(1));
+    return;
+  }
+  if (args[0] === "source") {
+    runSourceCommand(ctx2, args.slice(1));
+    return;
+  }
+  const flags = parseUpdateFlags(args);
+  const config = readUpdateConfig();
+  const source = resolveUpdateSource(flags, process.env, config);
+  if (flags.check && source.kind === "from") {
+    usageError("--check \u4E0D\u80FD\u4E0E --from / DYCLI_UPDATE_FROM \u4E00\u8D77\u4F7F\u7528");
+  }
+  if (source.kind === "from") {
+    await updateFromTgz(ctx2, source);
+    return;
+  }
+  if (source.kind === "manifest") {
+    await updateFromManifest(ctx2, source, flags.check);
+    return;
+  }
+  await updateFromGitHub(ctx2, flags.check, source.proxy);
+}
+var REPO_URL, GITHUB_TAGS_API, MAX_DOWNLOAD_BYTES;
 var init_update = __esm({
   "src/commands/update.mts"() {
     "use strict";
+    init_args();
     init_errors();
     init_exec();
+    init_fs();
     init_json();
     init_log();
     init_version();
     REPO_URL = "https://github.com/yuanbaobaoo/daoyan-cli.git";
-  }
-});
-
-// src/shared/args.mts
-function splitInlineFlag(arg) {
-  if (!arg.startsWith("--")) return { name: arg };
-  const i = arg.indexOf("=");
-  if (i < 0) return { name: arg };
-  return { name: arg.slice(0, i), inline: arg.slice(i + 1) };
-}
-function takeValue(args, index, inline, label) {
-  if (inline !== void 0) {
-    if (inline === "") usageError(`${label} \u9700\u8981\u53C2\u6570`);
-    return { value: inline, skip: 0 };
-  }
-  const v = args[index + 1];
-  if (v === void 0 || v === "" || v.startsWith("--")) {
-    usageError(`${label} \u9700\u8981\u53C2\u6570`);
-  }
-  return { value: v, skip: 1 };
-}
-function parseJsonValue(raw) {
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return raw;
-  }
-}
-function usageError(message) {
-  throw new DaoyanCliError({ code: "usage", message, exit: 2 });
-}
-function requiredPositional(value, label) {
-  if (value === void 0 || value === "") usageError(`\u7F3A\u5C11${label}`);
-  return value;
-}
-var init_args = __esm({
-  "src/shared/args.mts"() {
-    "use strict";
-    init_errors();
+    GITHUB_TAGS_API = "https://api.github.com/repos/yuanbaobaoo/daoyan-cli/tags";
+    MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024;
   }
 });
 
@@ -2186,7 +2846,7 @@ var init_net = __esm({
 });
 
 // src/core/provision/init-flow.mts
-import { existsSync as existsSync5, readFileSync as readFileSync5, renameSync as renameSync2, writeFileSync as writeFileSync2 } from "fs";
+import { existsSync as existsSync6, readFileSync as readFileSync6, renameSync as renameSync2, writeFileSync as writeFileSync3 } from "fs";
 import { join as join4 } from "path";
 function projectTemplate(name) {
   return {
@@ -2204,22 +2864,22 @@ function scaffoldProject(root, name) {
     ensureDir(join4(root, d));
   }
   const projectFile = join4(root, PROJECT_FILE);
-  if (!existsSync5(projectFile)) {
+  if (!existsSync6(projectFile)) {
     writeFileAtomic(projectFile, JSON.stringify(projectTemplate(name), null, 2) + "\n");
     created.push(PROJECT_FILE);
   }
   const shotsFile = join4(root, SHOTS_FILE);
-  if (!existsSync5(shotsFile)) {
+  if (!existsSync6(shotsFile)) {
     writeFileAtomic(shotsFile, JSON.stringify(shotsTemplate(), null, 2) + "\n");
     created.push(SHOTS_FILE);
   }
   const wf = join4(root, WORKFLOWS_DIR, "t2v.json");
-  if (!existsSync5(wf)) {
+  if (!existsSync6(wf)) {
     writeFileAtomic(wf, "{}\n");
     created.push(`${WORKFLOWS_DIR}/t2v.json`);
   }
   const ignore = join4(root, ".gitignore");
-  if (!existsSync5(ignore)) {
+  if (!existsSync6(ignore)) {
     writeFileAtomic(
       ignore,
       [
@@ -2236,7 +2896,7 @@ function scaffoldProject(root, name) {
     created.push(".gitignore");
   }
   const attrs = join4(root, ".gitattributes");
-  if (!existsSync5(attrs)) {
+  if (!existsSync6(attrs)) {
     writeFileAtomic(
       attrs,
       [
@@ -2317,7 +2977,7 @@ async function latestComfyTag() {
   });
 }
 async function createVenv(root, venvDir, log) {
-  if (existsSync5(join4(venvDir, "bin", "python"))) {
+  if (existsSync6(join4(venvDir, "bin", "python"))) {
     log(`\u590D\u7528\u5DF2\u6709 venv\uFF1A${venvDir}`);
     return;
   }
@@ -2331,7 +2991,7 @@ async function createVenv(root, venvDir, log) {
   }
 }
 async function cloneRepo(root, repo, target, ref, log) {
-  if (existsSync5(join4(target, ".git"))) {
+  if (existsSync6(join4(target, ".git"))) {
     log(`\u590D\u7528\u5DF2\u6709\u4ED3\u5E93\uFF1A${target}`);
     return;
   }
@@ -2350,7 +3010,7 @@ async function cloneRepo(root, repo, target, ref, log) {
 async function pipInstall(root, venvDir, mirror, log, requirements) {
   const pip = join4(venvDir, "bin", "pip");
   const req = requirements ?? join4(root, "engine", "ComfyUI", "requirements.txt");
-  if (!existsSync5(req)) {
+  if (!existsSync6(req)) {
     throw new DaoyanCliError({ code: "provision_failed", message: `\u7F3A\u5C11 ${req}\uFF08clone \u672A\u5B8C\u6210\uFF1F\uFF09` });
   }
   log(`\u5B89\u88C5 ComfyUI \u4F9D\u8D56\uFF08pip install -r ${req}\uFF0C\u53EF\u80FD\u9700\u8981\u4E0B\u8F7D torch\uFF0C\u8017\u65F6\u8F83\u957F\uFF09...`);
@@ -2373,7 +3033,7 @@ async function installCustomNodes(root, venvDir, nodes, mirror, log, comfyDir = 
     const target = join4(base, node.name);
     await cloneRepo(root, node.repo, target, node.ref, log);
     const req = join4(target, "requirements.txt");
-    if (existsSync5(req)) {
+    if (existsSync6(req)) {
       log(`\u5B89\u88C5 ${node.name} \u4F9D\u8D56...`);
       const args = ["install", "-r", req];
       if (mirror !== void 0) args.push("--index-url", mirror);
@@ -2418,13 +3078,13 @@ async function checkoutComfyVersion(comfyDir, version, log) {
 async function deployLocalEngine(opts) {
   const venvDir = join4(opts.root, "engine", ".venv");
   const comfyDir = join4(opts.root, "engine", "ComfyUI");
-  const already = existsSync5(join4(venvDir, "bin", "python")) && existsSync5(join4(comfyDir, "main.py"));
+  const already = existsSync6(join4(venvDir, "bin", "python")) && existsSync6(join4(comfyDir, "main.py"));
   if (already) {
     opts.log("\u5F15\u64CE\u5DF2\u5B89\u88C5\uFF0C\u590D\u7528\u73B0\u6709\u76EE\u5F55");
     let switched = false;
-    if (existsSync5(join4(comfyDir, ".git"))) {
+    if (existsSync6(join4(comfyDir, ".git"))) {
       switched = await checkoutComfyVersion(comfyDir, opts.version, opts.log);
-    } else if (existsSync5(join4(comfyDir, "main.py"))) {
+    } else if (existsSync6(join4(comfyDir, "main.py"))) {
       opts.log("ComfyUI \u76EE\u5F55\u4E0D\u662F git \u68C0\u51FA\uFF0C\u8DF3\u8FC7\u7248\u672C\u5207\u6362\uFF08\u53EF\u7528 engine use \u6307\u5411\u5176\u4ED6\u76EE\u5F55\uFF09");
     }
     if (switched) {
@@ -2501,7 +3161,7 @@ function writeExtraModelPaths(root, modelpath) {
 }
 function writeFileAtomically(file, content) {
   const tmp = `${file}.tmp`;
-  writeFileSync2(tmp, content);
+  writeFileSync3(tmp, content);
   renameSync2(tmp, file);
 }
 async function allocatePort(existing) {
@@ -2545,7 +3205,7 @@ __export(store_exports, {
   taskSummary: () => taskSummary,
   updateTask: () => updateTask
 });
-import { existsSync as existsSync6, readdirSync as readdirSync2, rmSync as rmSync4 } from "fs";
+import { existsSync as existsSync7, readdirSync as readdirSync2, rmSync as rmSync4 } from "fs";
 import { join as join5 } from "path";
 function newTaskId(machineId) {
   return `t_${makeId(machineId)}`;
@@ -2558,7 +3218,7 @@ function taskFile(root, taskId) {
 }
 function createTask(root, record) {
   const dir = taskDir(root, record.task_id);
-  if (existsSync6(join5(dir, TASK_FILE))) {
+  if (existsSync7(join5(dir, TASK_FILE))) {
     throw new DaoyanCliError({
       code: "config_invalid",
       message: `task ${record.task_id} \u5DF2\u5B58\u5728\uFF08id \u51B2\u7A81\uFF0C\u8BF7\u91CD\u8BD5\uFF09`
@@ -2603,7 +3263,7 @@ function nextActionsFor(taskId, status) {
 }
 function listTasks(root) {
   const dir = join5(root, TASKS_DIR);
-  if (!existsSync6(dir)) return [];
+  if (!existsSync7(dir)) return [];
   const out = [];
   for (const ent of readdirSync2(dir, { withFileTypes: true })) {
     if (!ent.isDirectory()) continue;
@@ -2627,11 +3287,11 @@ function requestCancel(root, taskId) {
   });
 }
 function isCancelRequested(root, taskId) {
-  return existsSync6(join5(taskDir(root, taskId), CANCEL_FILE));
+  return existsSync7(join5(taskDir(root, taskId), CANCEL_FILE));
 }
 function clearCancelRequest(root, taskId) {
   const file = join5(taskDir(root, taskId), CANCEL_FILE);
-  if (existsSync6(file)) {
+  if (existsSync7(file)) {
     rmSync4(file, { force: true });
   }
 }
@@ -2855,7 +3515,7 @@ var init_client = __esm({
 });
 
 // src/core/workflow/catalog.mts
-import { existsSync as existsSync7, rmSync as rmSync5 } from "fs";
+import { existsSync as existsSync8, rmSync as rmSync5 } from "fs";
 import { join as join6 } from "path";
 function extractNodeDef(raw, classType) {
   const nodeRaw = raw[classType];
@@ -2939,7 +3599,7 @@ function comfyVersionOf(stats) {
 }
 function readCatalog(root) {
   const file = join6(root, CATALOG_FILE);
-  if (!existsSync7(file)) return null;
+  if (!existsSync8(file)) return null;
   const cat = readJsonIfExists(file);
   if (cat === null || typeof cat !== "object" || typeof cat.raw !== "object" || cat.raw === null) {
     throw new DaoyanCliError({
@@ -3107,11 +3767,11 @@ var init_detect = __esm({
 });
 
 // src/core/gpu/lease.mts
-import { chmodSync, existsSync as existsSync8, rmSync as rmSync6 } from "fs";
-import { homedir } from "os";
-import { dirname as dirname4, join as join7 } from "path";
+import { chmodSync as chmodSync2, existsSync as existsSync9, rmSync as rmSync6 } from "fs";
+import { homedir as homedir2 } from "os";
+import { dirname as dirname5, join as join7 } from "path";
 function leasePath() {
-  return join7(homedir(), ".dycli", "gpu", "lease.json");
+  return join7(homedir2(), ".dycli", "gpu", "lease.json");
 }
 function isLease(v) {
   if (typeof v !== "object" || v === null) return false;
@@ -3119,7 +3779,7 @@ function isLease(v) {
   return o.version === 1 && typeof o.task_id === "string" && typeof o.project === "string" && typeof o.created_at === "string" && Array.isArray(o.entries);
 }
 function inspectLease(path = leasePath()) {
-  if (!existsSync8(path)) return { status: "absent", path };
+  if (!existsSync9(path)) return { status: "absent", path };
   try {
     const raw = readJsonIfExists(path);
     if (raw === null) return { status: "absent", path };
@@ -3130,10 +3790,10 @@ function inspectLease(path = leasePath()) {
   }
 }
 function writeLease(lease, path = leasePath()) {
-  ensureDir(dirname4(path));
+  ensureDir(dirname5(path));
   writeJsonAtomic(path, lease);
   try {
-    chmodSync(path, 384);
+    chmodSync2(path, 384);
   } catch {
   }
 }
@@ -3141,7 +3801,7 @@ function newLease(taskId, project) {
   return { version: 1, task_id: taskId, project, created_at: nowIso(), entries: [] };
 }
 function clearLease(path = leasePath()) {
-  if (existsSync8(path)) {
+  if (existsSync9(path)) {
     rmSync6(path, { force: true });
   }
 }
@@ -3202,7 +3862,7 @@ var init_targets = __esm({
 });
 
 // src/core/gpu/cri.mts
-import { existsSync as existsSync9 } from "fs";
+import { existsSync as existsSync10 } from "fs";
 async function crictlAvailable() {
   if (crictlChecked !== null) return crictlChecked;
   const r = await tryExecCapture("crictl", ["--version"], { timeoutMs: 5e3 });
@@ -3213,7 +3873,7 @@ function crictlArgs(endpoint, args) {
   return endpoint !== void 0 ? ["--runtime-endpoint", endpoint, ...args] : args;
 }
 function availableCriEndpoints() {
-  return CRI_ENDPOINTS.filter((ep) => existsSync9(ep.replace(/^unix:\/\//, "")));
+  return CRI_ENDPOINTS.filter((ep) => existsSync10(ep.replace(/^unix:\/\//, "")));
 }
 function crictlEndpointCandidates(recorded) {
   const out = recorded !== void 0 ? [recorded, void 0] : [void 0];
@@ -3223,7 +3883,7 @@ function crictlEndpointCandidates(recorded) {
   return out;
 }
 function availableContainerdSockets() {
-  return CONTAINERD_SOCKETS.filter((p) => existsSync9(p));
+  return CONTAINERD_SOCKETS.filter((p) => existsSync10(p));
 }
 function isEndpointError(stderr) {
   return /connect|connection|no such file|refused|socket|failed to connect|code = Unavailable/i.test(
@@ -3258,7 +3918,7 @@ var init_cri = __esm({
 });
 
 // src/core/gpu/containers.mts
-import { readFileSync as readFileSync6 } from "fs";
+import { readFileSync as readFileSync7 } from "fs";
 function containerIdFromCgroup(cgroup) {
   const kubernetes = /kubepods(?:[\/.]|$)/i.test(cgroup);
   const patterns = [
@@ -3288,7 +3948,7 @@ function containerIdFromCgroup(cgroup) {
 function readContainerInfo(pid) {
   if (process.platform !== "linux") return null;
   try {
-    return containerIdFromCgroup(readFileSync6(`/proc/${pid}/cgroup`, "utf8"));
+    return containerIdFromCgroup(readFileSync7(`/proc/${pid}/cgroup`, "utf8"));
   } catch {
     return null;
   }
@@ -3306,14 +3966,14 @@ function commandArray(v) {
 }
 function readProcessCmdline(pid) {
   try {
-    return readFileSync6(`/proc/${pid}/cmdline`, "utf8").split("\0").filter((x) => x !== "");
+    return readFileSync7(`/proc/${pid}/cmdline`, "utf8").split("\0").filter((x) => x !== "");
   } catch {
     return [];
   }
 }
 function readParentPid(pid) {
   try {
-    const stat = readFileSync6(`/proc/${pid}/stat`, "utf8");
+    const stat = readFileSync7(`/proc/${pid}/stat`, "utf8");
     const close = stat.lastIndexOf(")");
     if (close < 0) return null;
     const rest = stat.slice(close + 2).split(/\s+/);
@@ -4293,7 +4953,7 @@ var init_vllm = __esm({
 });
 
 // src/core/gpu/providers/process.mts
-import { readFileSync as readFileSync7, readlinkSync } from "fs";
+import { readFileSync as readFileSync8, readlinkSync } from "fs";
 import { spawn as spawn3 } from "child_process";
 async function listProcesses() {
   const r = await tryExecCapture("ps", ["-eo", "pid=,uid=,comm=,args="], { timeoutMs: 1e4 });
@@ -4327,7 +4987,7 @@ async function ancestorPids() {
 function cmdlineOf(info) {
   if (process.platform === "linux") {
     try {
-      const parts = readFileSync7(`/proc/${info.pid}/cmdline`, "utf8").split("\0").filter((x) => x !== "");
+      const parts = readFileSync8(`/proc/${info.pid}/cmdline`, "utf8").split("\0").filter((x) => x !== "");
       if (parts.length > 0) return parts;
     } catch {
     }
@@ -4707,7 +5367,7 @@ __export(local_session_exports, {
   readEnginePid: () => readEnginePid,
   stopResidualEngine: () => stopResidualEngine
 });
-import { closeSync, existsSync as existsSync10, openSync, readFileSync as readFileSync8, readSync, rmSync as rmSync7, statSync, unlinkSync, writeFileSync as writeFileSync3 } from "fs";
+import { closeSync, existsSync as existsSync11, openSync, readFileSync as readFileSync9, readSync, rmSync as rmSync7, statSync as statSync2, unlinkSync, writeFileSync as writeFileSync4 } from "fs";
 import { spawn as spawn4 } from "child_process";
 import { join as join8 } from "path";
 function enginePidFile(root) {
@@ -4715,9 +5375,9 @@ function enginePidFile(root) {
 }
 function readEnginePid(root) {
   const file = enginePidFile(root);
-  if (!existsSync10(file)) return null;
+  if (!existsSync11(file)) return null;
   try {
-    const text = readFileSync8(file, "utf8").trim();
+    const text = readFileSync9(file, "utf8").trim();
     if (/^\d+$/.test(text)) {
       return { pid: Number(text), port: 0, comfyui_dir: "", task_id: "", started_at: "" };
     }
@@ -4729,7 +5389,7 @@ function readEnginePid(root) {
 }
 function writeEnginePid(root, rec) {
   ensureDir(join8(root, LOG_DIR));
-  writeFileSync3(enginePidFile(root), JSON.stringify(rec, null, 2) + "\n", { mode: 384 });
+  writeFileSync4(enginePidFile(root), JSON.stringify(rec, null, 2) + "\n", { mode: 384 });
 }
 function pidAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
@@ -4802,10 +5462,10 @@ async function stopResidualEngine(root, log) {
   rmSync7(enginePidFile(root), { force: true });
 }
 function tailFile(file, lines) {
-  if (!existsSync10(file)) return "(\u6587\u4EF6\u4E0D\u5B58\u5728)";
+  if (!existsSync11(file)) return "(\u6587\u4EF6\u4E0D\u5B58\u5728)";
   let size = 0;
   try {
-    size = statSync(file).size;
+    size = statSync2(file).size;
   } catch {
     return "(\u4E0D\u53EF\u8BFB)";
   }
@@ -4914,13 +5574,13 @@ var init_local_session = __esm({
         const started = Date.now();
         const comfyDir = this.comfyDir();
         const venvPython = join8(this.venvDir(), "bin", "python");
-        if (!existsSync10(venvPython)) {
+        if (!existsSync11(venvPython)) {
           throw new DaoyanCliError({
             code: "engine_start_failed",
             message: `venv \u4E0D\u5B58\u5728\uFF1A${venvPython}\u3002\u8FD0\u884C daoyan init --mode=local \u90E8\u7F72\u5F15\u64CE`
           });
         }
-        if (!existsSync10(join8(comfyDir, "main.py"))) {
+        if (!existsSync11(join8(comfyDir, "main.py"))) {
           throw new DaoyanCliError({
             code: "engine_start_failed",
             message: `ComfyUI \u76EE\u5F55\u65E0\u6548\uFF1A${comfyDir}\uFF08\u7F3A\u5C11 main.py\uFF09\u3002\u8FD0\u884C daoyan init --mode=local`
@@ -5104,7 +5764,7 @@ ${tailFile(logFile, 8)}`
         const explicit = this.opts.machine.engine.models_config;
         if (explicit !== void 0 && explicit !== null && explicit !== "") return explicit;
         const auto = join8(this.opts.root, EXTRA_MODELS_FILE);
-        return existsSync10(auto) ? auto : null;
+        return existsSync11(auto) ? auto : null;
       }
       /**
        * 清理本次 run 的 scratch 文件（local 拥有引擎文件系统）。
@@ -5129,11 +5789,11 @@ ${tailFile(logFile, 8)}`
 });
 
 // src/core/machine/lock.mts
-import { closeSync as closeSync2, existsSync as existsSync11, openSync as openSync2, readFileSync as readFileSync9, rmSync as rmSync8, unlinkSync as unlinkSync2, writeFileSync as writeFileSync4 } from "fs";
-import { homedir as homedir2 } from "os";
-import { dirname as dirname5, join as join9 } from "path";
+import { closeSync as closeSync2, existsSync as existsSync12, openSync as openSync2, readFileSync as readFileSync10, rmSync as rmSync8, unlinkSync as unlinkSync2, writeFileSync as writeFileSync5 } from "fs";
+import { homedir as homedir3 } from "os";
+import { dirname as dirname6, join as join9 } from "path";
 function machineLockPath() {
-  return join9(homedir2(), ".dycli", "machine.lock");
+  return join9(homedir3(), ".dycli", "machine.lock");
 }
 function pidAlive2(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
@@ -5145,10 +5805,10 @@ function pidAlive2(pid) {
   }
 }
 function inspectMachineLock(path = machineLockPath()) {
-  if (!existsSync11(path)) return { status: "absent", path };
+  if (!existsSync12(path)) return { status: "absent", path };
   let raw;
   try {
-    raw = JSON.parse(readFileSync9(path, "utf8"));
+    raw = JSON.parse(readFileSync10(path, "utf8"));
   } catch (e) {
     return {
       status: "corrupt",
@@ -5167,8 +5827,8 @@ function isLockRecord(v) {
   return typeof o.token === "string" && (o.kind === "generation" || o.kind === "metadata") && typeof o.task_id === "string" && typeof o.project === "string" && (o.mode === "local" || o.mode === "remote") && typeof o.command === "string" && typeof o.pid === "number" && typeof o.started_at === "string";
 }
 function writeLock(path, record) {
-  ensureDir(dirname5(path));
-  writeFileSync4(path, JSON.stringify(record, null, 2) + "\n", { mode: 384 });
+  ensureDir(dirname6(path));
+  writeFileSync5(path, JSON.stringify(record, null, 2) + "\n", { mode: 384 });
 }
 function machineBusyError(owner) {
   return new DaoyanCliError({
@@ -5206,10 +5866,10 @@ async function acquireMachineLock(opts) {
   };
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      ensureDir(dirname5(path));
+      ensureDir(dirname6(path));
       const fd = openSync2(path, "wx", 384);
       try {
-        writeFileSync4(fd, JSON.stringify(record, null, 2) + "\n");
+        writeFileSync5(fd, JSON.stringify(record, null, 2) + "\n");
       } finally {
         closeSync2(fd);
       }
@@ -5264,7 +5924,7 @@ function attachMachineLock(opts) {
 }
 async function recoverStaleLock(record, path = machineLockPath()) {
   try {
-    if (record.kind === "generation" && existsSync11(join9(record.project, "project.json"))) {
+    if (record.kind === "generation" && existsSync12(join9(record.project, "project.json"))) {
       const store = await Promise.resolve().then(() => (init_store(), store_exports));
       const task = store.readTask(record.project, record.task_id);
       if (task !== null && (task.status === "queued" || task.status === "running")) {
@@ -5282,7 +5942,7 @@ async function recoverStaleLock(record, path = machineLockPath()) {
   } catch {
   }
   try {
-    if (record.mode === "local" && existsSync11(join9(record.project, "project.json"))) {
+    if (record.mode === "local" && existsSync12(join9(record.project, "project.json"))) {
       const local = await Promise.resolve().then(() => (init_local_session(), local_session_exports));
       await local.stopResidualEngine(record.project, () => {
       });
@@ -5336,8 +5996,8 @@ var init_lock = __esm({
 });
 
 // src/commands/init.mts
-import { basename, isAbsolute as isAbsolute2, join as join10, resolve as resolve2 } from "path";
-import { existsSync as existsSync12, statSync as statSync2 } from "fs";
+import { basename as basename2, isAbsolute as isAbsolute3, join as join10, resolve as resolve3 } from "path";
+import { existsSync as existsSync13, statSync as statSync3 } from "fs";
 function parseArgs(args) {
   const flags = { noSkill: false };
   for (let i = 0; i < args.length; i++) {
@@ -5398,8 +6058,8 @@ function parseArgs(args) {
   return flags;
 }
 function resolveModelPath(raw) {
-  const abs = isAbsolute2(raw) ? raw : resolve2(process.cwd(), raw);
-  if (!existsSync12(abs) || !statSync2(abs).isDirectory()) {
+  const abs = isAbsolute3(raw) ? raw : resolve3(process.cwd(), raw);
+  if (!existsSync13(abs) || !statSync3(abs).isDirectory()) {
     throw new DaoyanCliError({
       code: "config_invalid",
       message: `--modelpath \u5FC5\u987B\u662F\u5DF2\u5B58\u5728\u7684\u76EE\u5F55\uFF08\u6536\u5230 ${raw}\uFF09`
@@ -5411,7 +6071,7 @@ async function runInit(ctx2, args) {
   const flags = parseArgs(args);
   const root = process.cwd();
   const parent = findProject(root);
-  if (parent !== null && resolve2(parent.root) !== resolve2(root)) {
+  if (parent !== null && resolve3(parent.root) !== resolve3(root)) {
     throw new DaoyanCliError({
       code: "usage",
       message: `\u5F53\u524D\u76EE\u5F55\u4F4D\u4E8E\u5DF2\u6709\u9879\u76EE\u5185\uFF1A${parent.root}\u3002\u8BF7\u5728\u9879\u76EE\u6839\u8FD0\u884C init\uFF0C\u6216\u6362\u4E00\u4E2A\u7A7A\u76EE\u5F55`,
@@ -5423,7 +6083,7 @@ async function runInit(ctx2, args) {
   let projectCreated = false;
   if (existingProject === null) {
     say(`\u5728 ${root} \u521B\u5EFA\u65B0\u9879\u76EE\uFF08v2 \u9AA8\u67B6\uFF09`);
-    scaffoldProject(root, basename(root));
+    scaffoldProject(root, basename2(root));
     project = readProjectAt(root);
     projectCreated = true;
   } else {
@@ -5454,10 +6114,10 @@ async function runInit(ctx2, args) {
           comfyui: { ...project.comfyui ?? {}, version }
         };
         const { writeJsonAtomic: writeJsonAtomic2 } = await Promise.resolve().then(() => (init_fs(), fs_exports));
-        writeJsonAtomic2(resolve2(root, "project.json"), project);
+        writeJsonAtomic2(resolve3(root, "project.json"), project);
       }
-      const prevComfyAbs = prevLocal?.comfyui_dir !== void 0 ? isAbsolute2(prevLocal.comfyui_dir) ? prevLocal.comfyui_dir : resolve2(root, prevLocal.comfyui_dir) : null;
-      const reuseCustomEngine = flags.version === void 0 && prevLocal?.comfyui_dir !== void 0 && prevLocal.comfyui_dir !== "engine/ComfyUI" && prevComfyAbs !== null && existsSync12(join10(prevComfyAbs, "main.py"));
+      const prevComfyAbs = prevLocal?.comfyui_dir !== void 0 ? isAbsolute3(prevLocal.comfyui_dir) ? prevLocal.comfyui_dir : resolve3(root, prevLocal.comfyui_dir) : null;
+      const reuseCustomEngine = flags.version === void 0 && prevLocal?.comfyui_dir !== void 0 && prevLocal.comfyui_dir !== "engine/ComfyUI" && prevComfyAbs !== null && existsSync13(join10(prevComfyAbs, "main.py"));
       if (reuseCustomEngine) {
         say(`\u590D\u7528 engine use \u9009\u5B9A\u7684\u5F15\u64CE\u76EE\u5F55\uFF1A${prevLocal?.comfyui_dir}`);
         comfyVersion = prevLocal?.comfyui_version ?? version;
@@ -5693,18 +6353,18 @@ var init_graph = __esm({
 });
 
 // src/core/workflow/load.mts
-import { existsSync as existsSync13, readFileSync as readFileSync10 } from "fs";
-import { dirname as dirname6, join as join11 } from "path";
+import { existsSync as existsSync14, readFileSync as readFileSync11 } from "fs";
+import { dirname as dirname7, join as join11 } from "path";
 function workflowError(message, details) {
   throw new DaoyanCliError({ code: "workflow_invalid", message, details });
 }
 function loadGraphFile(abs, rel) {
-  if (!existsSync13(abs)) {
+  if (!existsSync14(abs)) {
     workflowError(`workflow \u6587\u4EF6\u4E0D\u5B58\u5728\uFF1A${rel}`, { path: rel });
   }
   let raw;
   try {
-    raw = JSON.parse(readFileSync10(abs, "utf8"));
+    raw = JSON.parse(readFileSync11(abs, "utf8"));
   } catch (e) {
     workflowError(`${rel} \u4E0D\u662F\u5408\u6CD5 JSON\uFF1A${e instanceof Error ? e.message : String(e)}`, { path: rel });
   }
@@ -5726,10 +6386,10 @@ function bindingsPathOf(workflowAbs) {
 }
 function loadBindings(workflowAbs) {
   const file = bindingsPathOf(workflowAbs);
-  if (!existsSync13(file)) return null;
+  if (!existsSync14(file)) return null;
   let raw;
   try {
-    raw = JSON.parse(readFileSync10(file, "utf8"));
+    raw = JSON.parse(readFileSync11(file, "utf8"));
   } catch (e) {
     throw new DaoyanCliError({
       code: "workflow_invalid",
@@ -5923,8 +6583,8 @@ var init_load = __esm({
 });
 
 // src/commands/validate.mts
-import { existsSync as existsSync14, readFileSync as readFileSync11, readdirSync as readdirSync3 } from "fs";
-import { isAbsolute as isAbsolute3, join as join12 } from "path";
+import { existsSync as existsSync15, readFileSync as readFileSync12, readdirSync as readdirSync3 } from "fs";
+import { isAbsolute as isAbsolute4, join as join12 } from "path";
 function fromGraphIssue(prefix, i) {
   return {
     path: `${prefix}:${i.path}`,
@@ -5936,7 +6596,7 @@ function fromGraphIssue(prefix, i) {
 }
 function validateWorkflows(root, machine, issues) {
   const dir = join12(root, WORKFLOWS_DIR);
-  if (!existsSync14(dir)) {
+  if (!existsSync15(dir)) {
     issues.push({
       path: WORKFLOWS_DIR,
       code: "workflows_dir_missing",
@@ -5962,7 +6622,7 @@ function validateWorkflows(root, machine, issues) {
     const abs = join12(dir, f);
     let raw;
     try {
-      raw = JSON.parse(readFileSync11(abs, "utf8"));
+      raw = JSON.parse(readFileSync12(abs, "utf8"));
     } catch (e) {
       issues.push({
         path: rel,
@@ -6110,7 +6770,7 @@ function validateShots(root, shots, issues) {
     const ref = s.workflow ?? shots.workflow ?? null;
     if (ref !== null) {
       const wf = resolveWorkflowRef(root, ref);
-      if (!existsSync14(wf.abs)) {
+      if (!existsSync15(wf.abs)) {
         issues.push({
           path: tag,
           code: "shot_workflow_missing",
@@ -6118,7 +6778,7 @@ function validateShots(root, shots, issues) {
           message: `workflow \u6587\u4EF6\u4E0D\u5B58\u5728\uFF1A${wf.rel}`,
           hint: "\u5148\u521B\u5EFA/\u5BFC\u5165\u8BE5 workflow\u3002"
         });
-      } else if (!existsSync14(bindingsPathOf(wf.abs))) {
+      } else if (!existsSync15(bindingsPathOf(wf.abs))) {
         issues.push({
           path: tag,
           code: "shot_bindings_missing",
@@ -6143,7 +6803,7 @@ function validateShots(root, shots, issues) {
           message: `\u951A\u70B9 key "${ff}" \u4E0D\u5728 meta.anchors`,
           hint: "\u5728 meta.anchors \u767B\u8BB0\u6216\u6539\u7528\u5B58\u5728\u7684 key\u3002"
         });
-      } else if (!existsSync14(join12(root, rel))) {
+      } else if (!existsSync15(join12(root, rel))) {
         issues.push({
           path: tag,
           code: "anchor_file_missing",
@@ -6207,8 +6867,8 @@ function validateMachine(root, machine, issues) {
     return;
   }
   if (machine.engine.mode !== "local") return;
-  const comfyDir = machine.engine.comfyui_dir !== void 0 ? isAbsolute3(machine.engine.comfyui_dir) ? machine.engine.comfyui_dir : join12(root, machine.engine.comfyui_dir) : join12(root, "engine", "ComfyUI");
-  if (!existsSync14(join12(comfyDir, "main.py"))) {
+  const comfyDir = machine.engine.comfyui_dir !== void 0 ? isAbsolute4(machine.engine.comfyui_dir) ? machine.engine.comfyui_dir : join12(root, machine.engine.comfyui_dir) : join12(root, "engine", "ComfyUI");
+  if (!existsSync15(join12(comfyDir, "main.py"))) {
     issues.push({
       path: ".dycli/machine.json",
       code: "engine_not_installed",
@@ -6217,7 +6877,7 @@ function validateMachine(root, machine, issues) {
       hint: "\u8FD0\u884C daoyan init --mode=local \u90E8\u7F72\u5F15\u64CE\u3002"
     });
   }
-  if (machine.engine.modelpath !== void 0 && !existsSync14(machine.engine.modelpath)) {
+  if (machine.engine.modelpath !== void 0 && !existsSync15(machine.engine.modelpath)) {
     issues.push({
       path: ".dycli/machine.json",
       code: "modelpath_missing",
@@ -6226,7 +6886,7 @@ function validateMachine(root, machine, issues) {
       hint: "\u91CD\u65B0 init --modelpath\uFF0C\u6216\u6302\u8F7D\u8BE5\u76EE\u5F55\u3002"
     });
   }
-  if (machine.engine.models_config !== null && machine.engine.models_config !== void 0 && !existsSync14(machine.engine.models_config)) {
+  if (machine.engine.models_config !== null && machine.engine.models_config !== void 0 && !existsSync15(machine.engine.models_config)) {
     issues.push({
       path: ".dycli/machine.json",
       code: "models_config_missing",
@@ -6243,7 +6903,7 @@ async function runValidate(ctx2) {
   const issues = [];
   if (project.default_workflow !== void 0) {
     const wf = resolveWorkflowRef(root, project.default_workflow);
-    if (!existsSync14(wf.abs)) {
+    if (!existsSync15(wf.abs)) {
       issues.push({
         path: "project.default_workflow",
         code: "default_workflow_missing",
@@ -6391,8 +7051,8 @@ var init_ffmpeg = __esm({
 });
 
 // src/core/run/store.mts
-import { copyFileSync, existsSync as existsSync15, readdirSync as readdirSync4, readFileSync as readFileSync12, renameSync as renameSync3, writeFileSync as writeFileSync5 } from "fs";
-import { basename as basename2, join as join13 } from "path";
+import { copyFileSync, existsSync as existsSync16, readdirSync as readdirSync4, readFileSync as readFileSync13, renameSync as renameSync3, writeFileSync as writeFileSync6 } from "fs";
+import { basename as basename3, join as join13 } from "path";
 function newRunId(machineId) {
   return makeId(machineId);
 }
@@ -6412,23 +7072,23 @@ function writeInputsSnapshot(root, runId, inputs, files) {
   writeJsonAtomic(join13(runDir(root, runId), RUN_INPUTS_FILE), { inputs, files });
 }
 function copyRunInput(root, runId, source, desiredName) {
-  if (!existsSync15(source)) {
+  if (!existsSync16(source)) {
     throw new DaoyanCliError({ code: "config_invalid", message: `\u8F93\u5165\u6587\u4EF6\u4E0D\u5B58\u5728\uFF1A${source}` });
   }
-  const name = basename2(desiredName ?? source).replace(/[^A-Za-z0-9._-]/g, "_");
+  const name = basename3(desiredName ?? source).replace(/[^A-Za-z0-9._-]/g, "_");
   const dir = join13(runDir(root, runId), INPUTS_DIR);
   ensureDir(dir);
   const dest = join13(dir, name);
   copyFileSync(source, dest);
-  const bytes = new Uint8Array(readFileSync12(dest));
+  const bytes = new Uint8Array(readFileSync13(dest));
   return { name, sha256: sha256(bytes), bytes: bytes.byteLength };
 }
 function writeRunOutput(root, runId, filename, bytes) {
-  const safe = basename2(filename).replace(/[^A-Za-z0-9._-]/g, "_") || "output.bin";
+  const safe = basename3(filename).replace(/[^A-Za-z0-9._-]/g, "_") || "output.bin";
   const dir = join13(runDir(root, runId), "outputs");
   ensureDir(dir);
   let name = safe;
-  for (let i = 1; existsSync15(join13(dir, name)); i++) {
+  for (let i = 1; existsSync16(join13(dir, name)); i++) {
     const dot = safe.lastIndexOf(".");
     name = dot > 0 ? `${safe.slice(0, dot)}_${i}${safe.slice(dot)}` : `${safe}_${i}`;
   }
@@ -6437,7 +7097,7 @@ function writeRunOutput(root, runId, filename, bytes) {
 }
 function writeFileAtomicBytes(file, bytes) {
   const tmp = `${file}.tmp-${process.pid}`;
-  writeFileSync5(tmp, bytes);
+  writeFileSync6(tmp, bytes);
   renameSync3(tmp, file);
 }
 function writeRun(root, record) {
@@ -6455,7 +7115,7 @@ function requireRun(root, runId) {
 }
 function listRuns(root) {
   const dir = join13(root, RUNS_DIR);
-  if (!existsSync15(dir)) return [];
+  if (!existsSync16(dir)) return [];
   const out = [];
   for (const ent of readdirSync4(dir, { withFileTypes: true })) {
     if (!ent.isDirectory()) continue;
@@ -6486,14 +7146,14 @@ var init_store2 = __esm({
 });
 
 // src/core/task/plans.mts
-import { existsSync as existsSync16, mkdirSync as mkdirSync3, statSync as statSync3 } from "fs";
-import { basename as basename3, join as join14 } from "path";
+import { existsSync as existsSync17, mkdirSync as mkdirSync3, statSync as statSync4 } from "fs";
+import { basename as basename4, join as join14 } from "path";
 function splitTarget(target) {
   const dot = target.indexOf(".");
   return { node: target.slice(0, dot), input: target.slice(dot + 1) };
 }
 function extOf(p) {
-  const b = basename3(p);
+  const b = basename4(p);
   const i = b.lastIndexOf(".");
   return i > 0 ? b.slice(i) : ".png";
 }
@@ -6611,7 +7271,7 @@ function pickRelaySource(root, upstreamId) {
     });
   }
   const abs = runOutputAbs(root, rec, chosen);
-  if (!existsSync16(abs)) {
+  if (!existsSync17(abs)) {
     throw new DaoyanCliError({
       code: "relay_upstream_missing",
       message: `\u63A5\u529B\u4E0A\u6E38\u4EA7\u7269\u4E0D\u5728\u5DE5\u4F5C\u533A\uFF08\u53EF\u80FD\u672A git lfs pull\uFF09\uFF1A${rec.run_id}/${chosen.path}`,
@@ -6640,7 +7300,7 @@ function firstFrameUpload(opts) {
       });
     }
     const src = join14(opts.root, rel);
-    if (!existsSync16(src)) {
+    if (!existsSync17(src)) {
       throw new DaoyanCliError({
         code: "anchor_not_found",
         message: `\u951A\u70B9\u56FE\u7247\u4E0D\u5B58\u5728\uFF1A${rel}`,
@@ -6670,9 +7330,9 @@ function firstFrameUpload(opts) {
   mkdirSync3(relayDir, { recursive: true });
   const cache = join14(relayDir, `relay_${upstream.id}_to_${opts.shot.id}.png`);
   let needExtract = true;
-  if (existsSync16(cache)) {
+  if (existsSync17(cache)) {
     try {
-      needExtract = statSync3(cache).mtimeMs < statSync3(sourceClip).mtimeMs;
+      needExtract = statSync4(cache).mtimeMs < statSync4(sourceClip).mtimeMs;
     } catch {
       needExtract = true;
     }
@@ -6841,7 +7501,7 @@ var init_signals = __esm({
 });
 
 // src/core/task/events.mts
-import { existsSync as existsSync17, readFileSync as readFileSync13 } from "fs";
+import { existsSync as existsSync18, readFileSync as readFileSync14 } from "fs";
 import { join as join15 } from "path";
 import { appendFileSync as appendFileSync2 } from "fs";
 function eventsPath(taskDir2) {
@@ -6849,9 +7509,9 @@ function eventsPath(taskDir2) {
 }
 function readEvents(taskDir2, fromSeq = 0) {
   const file = eventsPath(taskDir2);
-  if (!existsSync17(file)) return [];
+  if (!existsSync18(file)) return [];
   const out = [];
-  for (const line of readFileSync13(file, "utf8").split("\n")) {
+  for (const line of readFileSync14(file, "utf8").split("\n")) {
     if (line.trim() === "") continue;
     try {
       const ev = JSON.parse(line);
@@ -7081,8 +7741,8 @@ var init_preflight = __esm({
 });
 
 // src/core/run/executor.mts
-import { existsSync as existsSync18, readFileSync as readFileSync14, statSync as statSync4, openSync as openSync3, readSync as readSync2, closeSync as closeSync3 } from "fs";
-import { basename as basename4, join as join16 } from "path";
+import { existsSync as existsSync19, readFileSync as readFileSync15, statSync as statSync5, openSync as openSync3, readSync as readSync2, closeSync as closeSync3 } from "fs";
+import { basename as basename5, join as join16 } from "path";
 function collectOutputItems(outputs) {
   const out = [];
   for (const nodeOutputs of Object.values(outputs)) {
@@ -7104,10 +7764,10 @@ function collectOutputItems(outputs) {
   return out;
 }
 function readTailText(file, lines) {
-  if (!existsSync18(file)) return "";
+  if (!existsSync19(file)) return "";
   let size = 0;
   try {
-    size = statSync4(file).size;
+    size = statSync5(file).size;
   } catch {
     return "";
   }
@@ -7193,9 +7853,9 @@ async function executeRun(opts) {
     }
     for (const up of opts.plan.uploads) {
       opts.event("upload_started", { run_id: opts.runId, logical: up.logical });
-      const bytes = new Uint8Array(readFileSync14(up.source));
+      const bytes = new Uint8Array(readFileSync15(up.source));
       files.push(copyRunInput(opts.root, opts.runId, up.source, up.desiredName));
-      const engineName = `dycli_${opts.runId}_${basename4(up.desiredName).replace(/[^A-Za-z0-9._-]/g, "_")}`;
+      const engineName = `dycli_${opts.runId}_${basename5(up.desiredName).replace(/[^A-Za-z0-9._-]/g, "_")}`;
       const name = await opts.session.client.uploadImage(engineName, bytes, true);
       opts.accumulator.uploaded.push(name);
       const target = graph[up.target.node];
@@ -7402,9 +8062,9 @@ function patchRunCleanup(opts) {
   let first = true;
   for (const runId of opts.runIds) {
     const file = join16(opts.root, "runs", runId, "run.json");
-    if (!existsSync18(file)) continue;
+    if (!existsSync19(file)) continue;
     try {
-      const rec = JSON.parse(readFileSync14(file, "utf8"));
+      const rec = JSON.parse(readFileSync15(file, "utf8"));
       rec.engine.cleanup = opts.cleanup;
       if (opts.gpu !== void 0) {
         const gpu = { ...opts.gpu, restored: opts.restored };
@@ -7444,8 +8104,8 @@ var init_executor = __esm({
 });
 
 // src/core/task/worker.mts
-import { existsSync as existsSync19, readdirSync as readdirSync5 } from "fs";
-import { basename as basename5, dirname as dirname7, join as join17, resolve as resolve3 } from "path";
+import { existsSync as existsSync20, readdirSync as readdirSync5 } from "fs";
+import { basename as basename6, dirname as dirname8, join as join17, resolve as resolve4 } from "path";
 function isFatalRunError(code) {
   return code === "engine_oom" || code === "engine_crashed" || code === "engine_unreachable" || code === "engine_busy" || code === "engine_start_failed" || code === "engine_stop_failed" || code === "gpu_lease_corrupt" || code === "machine_busy" || code === "machine_lock_corrupt" || code === "worker_start_failed";
 }
@@ -7489,9 +8149,9 @@ function aggregateFailure(kind, failures, completed) {
   };
 }
 async function runWorker(opts) {
-  const taskDir2 = resolve3(opts.taskDir);
-  const root = dirname7(dirname7(taskDir2));
-  const taskId = basename5(taskDir2);
+  const taskDir2 = resolve4(opts.taskDir);
+  const root = dirname8(dirname8(taskDir2));
+  const taskId = basename6(taskDir2);
   let task = requireTask(root, taskId);
   if (isTerminalStatus(task.status)) return 0;
   let lock = null;
@@ -7849,7 +8509,7 @@ var init_worker = __esm({
 });
 
 // src/core/task/create.mts
-import { closeSync as closeSync4, openSync as openSync4, readFileSync as readFileSync15 } from "fs";
+import { closeSync as closeSync4, openSync as openSync4, readFileSync as readFileSync16 } from "fs";
 import { spawn as spawn6 } from "child_process";
 import { join as join18 } from "path";
 function sleepMs(ms) {
@@ -7961,7 +8621,7 @@ function taskRuns(root, task) {
   const out = [];
   for (const id of task.runs) {
     try {
-      const raw = JSON.parse(readFileSync15(join18(root, "runs", id, RUN_FILE), "utf8"));
+      const raw = JSON.parse(readFileSync16(join18(root, "runs", id, RUN_FILE), "utf8"));
       out.push(raw);
     } catch {
     }
@@ -8092,7 +8752,7 @@ var init_create = __esm({
 });
 
 // src/core/run/summary.mts
-import { existsSync as existsSync20 } from "fs";
+import { existsSync as existsSync21 } from "fs";
 import { join as join19 } from "path";
 function outputSummaries(root, rec) {
   return rec.outputs.map((o) => {
@@ -8103,7 +8763,7 @@ function outputSummaries(root, rec) {
       abs_path: abs,
       sha256: o.sha256,
       bytes: o.bytes,
-      present: existsSync20(abs)
+      present: existsSync21(abs)
     };
   });
 }
@@ -8521,7 +9181,7 @@ var init_shot = __esm({
 });
 
 // src/commands/wrap.mts
-import { existsSync as existsSync21, mkdirSync as mkdirSync4, writeFileSync as writeFileSync6 } from "fs";
+import { existsSync as existsSync22, mkdirSync as mkdirSync4, writeFileSync as writeFileSync7 } from "fs";
 import { join as join20 } from "path";
 function pickVideoAt(root, rec) {
   const chosen = rec.outputs.find((o) => /\.(mp4|webm|mkv|mov|gif)$/i.test(o.name)) ?? rec.outputs[0];
@@ -8565,7 +9225,7 @@ async function runWrap(ctx2, args) {
       continue;
     }
     const pick = pickVideoAt(root, rec);
-    if (pick === null || !existsSync21(pick.abs)) {
+    if (pick === null || !existsSync22(pick.abs)) {
       missing.push(shot.id);
       continue;
     }
@@ -8586,7 +9246,7 @@ async function runWrap(ctx2, args) {
   const manifestName = `cut-${ts2}.json`;
   const manifestPath = join20(finalDir, manifestName);
   const listFile = join20(root, CONCAT_LIST_FILE);
-  writeFileSync6(
+  writeFileSync7(
     listFile,
     clips.map((c) => `file '${c.abs.replace(/'/g, "'\\''")}'`).join("\n") + "\n"
   );
@@ -8627,7 +9287,7 @@ async function runWrap(ctx2, args) {
     missing,
     ffmpeg: { codec: "libx264", crf: 18, pix_fmt: "yuv420p", faststart: true }
   };
-  writeFileSync6(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
+  writeFileSync7(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
   const data = {
     output: `${FINAL_DIR}/${outName}`,
     abs_path: outPath,
@@ -8661,7 +9321,7 @@ var init_wrap = __esm({
 });
 
 // src/commands/logs.mts
-import { closeSync as closeSync5, existsSync as existsSync22, openSync as openSync5, readSync as readSync3, readdirSync as readdirSync6, statSync as statSync5 } from "fs";
+import { closeSync as closeSync5, existsSync as existsSync23, openSync as openSync5, readSync as readSync3, readdirSync as readdirSync6, statSync as statSync6 } from "fs";
 import { join as join21 } from "path";
 function parseArgs2(args) {
   const out = { follow: false, n: 100, src: "all" };
@@ -8726,10 +9386,10 @@ function cleanLines(raw) {
   return out;
 }
 function readTail(file, n) {
-  if (!existsSync22(file)) return [];
+  if (!existsSync23(file)) return [];
   let size = 0;
   try {
-    size = statSync5(file).size;
+    size = statSync6(file).size;
   } catch {
     return [];
   }
@@ -8746,8 +9406,8 @@ function readTail(file, n) {
 }
 function fileSources(root, src) {
   const dir = join21(root, LOG_DIR);
-  const engines = existsSync22(dir) ? readdirSync6(dir).filter((f) => /^engine-.*\.log$/.test(f)).sort().reverse() : [];
-  const workers = existsSync22(dir) ? readdirSync6(dir).filter((f) => /^worker-.*\.log$/.test(f)).sort().reverse() : [];
+  const engines = existsSync23(dir) ? readdirSync6(dir).filter((f) => /^engine-.*\.log$/.test(f)).sort().reverse() : [];
+  const workers = existsSync23(dir) ? readdirSync6(dir).filter((f) => /^worker-.*\.log$/.test(f)).sort().reverse() : [];
   const all = [
     ...workers[0] !== void 0 ? [{ name: "worker", file: join21(dir, workers[0]) }] : [],
     ...engines[0] !== void 0 ? [{ name: "engine", file: join21(dir, engines[0]) }] : [],
@@ -8843,7 +9503,7 @@ async function runLogs(ctx2, args) {
     return taskEvents(ctx2, root, taskId, flags);
   }
   const sources = fileSources(root, flags.src);
-  const existing = sources.filter((s) => existsSync22(s.file));
+  const existing = sources.filter((s) => existsSync23(s.file));
   if (existing.length === 0) {
     if (ctx2.json) {
       emitData({ sources: {}, note: "\u6682\u65E0\u65E5\u5FD7\u6587\u4EF6\uFF1B\u8FD0\u884C\u4EFB\u52A1\u540E\u53EF\u7528 logs --task <id>" });
@@ -8867,7 +9527,7 @@ async function runLogs(ctx2, args) {
   for (const s of existing) {
     for (const l of readTail(s.file, flags.n)) process.stdout.write(`${l}
 `);
-    offsets.set(s.file, statSync5(s.file).size);
+    offsets.set(s.file, statSync6(s.file).size);
   }
   let stop = false;
   const off = onSignal(() => {
@@ -8877,10 +9537,10 @@ async function runLogs(ctx2, args) {
     while (!stop) {
       await new Promise((r) => setTimeout(r, 500));
       for (const s of existing) {
-        if (!existsSync22(s.file)) continue;
+        if (!existsSync23(s.file)) continue;
         let size = 0;
         try {
-          size = statSync5(s.file).size;
+          size = statSync6(s.file).size;
         } catch {
           continue;
         }
@@ -8931,7 +9591,7 @@ var init_logs = __esm({
 });
 
 // src/commands/status.mts
-import { existsSync as existsSync23 } from "fs";
+import { existsSync as existsSync24 } from "fs";
 import { join as join22 } from "path";
 function parseArgs3(args) {
   const out = { wait: false };
@@ -8998,7 +9658,7 @@ function shotProgress(root, shots) {
   if (shots === null) return [];
   return shots.shots.map((s) => {
     const rec = latestSucceededRun(root, `shot:${s.id}`);
-    const present = rec !== null && rec.outputs.some((o) => existsSync23(join22(root, RUNS_DIR, rec.run_id, o.path)));
+    const present = rec !== null && rec.outputs.some((o) => existsSync24(join22(root, RUNS_DIR, rec.run_id, o.path)));
     return {
       id: s.id,
       slug: s.slug ?? null,
@@ -9240,8 +9900,8 @@ var init_status = __esm({
 });
 
 // src/commands/engine.mts
-import { existsSync as existsSync24, readdirSync as readdirSync7 } from "fs";
-import { isAbsolute as isAbsolute4, join as join23, relative, resolve as resolve4 } from "path";
+import { existsSync as existsSync25, readdirSync as readdirSync7 } from "fs";
+import { isAbsolute as isAbsolute5, join as join23, relative, resolve as resolve5 } from "path";
 async function comfyTags(limit) {
   try {
     const res = await fetch(COMFY_TAGS_API, {
@@ -9266,7 +9926,7 @@ function localVersions(root) {
 function currentDirs(root, engine) {
   const anchor = (p, fallback) => {
     if (p === void 0 || p === "") return join23(root, fallback);
-    return isAbsolute4(p) ? p : join23(root, p);
+    return isAbsolute5(p) ? p : join23(root, p);
   };
   return {
     comfyDir: anchor(engine.comfyui_dir, join23("engine", "ComfyUI")),
@@ -9275,7 +9935,7 @@ function currentDirs(root, engine) {
 }
 function portablePath(root, abs) {
   const rel = relative(root, abs);
-  return rel === "" || rel.startsWith("..") || isAbsolute4(rel) ? abs : rel.split("\\").join("/");
+  return rel === "" || rel.startsWith("..") || isAbsolute5(rel) ? abs : rel.split("\\").join("/");
 }
 async function runEngine(ctx2, args) {
   const sub = args[0];
@@ -9301,7 +9961,7 @@ async function runEngine(ctx2, args) {
           mode: "local",
           comfyui_dir: portablePath(found.root, dirs.comfyDir),
           venv_dir: portablePath(found.root, dirs.venvDir),
-          installed: existsSync24(join23(dirs.comfyDir, "main.py")),
+          installed: existsSync25(join23(dirs.comfyDir, "main.py")),
           version: machine2.engine.comfyui_version ?? found.config.comfyui?.version ?? null
         };
       } else if (machine2 !== null && machine2.engine.mode === "remote") {
@@ -9349,7 +10009,7 @@ async function runEngine(ctx2, args) {
     });
     try {
       const base = join23(root, "engine", "versions", tag);
-      if (existsSync24(join23(base, "ComfyUI", "main.py")) && existsSync24(join23(base, ".venv", "bin", "python"))) {
+      if (existsSync25(join23(base, "ComfyUI", "main.py")) && existsSync25(join23(base, ".venv", "bin", "python"))) {
         say(`\u7248\u672C ${tag} \u5DF2\u5B89\u88C5\uFF1A${portablePath(root, base)}`);
       } else {
         say(`\u5B89\u88C5 ComfyUI ${tag} \u2192 engine/versions/${tag} ...`);
@@ -9380,14 +10040,14 @@ async function runEngine(ctx2, args) {
       kind: "metadata"
     });
     try {
-      const asPath = resolve4(root, target);
+      const asPath = resolve5(root, target);
       let comfyDir;
       let venvDir;
       let version;
-      if (existsSync24(join23(asPath, "main.py"))) {
+      if (existsSync25(join23(asPath, "main.py"))) {
         comfyDir = asPath;
         venvDir = join23(asPath, ".venv");
-        if (!existsSync24(join23(venvDir, "bin", "python"))) {
+        if (!existsSync25(join23(venvDir, "bin", "python"))) {
           throw new DaoyanCliError({
             code: "config_invalid",
             message: `\u8DEF\u5F84\u4E0B\u7F3A\u5C11 venv\uFF1A${join23(venvDir, "bin", "python")}`
@@ -9397,13 +10057,13 @@ async function runEngine(ctx2, args) {
         const base = join23(root, "engine", "versions", target);
         comfyDir = join23(base, "ComfyUI");
         venvDir = join23(base, ".venv");
-        if (!existsSync24(join23(comfyDir, "main.py"))) {
+        if (!existsSync25(join23(comfyDir, "main.py"))) {
           throw new DaoyanCliError({
             code: "provision_failed",
             message: `\u672A\u627E\u5230\u7248\u672C ${target}\uFF08${portablePath(root, comfyDir)}\uFF09\u3002\u5148\u5B89\u88C5\uFF1Adaoyan engine install ${target}`
           });
         }
-        if (!existsSync24(join23(venvDir, "bin", "python"))) {
+        if (!existsSync25(join23(venvDir, "bin", "python"))) {
           throw new DaoyanCliError({
             code: "provision_failed",
             message: `\u7248\u672C ${target} \u7F3A\u5C11 venv\uFF1A${portablePath(root, venvDir)}`
@@ -9708,11 +10368,11 @@ var init_ops = __esm({
 });
 
 // src/commands/workflow.mts
-import { existsSync as existsSync25, readFileSync as readFileSync16, readdirSync as readdirSync8 } from "fs";
-import { basename as basename6, join as join24, resolve as resolve5 } from "path";
+import { existsSync as existsSync26, readFileSync as readFileSync17, readdirSync as readdirSync8 } from "fs";
+import { basename as basename7, join as join24, resolve as resolve6 } from "path";
 function readStdin() {
   try {
-    return readFileSync16(0, "utf8");
+    return readFileSync17(0, "utf8");
   } catch (e) {
     throw new DaoyanCliError({
       code: "usage",
@@ -9783,7 +10443,7 @@ async function ensureCatalog(opts) {
   }
 }
 function readOpsFile(path) {
-  const text = path === "-" ? readStdin() : readFileSync16(path, "utf8");
+  const text = path === "-" ? readStdin() : readFileSync17(path, "utf8");
   try {
     return parseOpsPayload(JSON.parse(text));
   } catch (e) {
@@ -9796,9 +10456,9 @@ function readOpsFile(path) {
   }
 }
 function isEmptyPlaceholder(abs) {
-  if (!existsSync25(abs)) return false;
+  if (!existsSync26(abs)) return false;
   try {
-    const parsed = parseGraph(JSON.parse(readFileSync16(abs, "utf8")));
+    const parsed = parseGraph(JSON.parse(readFileSync17(abs, "utf8")));
     return !hasGraphErrors(parsed.issues) && Object.keys(parsed.graph).length === 0;
   } catch {
     return false;
@@ -9820,7 +10480,7 @@ async function runWorkflow(ctx2, args) {
     const { root } = requireProject(ctx2);
     const target = resolveWorkflowRef(root, name);
     const replaced = isEmptyPlaceholder(target.abs);
-    if (existsSync25(target.abs) && !replaced) {
+    if (existsSync26(target.abs) && !replaced) {
       throw new DaoyanCliError({ code: "usage", message: `workflow ${name} \u5DF2\u5B58\u5728\uFF1A${target.rel}`, exit: 2 });
     }
     ensureDir(join24(root, WORKFLOWS_DIR));
@@ -9845,10 +10505,10 @@ async function runWorkflow(ctx2, args) {
     const { root } = requireProject(ctx2);
     const target = resolveWorkflowRef(root, name);
     const replaced = isEmptyPlaceholder(target.abs);
-    if (existsSync25(target.abs) && !replaced) {
+    if (existsSync26(target.abs) && !replaced) {
       throw new DaoyanCliError({ code: "usage", message: `workflow ${name} \u5DF2\u5B58\u5728`, exit: 2 });
     }
-    const loaded = loadGraphFile(resolve5(process.cwd(), source), basename6(source));
+    const loaded = loadGraphFile(resolve6(process.cwd(), source), basename7(source));
     saveGraphFile(target.abs, loaded.graph);
     if (ctx2.json) emitData({ name, path: target.rel, replaced_placeholder: replaced, graph_sha256: loaded.sha256 });
     else say(`\u5DF2\u5BFC\u5165 ${target.rel}`);
@@ -9857,10 +10517,10 @@ async function runWorkflow(ctx2, args) {
   if (sub === "list") {
     const { root } = requireProject(ctx2);
     const dir = join24(root, WORKFLOWS_DIR);
-    const items = existsSync25(dir) ? readdirSync8(dir).filter((f) => f.endsWith(".json") && !f.endsWith(BINDINGS_SUFFIX)).sort().map((f) => {
+    const items = existsSync26(dir) ? readdirSync8(dir).filter((f) => f.endsWith(".json") && !f.endsWith(BINDINGS_SUFFIX)).sort().map((f) => {
       const abs = join24(dir, f);
       try {
-        const parsed = parseGraph(JSON.parse(readFileSync16(abs, "utf8")));
+        const parsed = parseGraph(JSON.parse(readFileSync17(abs, "utf8")));
         const stats = graphStats(parsed.graph);
         return {
           name: f.slice(0, -".json".length),
@@ -9914,7 +10574,7 @@ async function runWorkflow(ctx2, args) {
       nodes: stats.nodes,
       links: stats.links,
       graph_sha256: loaded.sha256,
-      bindings: existsSync25(bindingsPathOf(ref.abs)) ? bindingsPathOf(ref.abs).slice(root.length + 1) : null,
+      bindings: existsSync26(bindingsPathOf(ref.abs)) ? bindingsPathOf(ref.abs).slice(root.length + 1) : null,
       ...full ? { graph: loaded.graph } : { node_list: nodeSummaries(loaded.graph) }
     };
     if (ctx2.json) {
@@ -10074,7 +10734,7 @@ async function runWorkflow(ctx2, args) {
     const ref = resolveWorkflowRef(root, name);
     let raw;
     try {
-      raw = JSON.parse(readFileSync16(ref.abs, "utf8"));
+      raw = JSON.parse(readFileSync17(ref.abs, "utf8"));
     } catch (e) {
       throw new DaoyanCliError({
         code: "workflow_invalid",
@@ -10547,11 +11207,78 @@ var init_registry = __esm({
       {
         name: "update",
         group: "meta",
-        summary: "\u81EA\u5347\u7EA7\uFF08\u68C0\u6D4B GitHub \u6700\u65B0 tag\uFF1B--check \u4EC5\u68C0\u6D4B\uFF09",
-        usage: "daoyan update [--check]",
-        flags: [{ name: "--check", type: "boolean", description: "\u53EA\u68C0\u6D4B\u4E0D\u5B89\u88C5" }],
+        summary: "\u81EA\u5347\u7EA7\uFF08\u9ED8\u8BA4 GitHub\uFF1B\u652F\u6301\u81EA\u5B9A\u4E49 manifest / tgz / \u4EE3\u7406\uFF09",
+        usage: "daoyan update [--check] [--manifest <url|\u8DEF\u5F84>] [--from <\u8DEF\u5F84|URL>] [--sha256 <hex>] [--proxy <url>]",
+        flags: [
+          { name: "--check", type: "boolean", description: "\u53EA\u68C0\u6D4B\u4E0D\u5B89\u88C5" },
+          { name: "--manifest", type: "string", description: "\u81EA\u5B9A\u4E49 latest.json\uFF08URL \u6216\u672C\u5730\u8DEF\u5F84\uFF09" },
+          { name: "--from", type: "string", description: "\u76F4\u63A5\u5B89\u88C5\u6307\u5B9A tgz\uFF08\u672C\u5730\u8DEF\u5F84\u6216 http(s) URL\uFF09" },
+          { name: "--sha256", type: "string", description: "--from \u7684 SHA-256 \u6821\u9A8C\u503C\uFF08\u8FDC\u7A0B\u5FC5\u586B\uFF09" },
+          { name: "--proxy", type: "string", description: "\u672C\u6B21\u66F4\u65B0\u4F7F\u7528\u7684 http/https/socks5 \u4EE3\u7406" }
+        ],
+        examples: [
+          "daoyan update --check",
+          "daoyan update source https://mirror.example.com/daoyan/latest.json",
+          "daoyan update --manifest ./latest.json",
+          "daoyan update --from ./daoyan-cli-0.0.4.tgz",
+          "daoyan update proxy http://127.0.0.1:7890"
+        ],
         implemented: true,
+        jsonShape: {
+          current: "string",
+          latest: "string|null",
+          updateAvailable: "boolean",
+          source: "github|manifest|from",
+          manifest: "string|null",
+          note: "string|null"
+        },
         run: (ctx2, args) => runUpdate(ctx2, args)
+      },
+      {
+        name: "update proxy",
+        group: "meta",
+        summary: "\u67E5\u770B/\u8BBE\u7F6E/\u6E05\u9664\u81EA\u66F4\u65B0\u4EE3\u7406\uFF08~/.dycli/update.json\uFF09",
+        usage: "daoyan update proxy [<url>|--unset]",
+        args: [
+          {
+            name: "url",
+            type: "string",
+            required: false,
+            description: "http/https/socks5/socks5h \u4EE3\u7406\u5730\u5740\uFF1B\u7701\u7565\u65F6\u663E\u793A\u5F53\u524D\u503C"
+          }
+        ],
+        flags: [{ name: "--unset", type: "boolean", description: "\u6E05\u9664\u5DF2\u4FDD\u5B58\u7684\u4EE3\u7406" }],
+        examples: [
+          "daoyan update proxy http://127.0.0.1:7890",
+          "daoyan update proxy --unset",
+          "daoyan update proxy --json"
+        ],
+        implemented: true,
+        jsonShape: { proxy: "string|null", path: "string" },
+        run: (ctx2, args) => runUpdate(ctx2, ["proxy", ...args])
+      },
+      {
+        name: "update source",
+        group: "meta",
+        summary: "\u67E5\u770B/\u8BBE\u7F6E/\u6E05\u9664\u81EA\u66F4\u65B0\u6E90\uFF08latest.json URL \u6216\u672C\u5730\u8DEF\u5F84\uFF09",
+        usage: "daoyan update source [<manifest>|--unset]",
+        args: [
+          {
+            name: "manifest",
+            type: "string",
+            required: false,
+            description: "latest.json \u7684 http(s) URL \u6216\u672C\u5730\u8DEF\u5F84\uFF1B\u7701\u7565\u65F6\u663E\u793A\u5F53\u524D\u503C"
+          }
+        ],
+        flags: [{ name: "--unset", type: "boolean", description: "\u6062\u590D\u9ED8\u8BA4 GitHub \u6E90" }],
+        examples: [
+          "daoyan update source https://mirror.example.com/daoyan/latest.json",
+          "daoyan update source /data/mirror/daoyan/latest.json",
+          "daoyan update source --unset"
+        ],
+        implemented: true,
+        jsonShape: { manifest: "string|null", path: "string" },
+        run: (ctx2, args) => runUpdate(ctx2, ["source", ...args])
       }
     ];
   }

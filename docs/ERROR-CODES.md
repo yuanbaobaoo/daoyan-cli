@@ -1,35 +1,87 @@
-# 错误码
+# 错误码（v0.1）
 
-全部错误码为稳定字符串枚举（`src/shared/errors.mts`），同时登记在
-`daoyan help --json` 的 `errorCodes` 字段中。`--json` 模式下失败信封为：
+## 信封
+
+成功：
 
 ```json
-{ "ok": false, "error": { "code": "relay_upstream_missing", "message": "…", "details": {} } }
+{ "ok": true, "schema_version": 1, "data": {} }
 ```
 
-| code | 默认退出码 | 触发场景 |
-|---|---|---|
-| `usage` | 2 | 参数缺失 / 未识别的参数或命令 |
-| `not_implemented` | 1 | 命令尚未到达其里程碑（M0 占位期） |
-| `project_not_found` | 1 | 向上未找到 project.json（`--project` 指错路径） |
-| `config_invalid` | 1 | project.json 非法 JSON / 缺少必填字段 |
-| `validation_failed` | 1 | validate 未通过（details 携带逐项结果） |
-| `anchor_not_found` | 1 | first_frame 引用的锚点 key 或图片文件不存在 |
-| `relay_upstream_missing` | 1 | 接力上游的成片不存在（应先拍上游） |
-| `engine_not_ready` | 1 | 引擎未运行 / 就绪超时 / 关键节点未注册 |
-| `engine_start_failed` | 1 | up 启动失败（details 携带日志尾） |
-| `engine_busy` | 1 | 引擎队列已有执行中任务，拒绝并行提交 |
-| `lock_held` | 1 | 已有任务运行中（details 携带 pid / 描述 / 开始时间） |
-| `gpu_evict_failed` | 1 | 容器模型卸载失败（部分成功继续，失败累计到阈值报错） |
-| `shot_failed` | 1 | 引擎返回 error / cancelled，或产物落位失败 |
-| `shot_timeout` | 1 | 单镜等待超时（`--timeout`，默认 3 小时） |
-| `external_tool_missing` | 1 | 外部组件缺失：python3 / git / npm / ffmpeg / k3s crictl 等 |
-| `update_failed` | 1 | 自升级失败（GitHub 检测 / npm pack / npm install，含 EACCES 权限指引） |
-| `provision_failed` | 1 | 引擎供应失败：venv 创建 / git clone / pip 安装 / 版本不存在 |
-| `wrap_failed` | 1 | 合片失败：镜头不足 / ffmpeg 退出非零 |
+失败：
 
-## 约定
+```json
+{
+  "ok": false,
+  "schema_version": 1,
+  "error": {
+    "code": "machine_busy",
+    "message": "another task is running",
+    "retryable": true,
+    "retry_after_ms": 5000,
+    "hint": "...",
+    "task_id": "t_...",
+    "run_id": null,
+    "next_actions": ["status --task <id>", "run cancel <id>"],
+    "details": {}
+  }
+}
+```
 
-- 新增错误码必须同步三处：`errors.mts` 枚举、本文件、`help --json` 输出（自动来自枚举）。
-- code 一旦发布即冻结，只能新增不能改义——下游 agent 依赖它做分支决策。
-- 人类可读模式输出格式：`ERROR[code] message`（stderr）。
+`code` 一旦发布即冻结；新增字段向后兼容。`schema_version` 只在破坏性变更时递增。
+
+## 错误目录
+
+| code | retryable | retry_after_ms | 场景 / hint |
+|---|---|---|---|
+| `usage` | 否 | — | 参数缺失/未知；`daoyan help --json` |
+| `not_implemented` | 否 | — | 保留占位 |
+| `project_not_found` | 否 | — | 无 `project.json`；在项目内运行或 `--project` |
+| `config_invalid` | 否 | — | project/machine/shots/缓存结构非法 |
+| `validation_failed` | 否 | — | `validate` 有 error；看 `details.issues` |
+| `workflow_invalid` | 否 | — | 图/bindings/引用非法；`workflow validate` |
+| `skill_write_failed` | 否 | — | 生成 `.agents` 或 `AGENTS.md` 失败 |
+| `external_tool_missing` | 否 | — | python3/git/ffmpeg 等缺失 |
+| `update_failed` | 是 | — | 自升级失败 |
+| `provision_failed` | 是 | — | 引擎部署失败 |
+| `artifact_download_failed` | 是 | — | `/view` 下载失败；引擎 scratch 保留 |
+| `engine_not_ready` | 是 | 5000 | 引擎未就绪 |
+| `engine_start_failed` | 否 | — | local 启动失败/就绪超时；看 `logs/engine-*.log` |
+| `engine_stop_failed` | 是 | 10000 | local 停止失败；下次任务回收 |
+| `engine_unreachable` | 是 | 10000 | remote 不可达；不代启 |
+| `engine_busy` | 是 | 10000 | remote 队列忙；不提交、不 `/free` |
+| `engine_crashed` | 是 | — | local 引擎执行中退出 |
+| `engine_oom` | 是 | — | 显存不足；降分辨率/帧数，或开启 `gpu.takeover` |
+| `cleanup_failed` | 否 | — | 附加在原始错误 `details.cleanup`；不覆盖主错误 |
+| `machine_busy` | 是 | 5000 | 同设备已有 generation task；看 owner，等待或取消 |
+| `machine_lock_corrupt` | 否 | — | 锁损坏；确认无任务后删除 `~/.dycli/machine.lock` |
+| `task_not_found` | 否 | — | task id 不存在 |
+| `run_not_found` | 否 | — | run id 不存在 |
+| `worker_start_failed` | 是 | — | detached worker 启动失败 |
+| `worker_crashed` | 是 | — | worker 退出；task `interrupted`，下次任务 stale 恢复 |
+| `run_failed` | 否 | — | 通用执行失败 |
+| `run_timeout` | 是 | — | 任务超时；提高 `--timeout` |
+| `shot_failed` | 否 | — | 镜头失败（多 run task 汇总） |
+| `shot_timeout` | 是 | — | 镜头超时 |
+| `anchor_not_found` | 否 | — | 锚点 key/文件不存在 |
+| `relay_upstream_missing` | 否 | — | 上游无成功 run/产物 |
+| `model_not_found` | 否 | — | loader 枚举不匹配；检查 modelpath/文件名 |
+| `node_missing` | 否 | — | 引擎缺节点类；安装 custom node |
+| `gpu_unsupported` | 否 | — | 平台不支持接管；任务继续 |
+| `gpu_takeover_failed` | 否 | — | 某个内置目标卸载/驱逐失败；任务继续 |
+| `gpu_restore_failed` | 是 | — | 恢复失败；租约保留，下次 local 任务重试 |
+| `gpu_lease_corrupt` | 否 | — | 租约损坏；确认无任务后处理 `~/.dycli/gpu/lease.json` |
+| `wrap_failed` | 否 | — | 片段不足/ffmpeg 失败 |
+
+## 重试分类
+
+- **立即重试**：`machine_busy`、`engine_busy`（按 `retry_after_ms`）；
+- **修改配置后重试**：`engine_oom`、`model_not_found`、`node_missing`、`gpu_restore_failed`；
+- **终止**：`workflow_invalid`、`usage`、`config_invalid`、`validation_failed`。
+
+## 清理语义
+
+- 未提交 prompt：不 `/free`；local 仍停止引擎；
+- 提交后 OOM/取消/超时：`/interrupt` → `/free` → 停止 → GPU 恢复；
+- `cleanup_failed` / cleanup errors 只作为附加信息；
+- 产物下载失败时不删除引擎 scratch，保留人工恢复可能。

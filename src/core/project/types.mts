@@ -1,69 +1,261 @@
-/** 项目数据模型 —— shots.json 字段语义（v1 格式）；
- *  project.json 集中声明环境配置。完整文档见 docs/DATA-MODEL.md。 */
+/** 项目数据模型 —— project.json v2（共享层）、.dycli/machine.json（本机层）、
+ *  task / run 记录与 shots recipe 的类型定义。完整文档见 docs/DATA-MODEL.md。
+ *  原则：共享记录不写绝对路径；本机路径只出现在 machine.json。 */
 
 // —— 项目布局常量：文件名 / 目录名（全仓唯一声明处，其余位置一律引用） ——
-// 项目配置文件名（自 cwd 向上寻找的锚点）
+// 共享：项目配置（自 cwd 向上寻找的锚点）
 export const PROJECT_FILE = "project.json";
-// 分镜表文件名
+// 共享：视频 recipe
 export const SHOTS_FILE = "shots.json";
-// 日志与运行产物目录（任务流日志 / 引擎日志 / 任务锁 / 引擎 PID 均在其下）
+// 共享：工作流目录
+export const WORKFLOWS_DIR = "workflows";
+// 共享：逻辑输入映射（<name>.bindings.json 与同目录）
+export const BINDINGS_SUFFIX = ".bindings.json";
+// 共享：原始素材
+export const INPUTS_DIR = "inputs";
+// 共享：任务记录
+export const TASKS_DIR = "tasks";
+// 共享：运行记录与产物
+export const RUNS_DIR = "runs";
+// 共享：最终合片
+export const FINAL_DIR = "final";
+// 共享：Agent Skill
+export const AGENTS_DIR = ".agents";
+export const SKILL_DIR = ".agents/skills/daoyan";
+export const AGENTS_FILE = "AGENTS.md";
+// 本机：项目级私有目录（gitignored）
+export const LOCAL_DIR = ".dycli";
+export const MACHINE_FILE = ".dycli/machine.json";
+export const CATALOG_FILE = ".dycli/node_catalog.json";
+export const EXTRA_MODELS_FILE = ".dycli/extra_model_paths.yaml";
+// 本机：引擎与日志
+export const ENGINE_DIR = "engine";
 export const LOG_DIR = "logs";
-// 任务流日志文件名（位于 LOG_DIR）
-export const TOOL_LOG_FILE = "daoyan-cli.log";
-// 引擎日志文件名（位于 LOG_DIR）
-export const ENGINE_LOG_FILE = "engine.log";
-// 引擎 PID 文件名（位于 LOG_DIR）
 export const ENGINE_PID_FILE = "engine.pid";
-// 任务锁文件名（位于 LOG_DIR）
-export const TASK_LOCK_FILE = "task.lock";
-// 每镜产物快照目录（manifest 落盘位置，断点归因依据）
-export const MANIFESTS_DIR = "manifests";
+// 任务事件文件（位于 tasks/<task_id>/）
+export const TASK_FILE = "task.json";
+export const EVENTS_FILE = "events.jsonl";
+// run 目录内文件
+export const RUN_FILE = "run.json";
+export const RUN_WORKFLOW_FILE = "workflow.json";
+export const RUN_INPUTS_FILE = "inputs.json";
+// 任务取消请求文件（位于 tasks/<task_id>/）
+export const CANCEL_FILE = "cancel.request";
+// 合片 ffmpeg 列表临时文件（项目根，gitignored）
+export const CONCAT_LIST_FILE = "concat_list.txt";
+// 中间接力帧缓存（项目根，gitignored）
+export const RELAY_DIR = "relay_frames";
 
 /**
- * first_frame 三形态：锚点 key / 接力 / 纯 T2V
+ * 可写入 JSON 的标量/复合值（工作流输入）。
+ */
+export type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | JsonValue[]
+  | { [k: string]: JsonValue };
+
+/**
+ * 自定义节点安装声明（共享层，repo + ref 可跨机器复现）。
+ */
+export interface CustomNodeSpec {
+  /**
+   * 目录名（安装到 engine/ComfyUI/custom_nodes/<name>）。
+   */
+  name: string;
+  /**
+   * Git clone 地址。
+   */
+  repo: string;
+  /**
+   * 分支 / tag / commit。
+   */
+  ref?: string;
+}
+
+/**
+ * project.json（共享，进 Git，不含绝对路径与机器差异）。
+ */
+export interface ProjectConfig {
+  /**
+   * 项目名（init 用目录名生成，仅展示用）。
+   */
+  name: string;
+  /**
+   * schema 版本（当前固定 2）。
+   */
+  version: 2;
+  /**
+   * 默认 workflow（相对项目根，如 workflows/t2v.json）。
+   */
+  default_workflow?: string;
+  /**
+   * GPU 接管开关（项目级策略，remote 忽略）。
+   */
+  gpu?: {
+    /**
+     * 默认 false；true = local 任务前自动接管内置目标，任务后恢复。
+     */
+    takeover?: boolean;
+  };
+  /**
+   * ComfyUI 版本与 custom nodes pin（local 模式 init 使用）。
+   */
+  comfyui?: {
+    /**
+     * ComfyUI tag（如 v0.3.40）。
+     */
+    version?: string;
+    /**
+     * 需要安装的自定义节点。
+     */
+    custom_nodes?: CustomNodeSpec[];
+  };
+}
+
+/**
+ * remote 模式的模型释放策略。
+ */
+export type FreeStrategy = "always" | "when_idle" | "never";
+
+/**
+ * .dycli/machine.json 的 local 引擎段。
+ */
+export interface MachineLocalEngine {
+  /**
+   * 固定 local。
+   */
+  mode: "local";
+  /**
+   * 外部模型根目录（绝对路径）；省略时使用 engine/ComfyUI/models。
+   */
+  modelpath?: string;
+  /**
+   * 自定义 extra_model_paths.yaml（绝对路径）；设置后忽略自动生成。
+   */
+  models_config?: string | null;
+  /**
+   * 项目专属端口。
+   */
+  port: number;
+  /**
+   * 透传 ComfyUI 参数（如 --lowvram）。
+   */
+  launch_extra?: string[];
+  /**
+   * 本机覆盖的 ComfyUI 版本（默认用 project.json 的 pin）。
+   */
+  comfyui_version?: string;
+  /**
+   * ComfyUI 目录（相对项目根或绝对路径）；默认 engine/ComfyUI。
+   */
+  comfyui_dir?: string;
+  /**
+   * venv 目录（相对项目根或绝对路径）；默认 engine/.venv。
+   */
+  venv_dir?: string;
+}
+
+/**
+ * .dycli/machine.json 的 remote 引擎段。
+ */
+export interface MachineRemoteEngine {
+  /**
+   * 固定 remote。
+   */
+  mode: "remote";
+  /**
+   * 外部 ComfyUI base URL（可含路径前缀）。
+   */
+  url: string;
+  /**
+   * 任务结束后的释放策略；默认 when_idle。
+   */
+  free_after_task?: FreeStrategy;
+}
+
+/**
+ * 机器配置（本机，gitignored）：mode、模型路径、端口、覆盖项。
+ */
+export interface MachineConfig {
+  /**
+   * 本机标签（默认 hostname），写入 task/run 记录。
+   */
+  machine_id: string;
+  /**
+   * 引擎接入配置。
+   */
+  engine: MachineLocalEngine | MachineRemoteEngine;
+  /**
+   * 本机节点输入覆盖：workflow 相对路径 -> { "nodeId.input": value }。
+   * 优先级：workflow < machine overrides < --set。
+   */
+  overrides?: Record<string, Record<string, JsonValue>>;
+}
+
+/**
+ * first_frame 三形态：锚点 key / 接力 / 纯 T2V。
  */
 export type FirstFrame = string | { relay: string } | undefined;
 
 /**
- * 分镜表中的单个镜头。
+ * 分镜表中的单个镜头（recipe）。
  */
 export interface ShotSpec {
   /**
-   * 镜号（如 "01"；产物文件名与日志均以它标识）。
+   * 镜号（如 "01"；run label 为 shot:<id>）。
    */
   id: string;
   /**
-   * 镜头短名（参与产物文件名，如 01_开篇）。
+   * 镜头短名（产物命名 / 展示用）。
    */
-  slug: string;
+  slug?: string;
   /**
-   * 随机种子（generate 时写入 workflow，保证可复现）。
+   * 随机种子（通过 bindings 的 seed 注入）。
    */
   seed: number;
   /**
-   * 正向提示词（与 style_prefix 拼接后送入引擎）。
+   * 正向提示词（与 style_prefix 拼接后通过 bindings 注入）。
    */
   prompt: string;
   /**
-   * 首帧来源（缺省 = 纯文生 T2V）。
+   * 首帧来源（缺省 = 纯文生）。
    */
   first_frame?: FirstFrame;
   /**
-   * 采样步数（缺省取 defaults.steps）。
+   * 覆盖采样步数。
    */
   steps?: number;
   /**
-   * 引导强度（缺省取 defaults.cfg）。
+   * 覆盖引导强度。
    */
   cfg?: number;
   /**
-   * 帧数（缺省取 defaults.length；应为 17k+5）。
+   * 覆盖帧数。
    */
   length?: number;
+  /**
+   * 覆盖宽度。
+   */
+  width?: number;
+  /**
+   * 覆盖高度。
+   */
+  height?: number;
+  /**
+   * 该镜使用的 workflow（短名或相对路径）；缺省用文件级 / project.default_workflow。
+   */
+  workflow?: string;
+  /**
+   * 额外的逻辑输入（键必须出现在 bindings 中）。
+   */
+  params?: Record<string, JsonValue>;
 }
 
 /**
- * 分镜表元信息（尺寸 / 锚点等全片级参数）。
+ * 分镜表元信息。
  */
 export interface ShotsMeta {
   /**
@@ -71,69 +263,73 @@ export interface ShotsMeta {
    */
   title?: string;
   /**
-   * 生成宽度（必须为 32 的倍数）。
+   * 生成宽度（建议为 32 的倍数）。
    */
   width: number;
   /**
-   * 生成高度（必须为 32 的倍数）。
+   * 生成高度（建议为 32 的倍数）。
    */
   height: number;
   /**
-   * 每镜默认帧数（可选，镜头可各自覆盖）。
-   */
-  length_per_shot?: number;
-  /**
-   * 锚点 key -> 相对项目根的图片路径
+   * 锚点 key -> 相对项目根的图片路径。
    */
   anchors: Record<string, string>;
   /**
-   * 允许扩展字段（向后兼容的预留位）。
+   * 允许扩展字段。
    */
   [k: string]: unknown;
 }
 
 /**
- * 全片默认参数（镜头未覆盖时生效）。
+ * 全片默认参数（镜头未覆盖时生效；通过 bindings 注入）。
  */
 export interface ShotsDefaults {
   /**
    * 默认帧数。
    */
-  length: number;
+  length?: number;
   /**
    * 默认采样步数。
    */
-  steps: number;
+  steps?: number;
   /**
    * 默认引导强度。
    */
-  cfg: number;
+  cfg?: number;
   /**
-   * 采样器名称（写入 workflow 的 7_sample 节点）。
+   * 采样器名称。
    */
-  sampler_name: string;
+  sampler_name?: string;
   /**
-   * 调度器名称（写入 workflow 的 7_sample 节点）。
+   * 调度器名称。
    */
-  scheduler: string;
+  scheduler?: string;
   /**
-   * 视频偏移量（写入 6_shift 节点）。
+   * 视频偏移量。
    */
-  shift_video: number;
+  shift_video?: number;
   /**
-   * 音频偏移量（写入 6_shift 节点）。
+   * 音频偏移量。
    */
-  shift_audio: number;
+  shift_audio?: number;
   /**
    * 默认负向提示词。
    */
-  negative: string;
+  negative?: string;
+  /**
+   * 允许扩展字段。
+   */
+  [k: string]: unknown;
 }
 
 /**
- * 分镜表文件（shots.json）的完整结构。
+ * shots.json 的完整结构（视频 recipe，跨机器共享）。
  */
 export interface ShotsFile {
+  /**
+   * 文件级默认 workflow（可被单镜覆盖）。
+   */
+  workflow?: string;
   /**
    * 全片级元信息。
    */
@@ -145,151 +341,373 @@ export interface ShotsFile {
   /**
    * 风格前缀（与每镜 prompt 拼接）。
    */
-  style_prefix: string;
+  style_prefix?: string;
   /**
    * 镜头列表（顺序即合片顺序）。
    */
   shots: ShotSpec[];
-}
-
-/** ComfyUI（外部组件）的接入模式（配置缺省时按 local 加载，由 config.mts 注入）：
- *  - local  = 本机托管：ComfyUI 仓库与 venv 在本机，up/down 管理其进程生命周期；
- *  - remote = 远端连接：引擎已在别处运行（另一台机器 / 容器 / 反代之后），只连接、不托管。
- *             （既定设计，细节随后续里程碑细化） */
-export type EngineMode = "local" | "remote";
-
-/**
- * 两种模式共有的引擎连接信息。
- */
-export interface EngineConn {
-  /** 完整 base URL（可含 https 与路径前缀，如反代后的 https://host/comfyui）；
-   *  设置时优先于 host/port；remote 模式推荐使用。 */
-  url?: string;
   /**
-   * 引擎 HTTP 地址（local 默认 127.0.0.1）
+   * 允许扩展字段。
    */
-  host: string;
-  /**
-   * 引擎 HTTP 端口（默认 8188）
-   */
-  port: number;
+  [k: string]: unknown;
 }
 
 /**
- * local 模式引擎：daoyan-cli 托管进程（spawn + PID 文件 + 就绪探测）。
+ * bindings 文件：逻辑输入名 -> "nodeId.input"。
  */
-export interface LocalEngine extends EngineConn {
+export interface Bindings {
   /**
-   * 接入模式判别标签（固定 local）。
+   * 逻辑名到节点输入的映射。
    */
-  mode: "local";
-  /**
-   * ComfyUI 仓库路径
-   */
-  comfyui_dir: string;
-  /**
-   * Python 虚拟环境路径（init 产物或既有 env/）
-   */
-  venv_dir: string;
-  /**
-   * init 选择的 ComfyUI 版本 tag
-   */
-  version?: string;
-  /**
-   * clone 源；默认官方仓库，可指镜像 / 内网 fork
-   */
-  repo_url?: string;
-  /**
-   * 透传 main.py 的额外参数（--listen 等）
-   */
-  launch_extra?: string[];
-  /**
-   * 以 root 运行 CLI 时，引擎降权到该用户
-   */
-  run_user?: string;
+  [logical: string]: string;
 }
 
 /**
- * remote 模式引擎：进程由远端管理，本 CLI 只通过 HTTP/WS 连接。
+ * task 生命周期状态。
  */
-export interface RemoteEngine extends EngineConn {
+export type TaskStatus =
+  | "queued"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "interrupted";
+
+/**
+ * task 类型（决定 worker 如何展开 runs）。
+ */
+export type TaskKind = "run" | "shot" | "retake" | "batch" | "metadata";
+
+/**
+ * task worker 信息。
+ */
+export interface TaskWorkerInfo {
   /**
-   * 接入模式判别标签（固定 remote）。
+   * worker 进程 pid。
    */
-  mode: "remote";
+  pid: number;
+  /**
+   * worker 启动时间（ISO）。
+   */
+  started_at: string;
 }
 
 /**
- * 引擎配置的联合类型（按 mode 判别 local / remote）。
+ * task.json 里的执行选项（worker 快照）。
  */
-export type EngineRef = LocalEngine | RemoteEngine;
-
-/**
- * 模型三件套与共享模型库引用。
- */
-export interface ModelsRef {
+export interface TaskOptions {
   /**
-   * 三件套文件名，位于 shared_models_dir 对应子目录（doctor 的校验口径）
+   * 目标 workflow（短名或项目内相对路径）；run 必填。
    */
-  unet: string;
+  workflow?: string;
   /**
-   * 文本编码器文件名。
+   * 节点/逻辑输入覆盖（--set）。
    */
-  clip: string;
+  sets?: Record<string, JsonValue>;
   /**
-   * VAE 文件名。
+   * run label（默认 shot:<id> / 用户 --label）。
    */
-  vae: string;
+  label?: string;
   /**
-   * 共享模型库根（extra_model_paths.yaml 指向的目录）
+   * shot/retake 的目标镜号。
    */
-  shared_models_dir?: string;
+  shots?: string[];
+  /**
+   * 覆盖采样步数（shot）。
+   */
+  steps?: number;
+  /**
+   * 等待上限（毫秒）。
+   */
+  timeout_ms?: number;
+  /**
+   * 单次 remote 覆盖 URL。
+   */
+  engine_url?: string;
+  /**
+   * 忽略已有成功 run（retake）。
+   */
+  force?: boolean;
 }
 
 /**
- * GPU 编排配置（生成让路策略）。
+ * task 记录（tasks/<task_id>/task.json）。
  */
-export interface GpuOrchestration {
+export interface TaskRecord {
   /**
-   * 生成前弹出 / 任务后恢复的容器目标；空数组 = 不编排
+   * task id（t_<timestamp>-<machine>-<suffix>）。
    */
-  evict_targets: Array<"ollama" | "xinference">;
+  task_id: string;
+  /**
+   * 任务类型。
+   */
+  kind: TaskKind;
+  /**
+   * 机器标签（区分 Git 同步来的其他机器任务）。
+   */
+  machine_id: string;
+  /**
+   * 幂等键（可空）。
+   */
+  request_id: string | null;
+  /**
+   * 当前状态。
+   */
+  status: TaskStatus;
+  /**
+   * 执行模式。
+   */
+  mode: "local" | "remote";
+  /**
+   * 创建该 task 的命令（展示用）。
+   */
+  command: string;
+  /**
+   * 本次 task 产生的 run id 列表（按执行顺序）。
+   */
+  runs: string[];
+  /**
+   * worker 信息（未启动为 null）。
+   */
+  worker: TaskWorkerInfo | null;
+  /**
+   * 创建时间（ISO）。
+   */
+  created_at: string;
+  /**
+   * 开始时间（ISO）。
+   */
+  started_at: string | null;
+  /**
+   * 结束时间（ISO）。
+   */
+  finished_at: string | null;
+  /**
+   * 终态错误（成功为 null）。
+   */
+  error: { code: string; message: string; details?: Record<string, unknown> } | null;
+  /**
+   * 给 Agent 的下一步动作。
+   */
+  next_actions: string[];
+  /**
+   * 执行选项快照。
+   */
+  options: TaskOptions;
 }
 
 /**
- * project.json 的完整结构（项目根配置，validate / pipeline 的输入）。
+ * task events.jsonl 的单个事件。
  */
-export interface ProjectConfig {
+export interface TaskEvent {
   /**
-   * 项目名（init 时确定，仅展示用）。
+   * 递增序号（从 1 开始）。
+   */
+  seq: number;
+  /**
+   * 事件时间（ISO）。
+   */
+  ts: string;
+  /**
+   * 事件类型（queued / engine_started / submitted / run_succeeded / cleanup_finished …）。
+   */
+  type: string;
+  /**
+   * 事件数据（不含绝对路径与密钥）。
+   */
+  data: Record<string, unknown>;
+}
+
+/**
+ * run 产物记录。
+ */
+export interface RunOutput {
+  /**
+   * 文件名（outputs/ 下）。
    */
   name: string;
   /**
-   * project.json schema 版本
+   * 相对 run 目录的路径（outputs/<name>）。
    */
-  version: number;
+  path: string;
   /**
-   * 引擎内输出子目录前缀，形如 "<slug>/"
+   * 内容 sha256。
    */
-  output_prefix: string;
+  sha256: string;
   /**
-   * workflow.api.json 相对路径
+   * 字节数。
    */
-  workflow: string;
+  bytes: number;
+}
+
+/**
+ * cleanup 结果（每个环节的简短状态）。
+ */
+export interface CleanupRecord {
   /**
-   * 引擎接入配置（local / remote 二选一）。
+   * interrupt：ok / failed / not_needed。
    */
-  engine: EngineRef;
+  interrupt: string;
   /**
-   * 模型三件套引用。
+   * free：ok / failed / skipped / not_needed。
    */
-  models: ModelsRef;
+  free: string;
   /**
-   * GPU 编排配置。
+   * stop：ok / failed / not_needed。
    */
-  gpu: GpuOrchestration;
+  stop: string;
   /**
-   * doctor / validate 校验必须注册的工作流节点类名
+   * scratch：ok / kept / not_needed。
    */
-  node_checks?: string[];
+  scratch: string;
+  /**
+   * gpu_restore：ok / failed / not_needed。
+   */
+  gpu_restore: string;
+}
+
+/**
+ * run 的引擎段。
+ */
+export interface RunEngineRecord {
+  /**
+   * local / remote。
+   */
+  mode: "local" | "remote";
+  /**
+   * ComfyUI 版本（可空）。
+   */
+  comfyui_version: string | null;
+  /**
+   * 引擎 URL（local 为 localhost，remote 为用户 URL）。
+   */
+  url: string;
+  /**
+   * local 进程 pid（remote 为 null）。
+   */
+  pid: number | null;
+  /**
+   * 从启动到就绪的毫秒数（remote 为 null）。
+   */
+  ready_ms: number | null;
+  /**
+   * cleanup 结果（task 结束后回填）。
+   */
+  cleanup: CleanupRecord | null;
+}
+
+/**
+ * run 的 GPU 接管段（仅 local 且发生接管时出现）。
+ */
+export interface RunGpuRecord {
+  /**
+   * 是否请求了接管。
+   */
+  takeover: boolean;
+  /**
+   * 接管前显存（MiB）。
+   */
+  before?: { used_mb: number; free_mb: number };
+  /**
+   * 被卸载/驱逐的对象。
+   */
+  evicted: Array<Record<string, unknown>>;
+  /**
+   * 接管后显存（MiB）。
+   */
+  after?: { used_mb?: number; free_mb?: number };
+  /**
+   * 已恢复的对象。
+   */
+  restored: string[];
+  /**
+   * 部分失败记录（如 gpu_takeover_failed）。
+   */
+  errors: Array<{ code: string; message: string }>;
+}
+
+/**
+ * run 记录（runs/<run_id>/run.json，不可变快照）。
+ */
+export interface RunRecord {
+  /**
+   * run id。
+   */
+  run_id: string;
+  /**
+   * 所属 task。
+   */
+  task_id: string;
+  /**
+   * 机器标签。
+   */
+  machine_id: string;
+  /**
+   * 幂等键（可空）。
+   */
+  request_id: string | null;
+  /**
+   * label（shot:<id> 或用户指定）。
+   */
+  label: string | null;
+  /**
+   * workflow 快照信息。
+   */
+  workflow: {
+    /**
+     * 项目内相对路径。
+     */
+    path: string;
+    /**
+     * 提交给引擎的图哈希。
+     */
+    sha256: string;
+  };
+  /**
+   * 逻辑输入（不含绝对路径与上传文件名）。
+   */
+  inputs: Record<string, JsonValue>;
+  /**
+   * 命中的覆盖项（machine overrides / --set 合并后）。
+   */
+  overrides: Record<string, JsonValue>;
+  /**
+   * 引擎信息。
+   */
+  engine: RunEngineRecord;
+  /**
+   * GPU 接管信息（仅 local）。
+   */
+  gpu?: RunGpuRecord;
+  /**
+   * 终态。
+   */
+  status: "succeeded" | "failed" | "cancelled" | "interrupted";
+  /**
+   * 引擎 prompt id（未提交为 null）。
+   */
+  prompt_id: string | null;
+  /**
+   * 开始时间（ISO）。
+   */
+  started_at: string;
+  /**
+   * 结束时间（ISO）。
+   */
+  finished_at: string;
+  /**
+   * 产物列表。
+   */
+  outputs: RunOutput[];
+  /**
+   * 终态错误（成功为 null）。
+   */
+  error: { code: string; message: string; details?: Record<string, unknown> } | null;
+}
+
+/**
+ * 任务终态判断。
+ */
+export function isTerminalStatus(status: TaskStatus): boolean {
+  return status === "succeeded" || status === "failed" || status === "cancelled" || status === "interrupted";
 }

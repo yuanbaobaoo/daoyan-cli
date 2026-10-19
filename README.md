@@ -1,64 +1,154 @@
-# daoyan-cli
+# daoyan-cli（dycli）
 
-构建在 ComfyUI 之上的生产编排 CLI，面向 AI Agent 与自动化流水线。
+**Agent 驱动的 ComfyUI 节点编辑器 + 执行运行时。** 剧本进，成片出；但真正的第一公民是 AI Agent。
 
-> 🚧 **开发中**：核心命令已可用（见下表 ✅），其余按里程碑推进，计划见 [docs/PLAN.md](docs/PLAN.md)。
-> 未实现的命令执行时报 `not_implemented`。GPU 编排与 remote 模式的生成链路尚未接入。
+dycli 把 ComfyUI 包装成一套机器契约：
+
+- **节点编辑**：`workflow` 命令族查询节点目录、增删节点、连接端口、设置参数、校验图；
+- **执行运行时**：`run` / `shot` / `batch` 以异步 task 执行，自动管理 local 引擎生命周期、GPU 接管与产物落盘；
+- **版本管理**：工作流、任务、run 快照全部是可进 Git 的 JSON；二进制产物走 Git LFS；
+- **Agent 契约**：非 TTY 默认 JSON 信封、稳定错误码、`retryable` / `next_actions`、`help --json` 自描述、项目内 Agent Skill。
+
+> 设计基线：[docs/REFACTOR.md](docs/REFACTOR.md)。命令参考：[docs/COMMANDS.md](docs/COMMANDS.md)。
 
 ## 安装
 
-要求 Node ≥ 22 LTS（含 npm）与 git。
+要求 Node ≥ 22（含 npm）与 git；local 模式另需 Python ≥ 3.10。
 
 ```bash
-# 方式一：curl 一键脚本（直接从 GitHub 安装）
+# 一键脚本（直接从 GitHub 安装）
 curl -fsSL https://raw.githubusercontent.com/yuanbaobaoo/daoyan-cli/master/install.sh | bash
 
-# 方式二：npm 直装 GitHub 仓库（等价于脚本内部的两步：npm pack 源码后安装 tgz）
+# 或 npm 直装 GitHub 仓库
 npm i -g git+https://github.com/yuanbaobaoo/daoyan-cli.git
-
-# 方式三：npm registry（包发布后可用）
-npm i -g daoyan-cli
 ```
 
-指定版本安装（接受 git tag / 分支 / commit）：
+`daoyan` 与 `dycli` 完全等价。升级：`daoyan update`。
+
+## 快速开始
+
+### local：项目专属 ComfyUI
 
 ```bash
-DAYOAN_REF=v0.2.0 curl -fsSL https://raw.githubusercontent.com/yuanbaobaoo/daoyan-cli/master/install.sh | bash
+mkdir demo && cd demo
+daoyan init --mode=local --modelpath /data/models
+
+# Agent 编辑闭环
+daoyan workflow nodes --refresh --json
+daoyan workflow new t2v
+daoyan workflow apply t2v --ops ./ops.json --json
+daoyan workflow validate t2v --json
+
+# 执行（默认异步）
+daoyan run t2v --label shot:01 --request-id shot-01 --json
+daoyan status --task <task_id> --wait --json
 ```
 
-## 升级
+local 引擎**只在任务期间存在**：任务开始拉起 ComfyUI，结束（成功/失败/OOM/取消）立即 `/free` 并停止进程。`init` 只部署，不启动。
+
+### remote：连接已有 ComfyUI
 
 ```bash
-# 检测新版本（GitHub tags，仅检测不安装）
-daoyan update --check
-
-# 升级到 GitHub 最新 tag（自动完成，无需 npm registry）
-daoyan update
-
-# 或重跑安装脚本（效果等同 update）
-curl -fsSL https://raw.githubusercontent.com/yuanbaobaoo/daoyan-cli/master/install.sh | bash
+daoyan init --mode=remote --url http://gpu-box:8188
+daoyan run t2v --label shot:01 --json
 ```
 
-发版流程：推送 `v*` tag 触发 GitHub Actions 自动构建并创建 Release（`.github/workflows/release.yml`）。
+remote 模式只走 HTTP（`/system_stats`、`/object_info`、`/upload/image`、`/prompt`、`/history`、`/view`、`/free`、`/interrupt`），**永不启动/停止/杀远端进程**；任务结束按 `free_after_task` 策略卸载模型。
 
-## 命令
+## 核心约定
 
-全局参数：`--json`（机器可读输出信封）· `--project <路径>` · `--no-color` · `-h/--help` · `-v/--version`。
-`dycli` 是 `daoyan` 的短命令，完全等价。
+### 同一设备，同一时刻，只允许一个 generation task
 
-| 命令 | 说明 | 状态 |
-|---|---|---|
-| `daoyan help [命令] [--json]` | 帮助；`--json` 输出 agent 自描述（命令树 / 信封 / 错误码 / 退出码） | ✅ 可用 |
-| `daoyan update [--check]` | 自升级 / 检测 GitHub 最新 tag | ✅ 可用 |
-| `daoyan init <名称>` | 立项：本地装引擎（venv/clone/依赖）或 `--use-existing <路径>` 接管既有安装或 `--remote <url>` 直连远端 | ✅ 可用 |
-| `daoyan validate [--json]` | 项目规则全量校验（接力链 / 锚点 / 尺寸 / seed / workflow 节点约定） | ✅ 可用 |
-| `daoyan shot <镜号...>` / `retake` | 拍摄 / 重拍（自动拉起引擎、首帧注入、15s 轮询、断点续跑、manifest） | ✅ 可用 |
-| `daoyan wrap` | 合片交付到 `final/`（ffmpeg concat，libx264/crf18/faststart） | ✅ 可用 |
-| `daoyan logs [-f] [-n N]` | 日志查看（docker logs 语义，清洗 ANSI/tqdm） | ✅ 可用 |
-| `daoyan status [--json]` | 引擎 / 队列 / 任务锁 / GPU / 内存 / 镜头完成度 | ✅ 可用 |
-| `daoyan engine ls / install / use` | ComfyUI 版本管理（本地 engine/versions/ + GitHub tags） | ✅ 可用 |
-| `daoyan batch` | 连拍全部未完成镜头 | ⬜ 计划中 |
-| `daoyan up` / `down` | 引擎独立启停（shot 已内置自动拉起） | ⬜ 计划中 |
-| `daoyan list [--json]` | 打印分镜表 | ⬜ 计划中 |
+`~/.dycli/machine.lock` 是全局机器锁，local 与 remote 共用：
 
-命令与数据格式规范见 [docs/COMMANDS.md](docs/COMMANDS.md) 与 [docs/DATA-MODEL.md](docs/DATA-MODEL.md)。
+- 第二个任务立即返回 `machine_busy`（带 owner、`retry_after_ms`、`next_actions`），不排队；
+- worker 崩溃后，下一次任务自动做 stale 恢复（标记 `interrupted`、回收残留引擎、恢复 GPU 租约）；
+- `wrap` 是 CPU 后处理，不占锁。
+
+### 异步 task
+
+`run` / `shot` / `retake` / `batch` 默认返回 `task_id`；退出码 0 只代表任务已创建：
+
+```bash
+daoyan run t2v --json                    # → task_id
+daoyan status --task <id> --wait --json  # 等终态
+daoyan logs --task <id> -f --json        # 事件流
+daoyan run cancel <id>                   # 取消（interrupt → free → stop → restore）
+```
+
+`--request-id` 保证幂等：重试返回同一个 task。`--wait` 的 SIGINT 只停止等待，不会取消任务。
+
+### GPU 接管（可选）
+
+`project.json` 里一个开关：
+
+```json
+{ "gpu": { "takeover": true } }
+```
+
+local 任务开始前自动卸载/驱逐代码内置的目标，任务后恢复：
+
+- 模型服务：ollama、LM Studio、xinference —— 卸载模型，保留进程；
+- 进程服务：vLLM、TGI、llama.cpp server、SGLang —— SIGTERM/SIGKILL，任务后 best-effort 重启；
+- 未知进程永不处理；默认关闭；Linux + NVIDIA 生效，其他平台 `gpu_unsupported` 警告后继续。
+
+### 版本管理
+
+- 工作流真源：`workflows/*.json`；Git 就是版本系统；
+- 每次执行生成不可变 `runs/<run_id>/`（`run.json`、`workflow.json`、`inputs.json`、`inputs/`、`outputs/`）；
+- 产物走 Git LFS；记录不含绝对路径；
+- `wrap` 按镜头选最新成功 run，写 `final/cut-<timestamp>.mp4` + 清单。
+
+### 项目内 Agent Skill
+
+`init` 默认生成 `.agents/skills/daoyan/`（SKILL.md + reference/*）并写入 `AGENTS.md` 管理块；`--no-skill` 可跳过。Skill 由命令 registry 生成，`daoyan skill update` 刷新，`status --json` 报告 stale。
+
+## 项目布局
+
+```text
+demo/
+├── project.json              # 共享：ComfyUI pin / custom nodes / gpu.takeover
+├── workflows/                # 共享：API JSON + *.bindings.json
+├── shots.json                # 共享：shot/batch recipe
+├── tasks/<task_id>/          # 共享：task.json + events.jsonl
+├── runs/<run_id>/            # 共享：不可变 run 快照与产物
+├── final/                    # 共享：合片（LFS）
+├── .agents/skills/daoyan/    # 共享：项目内 Agent Skill
+├── AGENTS.md                 # 共享：带 daoyan 管理块
+├── .dycli/machine.json       # 本机：模式/模型路径/端口/覆盖（不提交）
+├── engine/                   # 本机：ComfyUI + venv（不提交）
+└── logs/                     # 本机（不提交）
+```
+
+## 命令一览
+
+```text
+init / validate / skill update
+workflow new|import|list|show|nodes|node|apply|set|validate
+run / run cancel / shot / retake / batch / wrap
+status / logs
+engine ls|install|use
+help / update
+```
+
+完整参数、flags、JSON 形状与示例见 [docs/COMMANDS.md](docs/COMMANDS.md)；机器契约见 `daoyan help --json`。
+
+## 文档
+
+- [docs/COMMANDS.md](docs/COMMANDS.md) —— 命令与异步协议
+- [docs/DATA-MODEL.md](docs/DATA-MODEL.md) —— 配置、图、task、run 数据模型
+- [docs/ERROR-CODES.md](docs/ERROR-CODES.md) —— 错误码与恢复矩阵
+- [docs/AGENT-SKILL.md](docs/AGENT-SKILL.md) —— 项目内 Skill 与 AGENTS.md
+- [docs/PLAN.md](docs/PLAN.md) —— 架构总览与里程碑
+- [docs/REFACTOR.md](docs/REFACTOR.md) —— 重构设计基线
+
+## 开发
+
+```bash
+npm install
+npm run typecheck
+npm test          # node:test + 假 ComfyUI HTTP server
+npm run build     # dist/ 随仓库分发
+```
+
+License: Apache-2.0

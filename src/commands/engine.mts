@@ -1,26 +1,29 @@
-/** engine —— ComfyUI 外部组件的版本管理（local 模式）：
- *  ls 列本地 engine/versions/* 与 GitHub tags；install <tag> 克隆+建 venv+装依赖；use 切换。 */
+/** engine —— ComfyUI 版本管理（local 模式）：
+ *  ls 列当前安装 / engine/versions 与 GitHub tags；install <tag> 安装到版本目录；
+ *  use <tag|路径> 切换本机 machine.json 的 comfyui_dir / venv_dir。
+ *  不启动引擎；install/use 会持有 machine lock，避免改动正在使用的引擎。 */
 import { existsSync, readdirSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { DaoyanCliError } from "../shared/errors.mts";
 import { emitData } from "../shared/json.mts";
 import { say } from "../shared/log.mts";
 import type { CliContext } from "../shared/context.mts";
-import { projectFromContext, saveProjectConfig } from "../core/project/config.mts";
-import { COMFY_TAGS_API, cloneComfyUI, createVenv, pipInstall } from "../core/provision/init-flow.mts";
+import { usageError } from "../shared/args.mts";
+import { loadMachine, loadMachineIfExists, projectFromContext, requireProject, saveMachine } from "../core/project/config.mts";
+import type { MachineLocalEngine } from "../core/project/types.mts";
+import { COMFY_TAGS_API, installEngineAt } from "../core/provision/init-flow.mts";
+import { acquireMachineLock } from "../core/machine/lock.mts";
 
 /**
- * 取 GitHub 上 ComfyUI 的最新 tags（失败返回空数组，命令降级只显示本地）。
+ * 查询 GitHub 最新 tags（失败返回空）。
  */
 async function comfyTags(limit: number): Promise<string[]> {
   try {
-    // tags 接口响应
     const res = await fetch(COMFY_TAGS_API, {
       headers: { "user-agent": "daoyan-cli-engine", accept: "application/vnd.github+json" },
       signal: AbortSignal.timeout(15_000),
     });
     if (!res.ok) return [];
-    // tags 列表（按 GitHub 返回顺序）
     const tags = (await res.json()) as Array<{ name?: string }>;
     return tags
       .map((t) => t.name ?? "")
@@ -32,10 +35,9 @@ async function comfyTags(limit: number): Promise<string[]> {
 }
 
 /**
- * 列出本地已安装的 ComfyUI 版本（engine/versions/ 下的目录名）。
+ * 列出本地版本目录（engine/versions/*）。
  */
 function localVersions(root: string): string[] {
-  // 版本目录（不存在按空处理）
   const dir = join(root, "engine", "versions");
   try {
     return readdirSync(dir, { withFileTypes: true })
@@ -48,121 +50,202 @@ function localVersions(root: string): string[] {
 }
 
 /**
- * engine 命令入口：ls / install / use 三个子命令。
+ * 当前引擎目录（相对/绝对）。
  */
-export async function runEngine(ctx: CliContext, args: string[]): Promise<void> {
-  // 子命令名（ls / install / use）
+function currentDirs(root: string, engine: MachineLocalEngine): { comfyDir: string; venvDir: string } {
+  const anchor = (p: string | undefined, fallback: string): string => {
+    if (p === undefined || p === "") return join(root, fallback);
+    return isAbsolute(p) ? p : join(root, p);
+  };
+  return {
+    comfyDir: anchor(engine.comfyui_dir, join("engine", "ComfyUI")),
+    venvDir: anchor(engine.venv_dir, join("engine", ".venv")),
+  };
+}
+
+/**
+ * 路径在项目内时存相对路径，否则存绝对路径。
+ */
+function portablePath(root: string, abs: string): string {
+  const rel = relative(root, abs);
+  return rel === "" || rel.startsWith("..") || isAbsolute(rel) ? abs : rel.split("\\").join("/");
+}
+
+/**
+ * engine 命令入口。
+ */
+export async function runEngine(ctx: CliContext, args: string[]): Promise<number> {
   const sub = args[0];
   if (sub === undefined) {
-    throw new DaoyanCliError({ code: "usage", message: "用法：daoyan engine <ls|install|use> ...", exit: 2 });
+    throw new DaoyanCliError({
+      code: "usage",
+      message: "用法：daoyan engine <ls|install|use> ...",
+      exit: 2,
+    });
   }
-  // 子命令之后的参数
   const rest = args.slice(1);
 
   if (sub === "ls") {
-    // GitHub 远端版本（前 15）
     const remote = await comfyTags(15);
-    // 本地已安装版本
-    let local: string[] = [];
-    // 当前使用的版本（remote 模式标注）
-    let current = "";
-    // 项目定位结果（可在项目外运行）
     const found = projectFromContext(ctx);
+    let local: string[] = [];
+    let current: Record<string, unknown> | null = null;
     if (found !== null) {
       local = localVersions(found.root);
-      current = found.config.engine.mode === "local" ? found.config.engine.version ?? "" : "(remote 模式)";
+      // 本机配置（可能缺失）
+      const machine = loadMachineIfExists(found.root);
+      if (machine !== null && machine.engine.mode === "local") {
+        const dirs = currentDirs(found.root, machine.engine);
+        current = {
+          mode: "local",
+          comfyui_dir: portablePath(found.root, dirs.comfyDir),
+          venv_dir: portablePath(found.root, dirs.venvDir),
+          installed: existsSync(join(dirs.comfyDir, "main.py")),
+          version:
+            machine.engine.comfyui_version ?? found.config.comfyui?.version ?? null,
+        };
+      } else if (machine !== null && machine.engine.mode === "remote") {
+        current = { mode: "remote", url: machine.engine.url };
+      }
     }
     if (ctx.json) {
       emitData({ local, remote, current });
-      return;
+      return 0;
     }
-    say("本地已安装（engine/versions/）：");
-    // 逐个输出本地版本（标注当前使用）
-    for (const v of local) say(`  ${v}${v === current ? "  ← 当前" : ""}`);
+    say("本地版本（engine/versions/）：");
+    for (const v of local) say(`  ${v}`);
     if (local.length === 0) say("  （无）");
+    if (current !== null) {
+      if (current.mode === "local") {
+        say(`当前引擎：${String(current.comfyui_dir)}${current.installed === true ? "" : "（未安装）"}`);
+        say(`版本：${String(current.version ?? "unknown")}`);
+      } else {
+        say(`当前模式：remote（${String(current.url)}）`);
+      }
+    }
     say("GitHub 可用版本（前 15）：");
-    // 逐个输出远端版本
     for (const v of remote) say(`  ${v}`);
     if (remote.length === 0) say("  （GitHub 不可达，仅显示本地）");
-    return;
+    return 0;
   }
 
-  // install / use 需要项目
-  const found = projectFromContext(ctx);
-  if (found === null) {
-    throw new DaoyanCliError({ code: "project_not_found", message: "engine install/use 需在项目内运行（未找到 project.json）" });
+  // install / use 需要项目与 local 模式
+  const { root, config: project } = requireProject(ctx);
+  const machine = loadMachine(root);
+  if (machine.engine.mode !== "local") {
+    throw new DaoyanCliError({
+      code: "usage",
+      message: "remote 模式不管理引擎安装/切换（engine.mode=remote）",
+      exit: 2,
+    });
   }
-  // 项目根与配置
-  const { root, config: cfg } = found;
 
   if (sub === "install") {
-    // 目标版本 tag
     const tag = rest[0];
-    if (tag === undefined || tag === "") {
-      throw new DaoyanCliError({ code: "usage", message: "用法：daoyan engine install <版本 tag>", exit: 2 });
+    if (tag === undefined || tag === "") usageError("用法：daoyan engine install <版本 tag>");
+    // 持锁安装
+    const lock = await acquireMachineLock({
+      taskId: `metadata-engine-install-${process.pid}`,
+      project: root,
+      mode: "local",
+      command: `engine install ${tag}`,
+      kind: "metadata",
+    });
+    try {
+      const base = join(root, "engine", "versions", tag);
+      // 已安装则直接返回
+      if (existsSync(join(base, "ComfyUI", "main.py")) && existsSync(join(base, ".venv", "bin", "python"))) {
+        say(`版本 ${tag} 已安装：${portablePath(root, base)}`);
+      } else {
+        say(`安装 ComfyUI ${tag} → engine/versions/${tag} ...`);
+        await installEngineAt({ root, baseDir: base, version: tag, project, log: say });
+      }
+      if (ctx.json) {
+        emitData({
+          installed: tag,
+          dir: portablePath(root, base),
+          next_actions: [`engine use ${tag}`],
+        });
+        return 0;
+      }
+      say(`切换：daoyan engine use ${tag}`);
+      return 0;
+    } finally {
+      lock.release();
     }
-    if (cfg.engine.mode !== "local") {
-      throw new DaoyanCliError({ code: "usage", message: "remote 模式不管理引擎安装（engine.mode=remote）", exit: 2 });
-    }
-    // 版本安装目录（engine/versions/<tag>/）
-    const vDir = join("engine", "versions", tag);
-    await createVenv(root, join(vDir, ".venv"), say);
-    await cloneComfyUI(root, join(vDir, "ComfyUI"), tag, say);
-    await pipInstall(root, join(vDir, ".venv"), undefined, say);
-    say(`版本 ${tag} 安装完成（${vDir}）。切换使用：daoyan engine use ${tag}`);
-    if (ctx.json) emitData({ installed: tag, dir: vDir });
-    return;
   }
 
   if (sub === "use") {
-    // 目标版本 tag 或路径
     const target = rest[0];
-    if (target === undefined || target === "") {
-      throw new DaoyanCliError({ code: "usage", message: "用法：daoyan engine use <版本 tag|路径>", exit: 2 });
-    }
-    // 解析出的 ComfyUI 目录
-    let comfyDir: string;
-    // 解析出的 venv 目录（可空，缺省沿用既有配置）
-    let venvDir: string | undefined;
-    // 解析出的版本号（路径形态时为空）
-    let version: string | undefined;
-    // 目标按路径解析的绝对路径
-    const asPath = resolve(root, target);
-    if (existsSync(join(asPath, "main.py"))) {
-      comfyDir = asPath;
-      if (existsSync(join(asPath, ".venv", "bin", "python"))) venvDir = join(asPath, ".venv");
-    } else {
-      // 按 tag 解析到 engine/versions/<tag>/
-      const vDir = join(root, "engine", "versions", target);
-      comfyDir = join(vDir, "ComfyUI");
-      // 该版本的 venv 目录
-      const venv = join(vDir, ".venv");
-      if (!existsSync(join(comfyDir, "main.py"))) {
-        throw new DaoyanCliError({
-          code: "provision_failed",
-          message: `未找到版本 ${target}（${comfyDir}）。先安装：daoyan engine install ${target}`,
-        });
-      }
-      if (existsSync(join(venv, "bin", "python"))) venvDir = venv;
-      version = target;
-    }
-    // 切换前的 venv 配置（用于缺省回退）
-    const prevVenv = cfg.engine.mode === "local" ? cfg.engine.venv_dir : undefined;
-    // 切换前的版本号（用于缺省回退）
-    const prevVersion = cfg.engine.mode === "local" ? cfg.engine.version : undefined;
-    cfg.engine = {
+    if (target === undefined || target === "") usageError("用法：daoyan engine use <版本 tag|路径>");
+    // 持锁切换
+    const lock = await acquireMachineLock({
+      taskId: `metadata-engine-use-${process.pid}`,
+      project: root,
       mode: "local",
-      comfyui_dir: comfyDir,
-      venv_dir: venvDir ?? prevVenv ?? join(comfyDir, ".venv"),
-      ...(version !== undefined || prevVersion !== undefined ? { version: version ?? prevVersion } : {}),
-      host: cfg.engine.host,
-      port: cfg.engine.port,
-    };
-    saveProjectConfig(root, cfg);
-    say(`已切换引擎：${comfyDir}${venvDir !== undefined ? `（venv ${venvDir}）` : ""}`);
-    if (ctx.json) emitData({ comfyui_dir: comfyDir, venv_dir: venvDir ?? null, version: version ?? null });
-    return;
+      command: `engine use ${target}`,
+      kind: "metadata",
+    });
+    try {
+      // 解析目标目录
+      const asPath = resolve(root, target);
+      let comfyDir: string;
+      let venvDir: string;
+      let version: string | undefined;
+      if (existsSync(join(asPath, "main.py"))) {
+        comfyDir = asPath;
+        venvDir = join(asPath, ".venv");
+        if (!existsSync(join(venvDir, "bin", "python"))) {
+          throw new DaoyanCliError({
+            code: "config_invalid",
+            message: `路径下缺少 venv：${join(venvDir, "bin", "python")}`,
+          });
+        }
+      } else {
+        const base = join(root, "engine", "versions", target);
+        comfyDir = join(base, "ComfyUI");
+        venvDir = join(base, ".venv");
+        if (!existsSync(join(comfyDir, "main.py"))) {
+          throw new DaoyanCliError({
+            code: "provision_failed",
+            message: `未找到版本 ${target}（${portablePath(root, comfyDir)}）。先安装：daoyan engine install ${target}`,
+          });
+        }
+        if (!existsSync(join(venvDir, "bin", "python"))) {
+          throw new DaoyanCliError({
+            code: "provision_failed",
+            message: `版本 ${target} 缺少 venv：${portablePath(root, venvDir)}`,
+          });
+        }
+        version = target;
+      }
+      // 更新本机配置
+      const engine: MachineLocalEngine = {
+        ...machine.engine,
+        comfyui_dir: portablePath(root, comfyDir),
+        venv_dir: portablePath(root, venvDir),
+        ...(version !== undefined ? { comfyui_version: version } : {}),
+      };
+      saveMachine(root, { ...machine, engine });
+      if (ctx.json) {
+        emitData({
+          mode: "local",
+          comfyui_dir: engine.comfyui_dir,
+          venv_dir: engine.venv_dir,
+          version: engine.comfyui_version ?? null,
+        });
+        return 0;
+      }
+      say(`已切换引擎：${String(engine.comfyui_dir)}（venv ${String(engine.venv_dir)}）`);
+      return 0;
+    } finally {
+      lock.release();
+    }
   }
 
-  throw new DaoyanCliError({ code: "usage", message: `未知子命令 ${sub}（可用：ls / install / use）`, exit: 2 });
+  throw new DaoyanCliError({
+    code: "usage",
+    message: `未知子命令 ${sub}（可用：ls / install / use）`,
+    exit: 2,
+  });
 }

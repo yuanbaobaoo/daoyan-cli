@@ -1,7 +1,6 @@
-/** 命令注册表 —— 全部命令的元信息 + run。
- *  已实现：help / update / init / validate / shot / retake / wrap / logs / status / engine ls|install|use。
- *  其余为 not_implemented 占位，交付里程碑见 docs/PLAN.md §10。 */
-import { DaoyanCliError } from "../shared/errors.mts";
+/** 命令注册表 —— help --json、项目内 Skill 与命令分发共用同一份元数据。
+ *  已实现：init / validate / skill update / workflow * / run（异步）/ run cancel /
+ *  shot / retake / batch / wrap / status / logs / engine * / help / update。 */
 import type { CliContext } from "../shared/context.mts";
 import type { CommandGroup } from "../shared/groups.mts";
 import { VERSION } from "../shared/version.mts";
@@ -9,215 +8,462 @@ import { runHelp } from "./help.mts";
 import { runUpdate } from "./update.mts";
 import { runInit } from "./init.mts";
 import { runValidate } from "./validate.mts";
-import { runShot } from "./shot.mts";
+import { runShot, runBatch } from "./shot.mts";
 import { runWrap } from "./wrap.mts";
 import { runLogs } from "./logs.mts";
 import { runStatus } from "./status.mts";
 import { runEngine } from "./engine.mts";
+import { runWorkflow } from "./workflow.mts";
+import { runRun, runCancel } from "./run.mts";
+import { runSkill } from "./skill.mts";
 
 /**
- * 单个命令的注册信息（help 输出与分发都以它为准）。
+ * 位置参数说明。
  */
-export interface CommandMeta {
+export interface CommandArg {
   /**
-   * 子命令用空格分隔，如 "engine install"
+   * 参数名。
    */
   name: string;
   /**
-   * 所属分组（help 按组输出）。
+   * 类型说明。
    */
-  group: CommandGroup;
+  type: string;
   /**
-   * 一句话说明（help 列表用）。
+   * 是否必填。
    */
-  summary: string;
+  required?: boolean;
   /**
-   * 用法字符串（help 输出与 --json 自描述用）。
+   * 是否可多个。
    */
-  usage: string;
+  variadic?: boolean;
   /**
-   * 单命令帮助的补充说明行（可选）。
+   * 说明。
    */
-  detail?: string[];
-  /**
-   * help 据此标注 ✅/⬜
-   */
-  implemented?: boolean;
-  /**
-   * 命令实现（接收已解析的上下文与命令级参数）。
-   */
-  run: (ctx: CliContext, args: string[]) => void | Promise<void>;
+  description: string;
 }
 
 /**
- * 未实现命令的占位 run：抛 not_implemented 并提示交付里程碑。
+ * flag 说明。
  */
-function planned(milestone: string): CommandMeta["run"] {
-  return (_ctx: CliContext, _args: string[]): void => {
-    throw new DaoyanCliError({
-      code: "not_implemented",
-      message: `该命令计划在 ${milestone} 交付（docs/PLAN.md §10 里程碑）。`,
-    });
-  };
+export interface CommandFlag {
+  /**
+   * flag 名（含 --）。
+   */
+  name: string;
+  /**
+   * 取值类型。
+   */
+  type: string;
+  /**
+   * 是否必填。
+   */
+  required?: boolean;
+  /**
+   * 枚举值。
+   */
+  enum?: string[];
+  /**
+   * 默认值。
+   */
+  default?: unknown;
+  /**
+   * 说明。
+   */
+  description: string;
 }
 
-// 全部命令的注册表：help 输出、命令查找与 --json 自描述的唯一来源
+/**
+ * 单个命令的注册信息。
+ */
+export interface CommandMeta {
+  /**
+   * 子命令用空格分隔，如 "engine install"。
+   */
+  name: string;
+  /**
+   * 所属分组。
+   */
+  group: CommandGroup;
+  /**
+   * 一句话说明。
+   */
+  summary: string;
+  /**
+   * 用法字符串。
+   */
+  usage: string;
+  /**
+   * 位置参数。
+   */
+  args?: CommandArg[];
+  /**
+   * flags。
+   */
+  flags?: CommandFlag[];
+  /**
+   * 示例。
+   */
+  examples?: string[];
+  /**
+   * 单命令帮助的补充说明。
+   */
+  detail?: string[];
+  /**
+   * 是否已实现。
+   */
+  implemented?: boolean;
+  /**
+   * 该命令的 JSON data 形状（help --json）。
+   */
+  jsonShape?: unknown;
+  /**
+   * 命令实现；可返回进程退出码。
+   */
+  run: (ctx: CliContext, args: string[]) => void | number | Promise<void | number>;
+}
+
+/**
+ * 任务创建返回形状（run/shot/batch 共用）。
+ */
+const TASK_START_SHAPE = {
+  task_id: "string",
+  state: "queued|running|succeeded|failed|cancelled|interrupted",
+  runs: "string[]",
+  events_path: "tasks/<task_id>/events.jsonl",
+  next_actions: "string[]",
+  deduplicated: "boolean",
+};
+
+// 任务结果形状（--wait）
+const TASK_WAIT_SHAPE = {
+  ...TASK_START_SHAPE,
+  runs_detail: "object[]",
+  interrupted: "boolean",
+  timed_out: "boolean",
+};
+
+/**
+ * 全部命令（注册顺序即 help 顺序；`__worker` 为内部命令，不在此表）。
+ */
 export const COMMANDS: CommandMeta[] = [
   // ---- 项目 ----
   {
     name: "init",
     group: "project",
-    summary: "立项：本地装引擎（venv/clone）或 --remote 直连远端 ComfyUI",
-    usage: "daoyan init <名称> [--version <tag>] [--use-existing <路径>] [--remote <url>] [--mirror <镜像>]",
-    detail: [
-      "ComfyUI 是外部组件：init 只编排（clone / 装依赖），不捆绑。",
-      "--use-existing 接管既有安装，跳过引擎安装步骤。",
-      "--remote <url> 远端模式：不安装引擎，project.json 写 engine.mode=remote 直连。",
+    summary: "在当前目录立项：local 部署项目专属 ComfyUI，remote 绑定外部服务",
+    usage:
+      "daoyan init --mode=local [--modelpath <路径>] [--version <tag>] [--mirror <镜像>] [--no-skill]\n" +
+      "daoyan init --mode=remote --url <url> [--no-skill]",
+    flags: [
+      { name: "--mode", type: "local|remote", required: true, enum: ["local", "remote"], description: "执行模式（必填，无默认值）" },
+      { name: "--modelpath", type: "path", description: "local：外部模型根目录（已存在）" },
+      { name: "--url", type: "url", description: "remote：外部 ComfyUI base URL（必填）" },
+      { name: "--version", type: "tag", description: "local：ComfyUI 版本 tag" },
+      { name: "--mirror", type: "url", description: "local：pip 镜像源" },
+      { name: "--no-skill", type: "boolean", default: false, description: "不生成 .agents/skills/daoyan 与 AGENTS.md" },
+    ],
+    examples: [
+      "daoyan init --mode=local --modelpath /data/models",
+      "daoyan init --mode=remote --url http://gpu-box:8188",
     ],
     implemented: true,
+    jsonShape: { root: "string", mode: "local|remote", project_created: "boolean", engine_installed: "boolean", port: "number|null", skill: "object|null" },
     run: (ctx, args) => runInit(ctx, args),
   },
   {
     name: "validate",
     group: "project",
-    summary: "项目规则全量校验（接力闭合/锚点存在/尺寸 32 倍数/seed 冲突）",
+    summary: "项目级离线校验（配置/workflows/bindings/overrides/shots/引擎目录/Skill）",
     usage: "daoyan validate [--json]",
     implemented: true,
+    jsonShape: { ok: "boolean", issues: "Array<{path,code,severity,message,hint}>" },
     run: (ctx) => runValidate(ctx),
+  },
+  {
+    name: "skill update",
+    group: "project",
+    summary: "重新生成项目内 Agent Skill 与 AGENTS.md 管理块",
+    usage: "daoyan skill update [--json]",
+    implemented: true,
+    jsonShape: { path: "string", files: "number", hash: "string" },
+    run: (ctx, args) => runSkill(ctx, args),
+  },
+
+  // ---- 工作流 ----
+  {
+    name: "workflow new",
+    group: "workflow",
+    summary: "创建空工作流（{ }，后续用 apply/set 编辑）",
+    usage: "daoyan workflow new <name> [--json]",
+    args: [{ name: "name", type: "string", required: true, description: "工作流短名（字母数字 . _ -）" }],
+    implemented: true,
+    run: (ctx, args) => runWorkflow(ctx, ["new", ...args]),
+  },
+  {
+    name: "workflow import",
+    group: "workflow",
+    summary: "导入 ComfyUI API JSON（不重命名节点）",
+    usage: "daoyan workflow import <api.json> --name <name> [--json]",
+    args: [{ name: "api.json", type: "path", required: true, description: "ComfyUI Save (API Format) 导出的 JSON" }],
+    flags: [{ name: "--name", type: "string", required: true, description: "工作流短名" }],
+    examples: ["daoyan workflow import ./from-comfyui.json --name t2v --json"],
+    implemented: true,
+    run: (ctx, args) => runWorkflow(ctx, ["import", ...args]),
+  },
+  {
+    name: "workflow list",
+    group: "workflow",
+    summary: "列出 workflows/ 下的图（节点/连线/合法性）",
+    usage: "daoyan workflow list [--json]",
+    implemented: true,
+    run: (ctx) => runWorkflow(ctx, ["list"]),
+  },
+  {
+    name: "workflow show",
+    group: "workflow",
+    summary: "查看工作流摘要或完整图 / 单节点",
+    usage: "daoyan workflow show <name> [--full] [--node <id>] [--json]",
+    args: [{ name: "name", type: "string", required: true, description: "工作流短名或路径" }],
+    flags: [
+      { name: "--full", type: "boolean", description: "输出完整图" },
+      { name: "--node", type: "string", description: "只看某个节点" },
+    ],
+    implemented: true,
+    run: (ctx, args) => runWorkflow(ctx, ["show", ...args]),
+  },
+  {
+    name: "workflow nodes",
+    group: "workflow",
+    summary: "查询节点目录（默认缓存；--refresh 拉取 /object_info）",
+    usage: "daoyan workflow nodes [--filter <文本>] [--refresh] [--limit N] [--cursor <c>] [--fields <list>] [--json]",
+    flags: [
+      { name: "--filter", type: "text", description: "按类名/展示名/分类过滤" },
+      { name: "--refresh", type: "boolean", description: "重新拉取；local 启动 metadata session（不加载模型）" },
+      { name: "--limit", type: "integer", default: 100, description: "每页数量（最大 1000）" },
+      { name: "--cursor", type: "integer", default: 0, description: "分页游标" },
+      { name: "--fields", type: "list", description: "逗号分隔字段，如 name,category" },
+    ],
+    examples: ["daoyan workflow nodes --filter KSampler --json", "daoyan workflow nodes --refresh --json"],
+    implemented: true,
+    jsonShape: { nodes: "object[]", total: "number", next_cursor: "string|null", fingerprint: "object" },
+    run: (ctx, args) => runWorkflow(ctx, ["nodes", ...args]),
+  },
+  {
+    name: "workflow node",
+    group: "workflow",
+    summary: "查看单个节点类的输入/输出定义",
+    usage: "daoyan workflow node <class_type> [--json]",
+    args: [{ name: "class_type", type: "string", required: true, description: "节点类名" }],
+    examples: ["daoyan workflow node KSampler --json"],
+    implemented: true,
+    run: (ctx, args) => runWorkflow(ctx, ["node", ...args]),
+  },
+  {
+    name: "workflow apply",
+    group: "workflow",
+    summary: "批量图操作（全量校验后原子写盘）",
+    usage: "daoyan workflow apply <name> --ops <ops.json|-> [--json]",
+    args: [{ name: "name", type: "string", required: true, description: "工作流短名或路径" }],
+    flags: [{ name: "--ops", type: "path|-", required: true, description: "ops JSON 文件；- 表示 stdin" }],
+    examples: ["daoyan workflow apply t2v --ops ./ops.json --json"],
+    implemented: true,
+    jsonShape: { applied: "number", assigned_ids: "object[]", changed_nodes: "string[]", removed_links: "object[]", warnings: "object[]", graph_sha256: "string" },
+    run: (ctx, args) => runWorkflow(ctx, ["apply", ...args]),
+  },
+  {
+    name: "workflow set",
+    group: "workflow",
+    summary: "单点设置节点输入（值按 JSON 解析）",
+    usage: "daoyan workflow set <name> <nodeId>.<input> <value> [--json]",
+    args: [
+      { name: "name", type: "string", required: true, description: "工作流短名或路径" },
+      { name: "nodeId.input", type: "string", required: true, description: "目标输入" },
+      { name: "value", type: "string", required: true, description: "JSON 字面量或字符串" },
+    ],
+    examples: ["daoyan workflow set t2v 7.seed 42", 'daoyan workflow set t2v 6.text "a dog"'],
+    implemented: true,
+    run: (ctx, args) => runWorkflow(ctx, ["set", ...args]),
+  },
+  {
+    name: "workflow validate",
+    group: "workflow",
+    summary: "单图离线校验（结构/bindings/overrides/缓存目录）",
+    usage: "daoyan workflow validate <name> [--json]",
+    args: [{ name: "name", type: "string", required: true, description: "工作流短名或路径" }],
+    implemented: true,
+    jsonShape: { workflow: "string", ok: "boolean", issues: "Array<{path,code,severity,message,hint}>" },
+    run: (ctx, args) => runWorkflow(ctx, ["validate", ...args]),
   },
 
   // ---- 生产 ----
   {
+    name: "run",
+    group: "production",
+    summary: "执行一个 workflow（默认异步 task；--wait 才阻塞）",
+    usage:
+      "daoyan run <workflow.json|name> [--set nodeId.input=value ...] [--label <label>]\n" +
+      "                  [--engine <url>] [--request-id <id>] [--wait] [--dry-run]\n" +
+      "                  [--timeout <小时>] [--json]",
+    args: [{ name: "workflow", type: "string", required: true, description: "工作流短名或项目内相对路径" }],
+    flags: [
+      { name: "--set", type: "key=value", description: "覆盖节点输入或 bindings 逻辑名（可重复）" },
+      { name: "--label", type: "string", description: "run label（如 shot:01）" },
+      { name: "--engine", type: "url", description: "单次 remote 覆盖 URL" },
+      { name: "--request-id", type: "string", description: "幂等键；重复调用返回同一 task" },
+      { name: "--wait", type: "boolean", description: "前台等待到终态（SIGINT 只停止等待）" },
+      { name: "--dry-run", type: "boolean", description: "只输出解析后的计划，不占锁、不执行" },
+      { name: "--timeout", type: "number", description: "任务等待上限（小时，默认 3）" },
+    ],
+    examples: [
+      "daoyan run t2v --set seed=42 --label shot:01 --request-id shot-01 --json",
+      "daoyan run workflows/t2v.json --set 7.steps=20 --wait --json",
+    ],
+    implemented: true,
+    jsonShape: TASK_START_SHAPE,
+    run: (ctx, args) => runRun(ctx, args),
+  },
+  {
+    name: "run cancel",
+    group: "production",
+    summary: "取消一个 task（worker 执行 interrupt→free→stop→restore）",
+    usage: "daoyan run cancel <task_id> [--json]",
+    args: [{ name: "task_id", type: "string", required: true, description: "任务 id" }],
+    implemented: true,
+    run: (ctx, args) => runCancel(ctx, args),
+  },
+  {
     name: "shot",
     group: "production",
-    summary: "拍指定镜头（自动 up→首帧注入→提交→轮询→落位；已有产物跳过）",
-    usage: "daoyan shot <镜号...> [--steps N] [--timeout 小时] [--no-evict] [--no-up]",
-    detail: ["--no-evict 当前为默认行为（GPU 编排未接入，参数仅为兼容保留）。"],
+    summary: "拍摄指定镜头（一个 task 多个 run；默认异步）",
+    usage: "daoyan shot <镜号...> [--steps N] [--request-id <id>] [--wait] [--timeout <小时>] [--json]",
+    args: [{ name: "镜号", type: "string", required: true, variadic: true, description: "shots.json 中的镜头 id" }],
+    flags: [
+      { name: "--steps", type: "integer", description: "覆盖采样步数" },
+      { name: "--request-id", type: "string", description: "幂等键" },
+      { name: "--wait", type: "boolean", description: "前台等待到终态" },
+      { name: "--timeout", type: "number", description: "任务等待上限（小时）" },
+    ],
     implemented: true,
+    jsonShape: TASK_START_SHAPE,
     run: (ctx, args) => runShot(ctx, args),
   },
   {
     name: "retake",
     group: "production",
-    summary: "重拍（等价 shot --force）",
-    usage: "daoyan retake <镜号...>",
+    summary: "强制重拍指定镜头（忽略已有成功 run）",
+    usage: "daoyan retake <镜号...> [--steps N] [--request-id <id>] [--wait] [--json]",
+    args: [{ name: "镜号", type: "string", required: true, variadic: true, description: "shots.json 中的镜头 id" }],
     implemented: true,
+    jsonShape: TASK_START_SHAPE,
     run: (ctx, args) => runShot(ctx, args, true),
   },
   {
     name: "batch",
     group: "production",
-    summary: "连拍全部未完成镜头（断点续跑）",
-    usage: "daoyan batch [--no-evict] [--timeout 小时]",
-    run: planned("M1"),
+    summary: "连拍全部未完成镜头（已有成功 run 跳过；默认异步）",
+    usage: "daoyan batch [--request-id <id>] [--wait] [--timeout <小时>] [--json]",
+    flags: [
+      { name: "--request-id", type: "string", description: "幂等键" },
+      { name: "--wait", type: "boolean", description: "前台等待到终态" },
+      { name: "--timeout", type: "number", description: "任务等待上限（小时）" },
+    ],
+    implemented: true,
+    jsonShape: TASK_START_SHAPE,
+    run: (ctx, args) => runBatch(ctx, args),
   },
   {
     name: "wrap",
     group: "production",
-    summary: "杀青：ffmpeg 合片交付到 final/（libx264/crf18/faststart）",
-    usage: "daoyan wrap",
+    summary: "从 runs 选段合片，写 final/cut-*.mp4 与清单（不占机器锁）",
+    usage: "daoyan wrap [--select <镜号>=<run_id> ...] [--json]",
+    flags: [{ name: "--select", type: "镜号=run_id", description: "显式指定某镜使用的 run（可重复）" }],
     implemented: true,
-    run: (ctx) => runWrap(ctx),
-  },
-
-  // ---- 引擎 ----
-  {
-    name: "up",
-    group: "engine",
-    summary: "引擎就位（local：拉起进程+就绪探测；shot 会自动执行）",
-    usage: "daoyan up",
-    run: planned("M1"),
-  },
-  {
-    name: "down",
-    group: "engine",
-    summary: "停止引擎（local 模式；remote 模式引擎由远端管理，本命令不适用）",
-    usage: "daoyan down [--force]",
-    run: planned("M1"),
-  },
-  {
-    name: "engine ls",
-    group: "engine",
-    summary: "列出可用 ComfyUI 版本（本地 engine/versions/ + GitHub tags）",
-    usage: "daoyan engine ls",
-    implemented: true,
-    run: (ctx, args) => runEngine(ctx, ["ls", ...args]),
-  },
-  {
-    name: "engine install",
-    group: "engine",
-    summary: "安装指定版本的 ComfyUI（外部组件，local 模式）",
-    usage: "daoyan engine install <版本 tag>",
-    implemented: true,
-    run: (ctx, args) => runEngine(ctx, ["install", ...args]),
-  },
-  {
-    name: "engine use",
-    group: "engine",
-    summary: "切换项目使用的 ComfyUI 版本（local 模式）",
-    usage: "daoyan engine use <版本 tag|路径>",
-    implemented: true,
-    run: (ctx, args) => runEngine(ctx, ["use", ...args]),
+    jsonShape: { output: "string", manifest: "string", clips: "object[]", missing: "string[]" },
+    run: (ctx, args) => runWrap(ctx, args),
   },
 
   // ---- 运维 ----
   {
     name: "status",
     group: "ops",
-    summary: "场记汇报：引擎/队列/任务锁/GPU/内存/镜头完成度",
-    usage: "daoyan status [--json]",
+    summary: "被动状态快照；--task/--run 查看任务与运行详情",
+    usage:
+      "daoyan status [--json]\n" +
+      "daoyan status --task <task_id> [--wait] [--timeout <秒>] [--json]\n" +
+      "daoyan status --run <run_id> [--wait] [--timeout <秒>] [--json]",
+    flags: [
+      { name: "--task", type: "string", description: "查看任务" },
+      { name: "--run", type: "string", description: "查看单 run" },
+      { name: "--wait", type: "boolean", description: "等待到终态（SIGINT 只停止等待）" },
+      { name: "--timeout", type: "number", description: "等待上限（秒）" },
+    ],
+    examples: ["daoyan status --json", "daoyan status --task t_xxx --wait --json"],
     implemented: true,
-    run: (ctx) => runStatus(ctx),
+    jsonShape: {
+      mode: "local|remote",
+      engine: "object",
+      machine_lock: "object",
+      active_task: "object|null",
+      synced_running_tasks: "object[]",
+      recent_tasks: "object[]",
+      gpu: "object",
+      skill: "object",
+      shots: "object[]",
+    },
+    run: (ctx, args) => runStatus(ctx, args),
   },
   {
     name: "logs",
     group: "ops",
-    summary: "查看日志（docker logs 语义，-f 跟随；清洗 ANSI 与 tqdm 刷屏）",
-    usage: "daoyan logs [-f] [-n N] [--src daoyan-cli|engine|all]",
+    summary: "结构化事件流（--task/--run）或引擎/worker 文本日志",
+    usage:
+      "daoyan logs [-f] [-n N] [--task <task_id> | --run <run_id>] [--json]\n" +
+      "daoyan logs [-f] [-n N] [--src daoyan-cli|engine|worker|all]",
+    flags: [
+      { name: "-f", type: "boolean", description: "跟随到终态/持续输出" },
+      { name: "-n", type: "integer", default: 100, description: "尾部条数" },
+      { name: "--task", type: "string", description: "任务事件流" },
+      { name: "--run", type: "string", description: "单 run 事件" },
+      { name: "--src", type: "engine|worker|daoyan-cli|all", enum: ["engine", "worker", "daoyan-cli", "all"], description: "文件日志数据源" },
+    ],
     implemented: true,
     run: (ctx, args) => runLogs(ctx, args),
   },
+
+  // ---- 引擎 ----
   {
-    name: "list",
-    group: "ops",
-    summary: "打印分镜表",
-    usage: "daoyan list [--json]",
-    run: planned("M1"),
+    name: "engine ls",
+    group: "engine",
+    summary: "列出当前引擎、本地版本目录与 GitHub tags",
+    usage: "daoyan engine ls [--json]",
+    implemented: true,
+    run: (ctx) => runEngine(ctx, ["ls"]),
   },
   {
-    name: "doctor",
-    group: "ops",
-    summary: "环境自检（local：引擎/venv/模型/ffmpeg；remote：连通/节点/模型可见性）",
-    usage: "daoyan doctor [--json]",
-    run: planned("M1"),
+    name: "engine install",
+    group: "engine",
+    summary: "安装指定 ComfyUI 版本到 engine/versions/<tag>",
+    usage: "daoyan engine install <版本 tag> [--json]",
+    args: [{ name: "tag", type: "string", required: true, description: "ComfyUI tag" }],
+    implemented: true,
+    run: (ctx, args) => runEngine(ctx, ["install", ...args]),
   },
   {
-    name: "gpu status",
-    group: "ops",
-    summary: "GPU 与容器模型占用一览",
-    usage: "daoyan gpu status",
-    run: planned("M1"),
-  },
-  {
-    name: "gpu evict",
-    group: "ops",
-    summary: "手动弹出容器模型（通常由 shot 自动执行）",
-    usage: "daoyan gpu evict",
-    run: planned("M1"),
-  },
-  {
-    name: "gpu restore",
-    group: "ops",
-    summary: "恢复被弹出的容器模型",
-    usage: "daoyan gpu restore",
-    run: planned("M1"),
+    name: "engine use",
+    group: "engine",
+    summary: "切换本机使用的 ComfyUI 版本/路径",
+    usage: "daoyan engine use <版本 tag|路径> [--json]",
+    args: [{ name: "tag|path", type: "string", required: true, description: "已安装版本 tag 或包含 main.py 的目录" }],
+    implemented: true,
+    run: (ctx, args) => runEngine(ctx, ["use", ...args]),
   },
 
   // ---- 元 ----
   {
     name: "help",
     group: "meta",
-    summary: "帮助与 agent 自描述：help [命令]；--json 输出命令树/信封/错误码",
+    summary: "帮助与机器自描述（--json 输出命令/参数/Schema/错误目录）",
     usage: "daoyan help [命令] [--json]",
     implemented: true,
     run: (ctx, args) => runHelp(ctx, args, COMMANDS, VERSION),
@@ -227,6 +473,7 @@ export const COMMANDS: CommandMeta[] = [
     group: "meta",
     summary: "自升级（检测 GitHub 最新 tag；--check 仅检测）",
     usage: "daoyan update [--check]",
+    flags: [{ name: "--check", type: "boolean", description: "只检测不安装" }],
     implemented: true,
     run: (ctx, args) => runUpdate(ctx, args),
   },
@@ -240,11 +487,10 @@ export function findCommand(
   args: readonly string[],
 ): { meta: CommandMeta; rest: string[] } | null {
   if (args.length > 0) {
-    // 首参拼出的子命令全名（如 "engine install"）
+    // 子命令全名
     const sub = COMMANDS.find((c) => c.name === `${name} ${args[0]}`);
     if (sub) return { meta: sub, rest: args.slice(1) };
   }
-  // 主命令回退匹配
   const main = COMMANDS.find((c) => c.name === name);
   return main ? { meta: main, rest: [...args] } : null;
 }

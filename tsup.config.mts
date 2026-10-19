@@ -9,6 +9,8 @@ export default defineConfig({
   target: "node22",
   platform: "node",
   clean: true,
+  // 单入口单文件：动态 import 内联，避免多 chunk 在 CI 重建时产生 dist 差异。
+  splitting: false,
   sourcemap: true,
   // tsup 默认把 .mts 入口输出为 .js；显式指定 .mjs 以对齐 package.json 的 bin。
   outExtension: () => ({ js: ".mjs" }),

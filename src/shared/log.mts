@@ -1,5 +1,6 @@
 /** 日志 —— stdout 即时输出 + 可挂载的文件 sink。
- *  任务流落盘：attachFileSink(logs/daoyan-cli.log)；单镜 gen_*.log 由 pipeline 挂载。 */
+ *  JSON 模式下 say 自动改走 stderr，保证 stdout 只有信封；人类模式仍走 stdout。
+ *  任务流落盘：attachFileSink(logs/daoyan-cli.log)；worker 日志由 spawn 的 fd 承接。 */
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
@@ -8,8 +9,17 @@ import { dirname } from "node:path";
  */
 type Sink = (line: string) => void;
 
-// 已挂载的落盘 sink（stdout 之外的附加输出通道）
+// 已挂载的落盘 sink（即时输出之外的附加通道）
 const sinks: Sink[] = [];
+// JSON 模式：say 走 stderr，避免污染 stdout 信封
+let jsonMode = false;
+
+/**
+ * 设置输出模式（cli.mts 解析全局参数后调用）。
+ */
+export function setLogJsonMode(enabled: boolean): void {
+  jsonMode = enabled;
+}
 
 /**
  * 当前时间 HH:MM:SS（日志行前缀）。
@@ -43,12 +53,13 @@ export function detachSinks(): void {
 }
 
 /**
- * 输出一行日志：stdout 即时可见，并尽力写入全部挂载的 sink。
+ * 输出一行日志：JSON 模式写 stderr，人类模式写 stdout；都尽力写入 sink。
  */
 export function say(msg: string): void {
   // 已带时间戳的完整行
   const line = `[${ts()}] ${msg}`;
-  process.stdout.write(line + "\n");
+  if (jsonMode) process.stderr.write(line + "\n");
+  else process.stdout.write(line + "\n");
   // 日志尽力而为：sink 失败不影响主流程
   for (const s of sinks) {
     try {

@@ -59,10 +59,3 @@ export async function extractLastFrame(video: string, outPng: string): Promise<v
     "-vf", `select=eq(n\\,${n - 1})`, "-frames:v", "1", outPng,
   ]);
 }
-
-/**
- * wrap 合片（M1）：concat listfile + libx264 / yuv420p / crf18 / faststart。
- */
-export async function wrapConcat(_clips: string[], _outPath: string): Promise<void> {
-  throw new DaoyanCliError({ code: "not_implemented", message: "wrap 在 M1 交付。" });
-}

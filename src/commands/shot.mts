@@ -1,220 +1,175 @@
-/** shot / retake —— 拍摄命令：锁 → 引擎就位 → 首帧解析 → 生成 → 落位。
- *  断点续跑：已有产物跳过（retake = 强制重拍）。GPU 编排（evict/restore）尚未接入。 */
-import { appendFileSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+/** shot / retake / batch —— 分镜 recipe 执行。
+ *  一个 task 包含多个 run，由同一个 worker 串行执行，共用一次引擎会话与一把机器锁。
+ *  默认异步；--wait 才阻塞。已有成功 run 的镜头默认跳过（retake 强制）。 */
 import { DaoyanCliError } from "../shared/errors.mts";
-import { emitData } from "../shared/json.mts";
-import { say, attachFileSink } from "../shared/log.mts";
 import type { CliContext } from "../shared/context.mts";
-import { loadShotsFile, projectFromContext } from "../core/project/config.mts";
-import { acquireLock, releaseLock } from "../core/lock/task-lock.mts";
-import { ensureEngine } from "../core/comfy/lifecycle.mts";
-import { clientFromEngine } from "../core/comfy/client.mts";
-import { findClip, generateShot, resolveFirstFrame, type GenerateResult } from "../core/pipeline/generate.mts";
-import { LOG_DIR, TASK_LOCK_FILE, TOOL_LOG_FILE, type ShotSpec } from "../core/project/types.mts";
+import { splitInlineFlag, takeValue, usageError } from "../shared/args.mts";
+import { loadMachine, loadShotsFile, requireProject } from "../core/project/config.mts";
+import { enqueueRunTask } from "./run.mts";
 
 /**
- * shot 命令解析出的开关。
+ * shot / retake 解析结果。
  */
 interface ShotFlags {
   /**
-   * --steps：覆盖采样步数。
+   * 目标镜号。
+   */
+  ids: string[];
+  /**
+   * --steps 覆盖。
    */
   steps?: number;
   /**
-   * --timeout：等待超时（小时）。
+   * --timeout（小时）。
    */
   timeoutHours?: number;
   /**
-   * --no-evict：跳过 GPU 让路（当前为默认行为）。
+   * --request-id。
    */
-  noEvict: boolean;
+  requestId?: string;
   /**
-   * --no-up：不自动拉起引擎。
+   * --wait。
    */
-  noUp: boolean;
+  wait: boolean;
   /**
-   * --force：忽略已有产物强制重拍。
+   * --force（hidden；retake 默认 true）。
    */
   force: boolean;
 }
 
 /**
- * 解析 shot 的镜号与开关（镜号必填）。
+ * 解析 shot / retake 参数。
  */
-function parseFlags(args: string[]): { ids: string[]; flags: ShotFlags } {
-  // 位置参数：目标镜号
-  const ids: string[] = [];
-  // 各开关的解析结果
-  const flags: ShotFlags = { noEvict: false, noUp: false, force: false };
-  // 顺序扫描全部参数
+function parseShotArgs(args: string[], presetForce: boolean): ShotFlags {
+  // 结果
+  const out: ShotFlags = { ids: [], wait: false, force: presetForce };
   for (let i = 0; i < args.length; i++) {
-    // 当前参数
-    const a = args[i];
-    if (a === undefined) break;
-    if (a === "--force") flags.force = true;
-    else if (a === "--no-evict") flags.noEvict = true;
-    else if (a === "--no-up") flags.noUp = true;
-    else if (a === "--steps") {
-      // --steps 的取值
-      const v = args[i + 1];
-      if (v === undefined) throw new DaoyanCliError({ code: "usage", message: "--steps 需要数值", exit: 2 });
-      flags.steps = Number(v);
-      i++;
-    } else if (a === "--timeout") {
-      // --timeout 的取值
-      const v = args[i + 1];
-      if (v === undefined) throw new DaoyanCliError({ code: "usage", message: "--timeout 需要小时数", exit: 2 });
-      flags.timeoutHours = Number(v);
-      i++;
-    } else if (a.startsWith("-")) {
-      throw new DaoyanCliError({ code: "usage", message: `未知参数 ${a}`, exit: 2 });
-    } else ids.push(a);
+    const raw = args[i] ?? "";
+    const { name, inline } = splitInlineFlag(raw);
+    if (name === "--steps") {
+      const v = takeValue(args, i, inline, "--steps");
+      out.steps = Number(v.value);
+      if (!Number.isInteger(out.steps) || out.steps <= 0) usageError("--steps 需要正整数");
+      i += v.skip;
+      continue;
+    }
+    if (name === "--timeout") {
+      const v = takeValue(args, i, inline, "--timeout");
+      out.timeoutHours = Number(v.value);
+      if (!Number.isFinite(out.timeoutHours) || out.timeoutHours <= 0) usageError("--timeout 需要正数（小时）");
+      i += v.skip;
+      continue;
+    }
+    if (name === "--request-id") {
+      const v = takeValue(args, i, inline, "--request-id");
+      out.requestId = v.value;
+      i += v.skip;
+      continue;
+    }
+    if (name === "--wait") {
+      out.wait = true;
+      continue;
+    }
+    if (name === "--force") {
+      out.force = true;
+      continue;
+    }
+    if (name === "--no-evict" || name === "--no-up") {
+      // 旧参数已删除，给出明确提示而不是静默接受
+      usageError(`${name} 已删除：引擎生命周期由 task worker 管理，GPU 接管由 project.json 的 gpu.takeover 控制`);
+    }
+    if (name.startsWith("-")) usageError(`未知参数 ${name}`);
+    out.ids.push(name);
   }
-  if (ids.length === 0) throw new DaoyanCliError({ code: "usage", message: "缺少镜号，如 daoyan shot 01 02", exit: 2 });
-  return { ids, flags };
+  if (out.ids.length === 0) usageError("缺少镜号，如 daoyan shot 01 02");
+  return out;
 }
 
 /**
- * shot / retake 命令入口：逐镜执行 锁 → 就位 → 生成 → 落位。
+ * shot / retake 入口。
  */
-export async function runShot(ctx: CliContext, args: string[], presetForce = false): Promise<void> {
-  // 解析出的镜号与开关
-  const { ids, flags } = parseFlags(args);
-  // 是否强制重拍（retake 命令或 --force）
-  const force = presetForce || flags.force;
-  // 项目定位结果
-  const found = projectFromContext(ctx);
-  if (found === null) {
-    throw new DaoyanCliError({ code: "project_not_found", message: "未找到 project.json（自当前位置向上寻找）。用 --project 指定或在项目目录内运行" });
-  }
-  // 项目根与配置
-  const { root, config: cfg } = found;
-  attachFileSink(join(root, LOG_DIR, TOOL_LOG_FILE));
-  // 分镜表（镜号解析与首帧规则的数据源）
+export async function runShot(ctx: CliContext, args: string[], presetForce = false): Promise<number> {
+  const flags = parseShotArgs(args, presetForce);
+  const { root, config: project } = requireProject(ctx);
+  const machine = loadMachine(root);
+  // 分镜表（提前校验镜号，避免创建无效 task）
   const shots = loadShotsFile(root);
-
-  if (cfg.engine.mode === "remote") {
-    throw new DaoyanCliError({
-      code: "not_implemented",
-      message: "remote 模式的生成（首帧上传 / 产物落位）在 M2 交付；当前请用 local 模式",
-    });
-  }
-
-  // 解析镜号 → 分镜对象
-  const targets: ShotSpec[] = [];
-  // 逐个解析为分镜对象
-  for (const id of ids) {
-    // 当前镜号对应的分镜
-    const s = shots.shots.find((x) => x.id === id);
-    if (s === undefined) {
+  for (const id of flags.ids) {
+    if (!shots.shots.some((s) => s.id === id)) {
       throw new DaoyanCliError({
         code: "usage",
-        message: `未知镜号 ${id}；可用：${shots.shots.map((x) => x.id).join(" ")}`,
+        message: `未知镜号 ${id}；可用：${shots.shots.map((s) => s.id).join(" ")}`,
         exit: 2,
       });
     }
-    targets.push(s);
   }
-
-  // 任务锁文件路径
-  const lockPath = join(root, LOG_DIR, TASK_LOCK_FILE);
-  acquireLock(lockPath, `shot ${ids.join(" ")}`);
-  // 本次成功的生成结果
-  const results: GenerateResult[] = [];
-  // 因已有产物跳过的镜号
-  const skipped: string[] = [];
-  // 失败镜号与原因
-  const failed: Array<{ id: string; error: string; code: string }> = [];
-  try {
-    // 引擎客户端（--no-up 时直接连，否则确保就位）
-    let client = clientFromEngine(cfg.engine);
-    if (!flags.noUp) {
-      client = await ensureEngine(root, cfg, say);
-    }
-    // 引擎队列执行中任务数
-    const running = await client.queueRunningLen();
-    if (running !== null && running > 0) {
-      throw new DaoyanCliError({
-        code: "engine_busy",
-        message: `引擎队列已有 ${running} 个执行中任务（可能来自网页或其他提交），拒绝并行`,
-      });
-    }
-
-    // 逐镜拍摄（已有产物跳过）
-    for (const shot of targets) {
-      // 断点续跑：已有产物跳过
-      const existing = findClip(root, cfg, shot);
-      if (existing !== null && !force) {
-        say(`镜 ${shot.id} 已有产物，跳过（重拍用 retake）：${existing}`);
-        skipped.push(shot.id);
-        continue;
-      }
-      try {
-        // 本镜的流水日志文件
-        const genLog = genLogPath(root, shot.id);
-        // 本镜日志输出（stdout + 落盘）
-        const log = (m: string): void => {
-          say(m);
-          try {
-            appendFileSync(genLog, `[${new Date().toTimeString().slice(0, 8)}] ${m}\n`);
-          } catch {
-            // 忽略：单镜日志写入失败不影响主流程
-          }
-        };
-
-        // 解析出的首帧（锚点 / 接力 / 纯文生）
-        const ff = await resolveFirstFrame(root, cfg, shots, shot, log);
-        // 本镜生成结果
-        const r = await generateShot({
-          root,
-          cfg,
-          shots,
-          shot,
-          client,
-          log,
-          firstFrame: ff,
-          stepsOverride: flags.steps,
-          timeoutMs: flags.timeoutHours !== undefined ? flags.timeoutHours * 3600_000 : undefined,
-        });
-        results.push(r);
-        say(`镜 ${shot.id} 完成（${r.seconds}s）：${r.output}`);
-      } catch (e) {
-        if (e instanceof DaoyanCliError) {
-          failed.push({ id: shot.id, code: e.code, error: e.message });
-          say(`镜 ${shot.id} 失败[${e.code}]：${e.message}`);
-        } else {
-          failed.push({ id: shot.id, code: "shot_failed", error: e instanceof Error ? e.message : String(e) });
-          say(`镜 ${shot.id} 失败：${e instanceof Error ? e.message : String(e)}`);
-        }
-      }
-    }
-  } finally {
-    releaseLock(lockPath);
-  }
-
-  if (failed.length > 0) {
-    throw new DaoyanCliError({
-      code: "shot_failed",
-      message: `完成 ${results.length}，跳过 ${skipped.length}，失败 ${failed.length}：${failed.map((f) => f.id).join(" ")}`,
-      details: { done: results, skipped, failed },
-    });
-  }
-  if (ctx.json) {
-    emitData({ done: results, skipped });
-    return;
-  }
-  say(`全部完成：${results.map((r) => r.shotId).join(" ") || "（无新拍）"}`);
+  return enqueueRunTask({
+    ctx,
+    root,
+    project,
+    machine,
+    command: `${presetForce ? "retake" : "shot"} ${flags.ids.join(" ")}`,
+    kind: presetForce ? "retake" : "shot",
+    ...(flags.requestId !== undefined ? { requestId: flags.requestId } : {}),
+    options: {
+      shots: flags.ids,
+      force: flags.force,
+      ...(flags.steps !== undefined ? { steps: flags.steps } : {}),
+      ...(flags.timeoutHours !== undefined ? { timeout_ms: Math.round(flags.timeoutHours * 3_600_000) } : {}),
+    },
+    wait: flags.wait,
+  });
 }
 
 /**
- * 生成单镜日志路径（logs/gen_<镜号>_<时间戳>.log）。
+ * batch：执行全部未完成镜头（已有成功 run 的镜头跳过）。
  */
-function genLogPath(root: string, id: string): string {
-  // logs 目录（不存在则建）
-  const dir = join(root, LOG_DIR);
-  mkdirSync(dir, { recursive: true });
-  // 紧凑时间戳（YYYYMMDDHHMMSS）
-  const ts = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14);
-  return join(dir, `gen_${id}_${ts}.log`);
+export async function runBatch(ctx: CliContext, args: string[]): Promise<number> {
+  let timeoutHours: number | undefined;
+  let requestId: string | undefined;
+  let wait = false;
+  for (let i = 0; i < args.length; i++) {
+    const raw = args[i] ?? "";
+    const { name, inline } = splitInlineFlag(raw);
+    if (name === "--timeout") {
+      const v = takeValue(args, i, inline, "--timeout");
+      timeoutHours = Number(v.value);
+      if (!Number.isFinite(timeoutHours) || timeoutHours <= 0) usageError("--timeout 需要正数（小时）");
+      i += v.skip;
+      continue;
+    }
+    if (name === "--request-id") {
+      const v = takeValue(args, i, inline, "--request-id");
+      requestId = v.value;
+      i += v.skip;
+      continue;
+    }
+    if (name === "--wait") {
+      wait = true;
+      continue;
+    }
+    if (name === "--no-evict" || name === "--no-up") {
+      usageError(`${name} 已删除：生命周期由 worker 管理`);
+    }
+    usageError(`未知参数 ${name}`);
+  }
+  const { root, config: project } = requireProject(ctx);
+  const machine = loadMachine(root);
+  // 提前校验分镜表存在且非空
+  const shots = loadShotsFile(root);
+  if (shots.shots.length === 0) throw new DaoyanCliError({ code: "config_invalid", message: "shots.json 没有镜头" });
+  return enqueueRunTask({
+    ctx,
+    root,
+    project,
+    machine,
+    command: "batch",
+    kind: "batch",
+    ...(requestId !== undefined ? { requestId } : {}),
+    options: {
+      force: false,
+      ...(timeoutHours !== undefined ? { timeout_ms: Math.round(timeoutHours * 3_600_000) } : {}),
+    },
+    wait,
+  });
 }

@@ -1,67 +1,134 @@
-/** wrap —— 杀青合片：按分镜表顺序收集已完成的镜头产物，
- *  ffmpeg concat（libx264 / yuv420p / crf18 / faststart）交付到 final/。 */
-import { mkdirSync, writeFileSync } from "node:fs";
+/** wrap —— 杀青合片：按分镜顺序从 runs 选取成功产物，ffmpeg concat 交付 final/。
+ *  CPU 后处理，不占 machine lock；重拍不覆盖（cut-<timestamp>.mp4 + manifest）。 */
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DaoyanCliError } from "../shared/errors.mts";
 import { emitData } from "../shared/json.mts";
-import { say, attachFileSink } from "../shared/log.mts";
+import { say } from "../shared/log.mts";
 import type { CliContext } from "../shared/context.mts";
-import { loadShotsFile, projectFromContext } from "../core/project/config.mts";
-import { LOG_DIR, TOOL_LOG_FILE } from "../core/project/types.mts";
-import { findClip } from "../core/pipeline/generate.mts";
+import { splitInlineFlag, takeValue, usageError } from "../shared/args.mts";
+import { sha256File } from "../shared/fs.mts";
 import { execCapture } from "../shared/exec.mts";
+import { loadShotsFile, requireProject } from "../core/project/config.mts";
+import {
+  CONCAT_LIST_FILE,
+  FINAL_DIR,
+  type RunRecord,
+} from "../core/project/types.mts";
+import { latestSucceededRun, requireRun, runOutputAbs } from "../core/run/store.mts";
 
 /**
- * wrap 命令入口：收集产物 → ffmpeg concat 合片 → 交付 final/。
+ * 选中的片段。
  */
-export async function runWrap(ctx: CliContext): Promise<void> {
-  // 项目定位结果
-  const found = projectFromContext(ctx);
-  if (found === null) {
-    throw new DaoyanCliError({ code: "project_not_found", message: "未找到 project.json；用 --project 指定或在项目目录内运行" });
+interface SelectedClip {
+  /**
+   * 镜号。
+   */
+  shot: string;
+  /**
+   * 选中的 run。
+   */
+  run_id: string;
+  /**
+   * 产物相对 run 目录的路径。
+   */
+  artifact: string;
+  /**
+   * 运行时绝对路径。
+   */
+  abs: string;
+}
+
+/**
+ * 从 run 中选视频产物（运行时补绝对路径）。
+ */
+function pickVideoAt(root: string, rec: RunRecord): { path: string; abs: string } | null {
+  const chosen = rec.outputs.find((o) => /\.(mp4|webm|mkv|mov|gif)$/i.test(o.name)) ?? rec.outputs[0];
+  if (chosen === undefined) return null;
+  return { path: chosen.path, abs: runOutputAbs(root, rec, chosen) };
+}
+
+/**
+ * wrap 命令入口。
+ */
+export async function runWrap(ctx: CliContext, args: string[]): Promise<number> {
+  // --select 镜号=run_id
+  const explicit = new Map<string, string>();
+  for (let i = 0; i < args.length; i++) {
+    const { name, inline } = splitInlineFlag(args[i] ?? "");
+    if (name === "--select") {
+      const v = takeValue(args, i, inline, "--select");
+      const eq = v.value.indexOf("=");
+      if (eq <= 0) usageError(`--select 需要 <镜号>=<run_id>（收到 ${v.value}）`);
+      explicit.set(v.value.slice(0, eq), v.value.slice(eq + 1));
+      i += v.skip;
+      continue;
+    }
+    usageError(`未知参数 ${name}`);
   }
-  // 项目根与配置
-  const { root, config: cfg } = found;
-  attachFileSink(join(root, LOG_DIR, TOOL_LOG_FILE));
-  // 分镜表（决定合片顺序）
+
+  const { root } = requireProject(ctx);
   const shots = loadShotsFile(root);
-
-  if (cfg.engine.mode === "remote") {
-    throw new DaoyanCliError({ code: "not_implemented", message: "remote 模式的产物拉取在 M2 交付，wrap 暂仅支持 local 模式" });
-  }
-
-  // 按分镜顺序收集到的成片路径
-  const clips: string[] = [];
-  // 尚无成片的镜号
+  // 选中片段
+  const clips: SelectedClip[] = [];
+  // 缺失镜号
   const missing: string[] = [];
-  // 逐镜收集产物
-  for (const s of shots.shots) {
-    // 该镜已有产物（无则 null）
-    const p = findClip(root, cfg, s);
-    if (p !== null) clips.push(p);
-    else missing.push(s.id);
+  for (const shot of shots.shots) {
+    // 显式选择或最新成功 run
+    const explicitId = explicit.get(shot.id);
+    let rec: RunRecord | null;
+    if (explicitId !== undefined) {
+      rec = requireRun(root, explicitId);
+      if (rec.status !== "succeeded") {
+        throw new DaoyanCliError({
+          code: "wrap_failed",
+          message: `--select ${shot.id}=${explicitId} 的 run 不是 succeeded（${rec.status}）`,
+        });
+      }
+    } else {
+      rec = latestSucceededRun(root, `shot:${shot.id}`);
+    }
+    if (rec === null) {
+      missing.push(shot.id);
+      continue;
+    }
+    // 视频产物
+    const pick = pickVideoAt(root, rec);
+    if (pick === null || !existsSync(pick.abs)) {
+      missing.push(shot.id);
+      continue;
+    }
+    clips.push({ shot: shot.id, run_id: rec.run_id, artifact: pick.path, abs: pick.abs });
   }
+
   if (clips.length < 2) {
     throw new DaoyanCliError({
       code: "wrap_failed",
-      message: `可用于合片的镜头不足 2 段（当前 ${clips.length}/${shots.shots.length}；缺 ${missing.join(" ") || "无"}）。先完成拍摄：daoyan batch/shot`,
+      message: `可用于合片的镜头不足 2 段（当前 ${clips.length}/${shots.shots.length}；缺 ${missing.join(" ") || "无"}）`,
+      details: { clips, missing },
     });
   }
 
   // 交付目录
-  const finalDir = join(root, "final");
+  const finalDir = join(root, FINAL_DIR);
   mkdirSync(finalDir, { recursive: true });
-  // 输出文件名前缀（去尾斜杠，空则 drama）
-  const prefixName = cfg.output_prefix.replace(/\/+$/, "") || "drama";
-  // 成片输出路径
-  const outPath = join(finalDir, `${prefixName}.mp4`);
+  // 时间戳（含毫秒，避免同秒覆盖）
+  const ts = new Date().toISOString().replace(/[-:]/g, "").replace(/\.(\d{3})Z$/, "$1");
+  // 成片路径
+  const outName = `cut-${ts}.mp4`;
+  const outPath = join(finalDir, outName);
+  const manifestName = `cut-${ts}.json`;
+  const manifestPath = join(finalDir, manifestName);
 
-  // concat list：单引号按 ffmpeg concat demuxer 约定转义
-  const listFile = join(root, "concat_list.txt");
-  writeFileSync(listFile, clips.map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join("\n") + "\n");
+  // concat list
+  const listFile = join(root, CONCAT_LIST_FILE);
+  writeFileSync(
+    listFile,
+    clips.map((c) => `file '${c.abs.replace(/'/g, "'\\''")}'`).join("\n") + "\n",
+  );
 
-  say(`合片 ${clips.length} 段 → ${outPath}（libx264 / crf18 / faststart）...`);
-  // ffmpeg 合片结果
+  say(`合片 ${clips.length} 段 → final/${outName}（libx264 / crf18 / faststart）...`);
+  // ffmpeg 合片
   const r = await execCapture("ffmpeg", [
     "-y",
     "-f",
@@ -84,12 +151,38 @@ export async function runWrap(ctx: CliContext): Promise<void> {
     throw new DaoyanCliError({
       code: "wrap_failed",
       message: `ffmpeg 退出码 ${r.code}：${r.stderr.slice(-500)}`,
+      details: { clips },
     });
   }
-  if (missing.length > 0) say(`注意：有 ${missing.length} 镜未完成未纳入（${missing.join(" ")}）`);
-  say(`合片完成：${outPath}`);
 
+  // cut manifest
+  const manifest = {
+    cut: outName,
+    created_at: new Date().toISOString(),
+    clips: clips.map((c) => ({
+      shot: c.shot,
+      run_id: c.run_id,
+      artifact: c.artifact,
+    })),
+    missing,
+    ffmpeg: { codec: "libx264", crf: 18, pix_fmt: "yuv420p", faststart: true },
+  };
+  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
+
+  const data = {
+    output: `${FINAL_DIR}/${outName}`,
+    abs_path: outPath,
+    manifest: `${FINAL_DIR}/${manifestName}`,
+    sha256: sha256File(outPath),
+    clips: clips.map((c) => ({ shot: c.shot, run_id: c.run_id, artifact: c.artifact })),
+    missing,
+  };
   if (ctx.json) {
-    emitData({ output: outPath, clips, missing });
+    emitData(data);
+    return 0;
   }
+  if (missing.length > 0) say(`注意：${missing.length} 镜未完成未纳入（${missing.join(" ")}）`);
+  say(`合片完成：final/${outName}`);
+  say(`清单：final/${manifestName}`);
+  return 0;
 }

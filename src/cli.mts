@@ -1,29 +1,35 @@
-/** daoyan-cli —— 面向 AI Agent 的 ComfyUI 生产编排 CLI · 入口
- *  零依赖手写参数解析（保持轻量）。
- *  解析规则：全局参数（--json/--no-color/--project）可出现在任意位置；
- *  命令名之后出现的其余 - 开头参数一律透传给命令自行解析。 */
+/** daoyan-cli 入口 —— 零依赖参数解析 + 命令分发 + 统一信封。
+ *  非 TTY 默认 JSON；`--json` / `--no-json` / DYCLI_OUTPUT 可覆盖。
+ *  `__worker` 是 detached task worker 的内部入口（不写入 help）。 */
 import { COMMANDS, findCommand } from "./commands/registry.mts";
 import { DaoyanCliError } from "./shared/errors.mts";
 import { emitError } from "./shared/json.mts";
 import { printMainHelp, runHelp } from "./commands/help.mts";
-import type { CliContext } from "./shared/context.mts";
+import { defaultJsonMode, type CliContext } from "./shared/context.mts";
+import { setLogJsonMode } from "./shared/log.mts";
 import { VERSION } from "./shared/version.mts";
+import { installSignalHandlers } from "./shared/signals.mts";
+import { runWorker } from "./core/task/worker.mts";
 
 /**
  * 解析全局参数并分发到命令；返回进程退出码。
  */
 async function main(ctx: CliContext, argv: string[]): Promise<number> {
-  // 剥离全局参数后的剩余参数（命令名 + 命令级参数）
+  // 命令名 + 命令级参数
   const rest: string[] = [];
-  // 是否已遇到命令名（决定 -h 等参数归属全局还是命令）
+  // 是否已遇到命令名
   let sawCommand = false;
-  // 顺序扫描全部参数
   for (let i = 0; i < argv.length; i++) {
-    // 当前参数
     const a = argv[i];
     if (a === undefined) break;
     if (a === "--json") {
       ctx.json = true;
+      setLogJsonMode(true);
+      continue;
+    }
+    if (a === "--no-json") {
+      ctx.json = false;
+      setLogJsonMode(false);
       continue;
     }
     if (a === "--no-color") {
@@ -31,7 +37,6 @@ async function main(ctx: CliContext, argv: string[]): Promise<number> {
       continue;
     }
     if (a === "--project") {
-      // --project 的取值
       const v = argv[i + 1];
       if (v === undefined || v === "") {
         throw new DaoyanCliError({ code: "usage", message: "--project 需要一个路径参数", exit: 2 });
@@ -41,7 +46,7 @@ async function main(ctx: CliContext, argv: string[]): Promise<number> {
       continue;
     }
     if ((a === "-h" || a === "--help") && !sawCommand) {
-      printMainHelp(COMMANDS, VERSION);
+      runHelp(ctx, [], COMMANDS, VERSION);
       return 0;
     }
     if ((a === "-v" || a === "--version") && !sawCommand) {
@@ -52,7 +57,7 @@ async function main(ctx: CliContext, argv: string[]): Promise<number> {
       if (!sawCommand) {
         throw new DaoyanCliError({ code: "usage", message: `未知参数 ${a}`, exit: 2 });
       }
-      rest.push(a); // 命令级参数透传
+      rest.push(a);
       continue;
     }
     sawCommand = true;
@@ -61,43 +66,66 @@ async function main(ctx: CliContext, argv: string[]): Promise<number> {
 
   // 命令名与命令级参数
   const [name, ...cmdArgs] = rest;
+  // 后续日志按最终输出模式选择 stdout/stderr
+  setLogJsonMode(ctx.json);
   if (name === undefined) {
-    printMainHelp(COMMANDS, VERSION);
+    runHelp(ctx, [], COMMANDS, VERSION);
     return 0;
   }
+
+  // 内部 worker 入口（detached 进程）
+  if (name === "__worker") {
+    // task 目录
+    const taskDir = process.env.DYCLI_TASK_DIR;
+    // 锁令牌
+    const token = process.env.DYCLI_LOCK_TOKEN;
+    if (taskDir === undefined || taskDir === "" || token === undefined || token === "") {
+      throw new DaoyanCliError({
+        code: "worker_start_failed",
+        message: "__worker 缺少 DYCLI_TASK_DIR / DYCLI_LOCK_TOKEN",
+      });
+    }
+    return runWorker({ taskDir, token });
+  }
+
   if (name === "help") {
     runHelp(ctx, cmdArgs, COMMANDS, VERSION);
     return 0;
   }
 
-  // 命中的命令（含子命令解析）
+  // 命中的命令
   const found = findCommand(name, cmdArgs);
   if (found === null) {
     throw new DaoyanCliError({ code: "usage", message: `未知命令 ${name}；daoyan help 查看全部`, exit: 2 });
   }
-  await found.meta.run(ctx, found.rest);
-  return 0;
+  // 命令可返回退出码（run/status --wait）
+  const code = await found.meta.run(ctx, found.rest);
+  return typeof code === "number" ? code : 0;
 }
 
-// 单次运行共享的命令上下文（全局参数解析后填充）
-const ctx: CliContext = { json: false, noColor: false };
+// 单次运行共享的命令上下文（非 TTY 默认 JSON）
+const ctx: CliContext = {
+  json: defaultJsonMode(Boolean(process.stdout.isTTY), process.env),
+  noColor: false,
+};
 
-// 退出码约定：130 = 被 Ctrl-C 中断
-process.on("SIGINT", () => {
-  process.exit(130);
-});
+// 前台信号：命令注册处理器时自行决定退出；否则 130
+installSignalHandlers();
 
-// 顶层直接 await：结构化错误按信封 / 退出码输出，其余按致命错误处理
+// 顶层执行：结构化错误按信封/退出码输出
 try {
-  process.exit(await main(ctx, process.argv.slice(2)));
+  process.exitCode = await main(ctx, process.argv.slice(2));
 } catch (e: unknown) {
   if (e instanceof DaoyanCliError) {
     if (ctx.json) emitError(e);
-    else process.stderr.write(`ERROR[${e.code}] ${e.message}\n`);
-    process.exit(e.exit);
+    else {
+      process.stderr.write(`ERROR[${e.code}] ${e.message}\n`);
+      if (e.hint !== "") process.stderr.write(`hint: ${e.hint}\n`);
+      if (e.nextActions !== undefined) process.stderr.write(`next: ${e.nextActions.join(" | ")}\n`);
+    }
+    process.exitCode = e.exit;
+  } else {
+    process.stderr.write(`FATAL ${e instanceof Error ? (e.stack ?? e.message) : String(e)}\n`);
+    process.exitCode = 1;
   }
-  process.stderr.write(
-    `FATAL ${e instanceof Error ? (e.stack ?? e.message) : String(e)}\n`,
-  );
-  process.exit(1);
 }

@@ -1,105 +1,121 @@
-/** logs —— 日志查看（docker logs 语义）：-n 尾部行数、-f 跟随、--src 数据源过滤。
- *  清洗 ANSI 转义与 tqdm 刷屏（连续同进度只留最后一条）。 */
-import { existsSync, openSync, readSync, statSync, closeSync } from "node:fs";
+/** logs —— 结构化事件流优先，引擎/worker 文本日志兜底。
+ *  - `--task <id>`：tasks/<id>/events.jsonl（-f 跟随到终态）；
+ *  - `--run <id>`：该 run 相关事件；
+ *  - 默认：logs/ 下 engine-*.log / worker-*.log / daoyan-cli.log 尾部；
+ *  - --json：一次性返回事件数组；-f 时每行一个成功信封（JSONL）。 */
+import { closeSync, existsSync, openSync, readSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { DaoyanCliError } from "../shared/errors.mts";
-import { emitData } from "../shared/json.mts";
+import { emitData, SCHEMA_VERSION } from "../shared/json.mts";
 import type { CliContext } from "../shared/context.mts";
-import { projectFromContext } from "../core/project/config.mts";
-import { ENGINE_LOG_FILE, LOG_DIR, TOOL_LOG_FILE } from "../core/project/types.mts";
+import { splitInlineFlag, takeValue, usageError } from "../shared/args.mts";
+import { loadMachineIfExists, requireProject } from "../core/project/config.mts";
+import { LOG_DIR, isTerminalStatus, type TaskEvent } from "../core/project/types.mts";
+import { readTask, taskSummary } from "../core/task/store.mts";
+import { readEvents } from "../core/task/events.mts";
+import { taskDir } from "../core/task/store.mts";
+import { readRun } from "../core/run/store.mts";
+import { listTasks } from "../core/task/store.mts";
+import { onSignal } from "../shared/signals.mts";
 
 /**
- * 日志数据源标识（--src 的取值）。
+ * 文件日志数据源。
  */
-type Src = "daoyan-cli" | "engine" | "all";
-
-// ANSI 转义序列（日志清洗用）
-const ANSI_RE = /\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*(?:\x07|\x1b\\)/g;
-// tqdm 进度行形如 " 45%|██ | 12/26 [<00:03]"（清洗时压缩连续刷新）
-const TQDM_RE = /^\s*\d+%.{0,40}\|\s*(\d+)\/(\d+) \[/;
+type Src = "daoyan-cli" | "engine" | "worker" | "all";
 
 /**
- * logs 命令解析出的参数。
+ * logs 解析结果。
  */
-interface ParsedArgs {
+interface LogsFlags {
   /**
-   * -f：是否跟随追加。
+   * --task。
+   */
+  taskId?: string;
+  /**
+   * --run。
+   */
+  runId?: string;
+  /**
+   * -f。
    */
   follow: boolean;
   /**
-   * -n：显示尾部行数。
+   * -n。
    */
   n: number;
   /**
-   * --src：数据源过滤。
+   * --src。
    */
   src: Src;
 }
 
+// ANSI 转义
+const ANSI_RE = /\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*(?:\x07|\x1b\\)/g;
+// tqdm 形态
+const TQDM_RE = /^\s*\d+%.{0,40}\|\s*(\d+)\/(\d+) \[/;
+
 /**
- * 解析 logs 的参数（-f / -n / --src，其余报用法错误）。
+ * 解析 logs 参数。
  */
-function parseArgs(args: string[]): ParsedArgs {
-  // 解析结果（含缺省值）
-  const out: ParsedArgs = { follow: false, n: 100, src: "all" };
-  // 顺序扫描全部参数
+function parseArgs(args: string[]): LogsFlags {
+  // 结果
+  const out: LogsFlags = { follow: false, n: 100, src: "all" };
   for (let i = 0; i < args.length; i++) {
-    // 当前参数
-    const a = args[i];
-    if (a === undefined) break;
-    if (a === "-f" || a === "--follow") out.follow = true;
-    else if (a === "-n") {
-      // -n 的取值
-      const v = args[i + 1];
-      if (v === undefined || !/^\d+$/.test(v)) {
-        throw new DaoyanCliError({ code: "usage", message: "-n 需要行数", exit: 2 });
+    const { name, inline } = splitInlineFlag(args[i] ?? "");
+    if (name === "-f" || name === "--follow") {
+      out.follow = true;
+      continue;
+    }
+    if (name === "-n") {
+      const v = takeValue(args, i, inline, "-n");
+      if (!/^\d+$/.test(v.value)) usageError("-n 需要行数");
+      out.n = Number(v.value);
+      i += v.skip;
+      continue;
+    }
+    if (name === "--task") {
+      const v = takeValue(args, i, inline, "--task");
+      out.taskId = v.value;
+      i += v.skip;
+      continue;
+    }
+    if (name === "--run") {
+      const v = takeValue(args, i, inline, "--run");
+      out.runId = v.value;
+      i += v.skip;
+      continue;
+    }
+    if (name === "--src") {
+      const v = takeValue(args, i, inline, "--src");
+      if (v.value !== "daoyan-cli" && v.value !== "engine" && v.value !== "worker" && v.value !== "all") {
+        usageError(`--src 仅接受 daoyan-cli|engine|worker|all（收到 ${v.value}）`);
       }
-      out.n = Number(v);
-      i++;
-    } else if (a === "--src") {
-      // --src 的取值
-      const v = args[i + 1];
-      if (v !== "daoyan-cli" && v !== "engine" && v !== "all") {
-        throw new DaoyanCliError({ code: "usage", message: `--src 仅接受 daoyan-cli|engine|all（收到 ${v ?? "空"}）`, exit: 2 });
-      }
-      out.src = v;
-      i++;
-    } else throw new DaoyanCliError({ code: "usage", message: `未知参数 ${a}`, exit: 2 });
+      out.src = v.value;
+      i += v.skip;
+      continue;
+    }
+    usageError(`未知参数 ${name}`);
   }
+  if (out.taskId !== undefined && out.runId !== undefined) usageError("--task 与 --run 只能二选一");
   return out;
 }
 
 /**
- * 按 --src 过滤出待读的日志文件（name 供 --json 分组用）。
- */
-function sources(root: string, src: Src): Array<{ name: string; file: string }> {
-  // 全部可用数据源（项目日志 + 引擎日志）
-  const all = [
-    { name: "daoyan-cli", file: join(root, LOG_DIR, TOOL_LOG_FILE) },
-    { name: "engine", file: join(root, LOG_DIR, ENGINE_LOG_FILE) },
-  ];
-  return src === "all" ? all : all.filter((s) => s.name === src);
-}
-
-/**
- * 清洗日志行：去 ANSI 转义、压掉连续重复的 tqdm 进度行。
+ * 清洗文本日志行。
  */
 function cleanLines(raw: string): string[] {
-  // 清洗后的行列表
+  // 去 ANSI
   const lines = raw
     .replace(ANSI_RE, "")
     .split(/[\r\n]+/)
     .filter((l) => l !== "");
-  // 输出行（挤压 tqdm 用）
+  // 输出行
   const out: string[] = [];
-  // 上一条 tqdm 的 "cur/total" 键
+  // 上一条 tqdm 键
   let lastKey: string | null = null;
-  // 逐行挤压连续 tqdm 刷新
   for (const l of lines) {
-    // 当前行是否命中 tqdm 形态
     const m = TQDM_RE.exec(l);
     if (m !== null) {
-      // 当前进度键
       const key = `${m[1]}/${m[2]}`;
       if (key === lastKey && out.length > 0) {
         out[out.length - 1] = l;
@@ -116,119 +132,259 @@ function cleanLines(raw: string): string[] {
 }
 
 /**
- * 读取文件尾部 n 行（字节窗口近似；文件缺失 / 不可读返回空）。
+ * 读取文件尾部 n 行。
  */
 function readTail(file: string, n: number): string[] {
   if (!existsSync(file)) return [];
-  // 文件大小（读取窗口上界）
+  // 文件大小
   let size = 0;
   try {
     size = statSync(file).size;
   } catch {
     return [];
   }
-  // 读取窗口（按 400 字节/行估算 + 64KiB 余量）
+  // 读取窗口
   const window = Math.min(size, n * 400 + 65_536);
-  // 尾部字节缓冲
+  // 尾部缓冲
   const buf = Buffer.alloc(window);
   try {
-    // 只读最后 window 字节
     const fd = openSync(file, "r");
     readSync(fd, buf, 0, window, size - window);
     closeSync(fd);
   } catch {
-    // 忽略：读取失败按空输出处理
+    return [];
   }
   return cleanLines(buf.toString("utf8").replace(/\ufffd/g, "")).slice(-n);
 }
 
 /**
- * logs 命令入口：一次性 dump 或 -f 跟随轮询。
+ * 默认数据源（logs/ 下最新 engine/worker 日志 + 工具日志）。
  */
-export async function runLogs(ctx: CliContext, args: string[]): Promise<void> {
-  // 解析出的开关与数据源
-  const { follow, n, src } = parseArgs(args);
-  // 项目定位结果
-  const found = projectFromContext(ctx);
-  if (found === null) {
-    throw new DaoyanCliError({ code: "project_not_found", message: "未找到 project.json；用 --project 指定或在项目目录内运行" });
-  }
-  // 过滤后的数据源
-  const files = sources(found.root, src);
-  // 实际存在的日志文件
-  const existing = files.filter((s) => existsSync(s.file));
-  if (existing.length === 0) {
-    // 缺失文件清单（提示用）
-    const names = files.map((s) => s.file).join("、");
-    if (ctx.json) {
-      emitData({ sources: {}, note: "暂无日志文件" });
-      return;
+function fileSources(root: string, src: Src): Array<{ name: string; file: string }> {
+  // logs 目录
+  const dir = join(root, LOG_DIR);
+  // 最新 engine 日志
+  const engines = existsSync(dir)
+    ? readdirSync(dir)
+        .filter((f) => /^engine-.*\.log$/.test(f))
+        .sort()
+        .reverse()
+    : [];
+  // 最新 worker 日志
+  const workers = existsSync(dir)
+    ? readdirSync(dir)
+        .filter((f) => /^worker-.*\.log$/.test(f))
+        .sort()
+        .reverse()
+    : [];
+  // 数据源列表
+  const all = [
+    ...(workers[0] !== undefined ? [{ name: "worker", file: join(dir, workers[0]) }] : []),
+    ...(engines[0] !== undefined ? [{ name: "engine", file: join(dir, engines[0]) }] : []),
+    { name: "daoyan-cli", file: join(dir, "daoyan-cli.log") },
+  ];
+  if (src === "all") return all;
+  return all.filter((s) => s.name === src);
+}
+
+/**
+ * 事件的人类可读行。
+ */
+function renderEvent(ev: TaskEvent): string {
+  return `[${ev.ts}] ${ev.type} ${JSON.stringify(ev.data)}`;
+}
+
+/**
+ * 输出一批事件（--json 用信封，人读用行）。
+ */
+function printEvents(ctx: CliContext, events: TaskEvent[], stream: boolean): void {
+  if (ctx.json) {
+    if (stream) {
+      for (const ev of events) {
+        process.stdout.write(
+          JSON.stringify({ ok: true, schema_version: SCHEMA_VERSION, data: { event: ev } }) + "\n",
+        );
+      }
+    } else {
+      emitData({ events });
     }
-    process.stdout.write(`暂无日志文件（${names}）。运行过 shot/status 后才会产生。\n`);
     return;
   }
+  for (const ev of events) process.stdout.write(renderEvent(ev) + "\n");
+}
 
-  if (!follow) {
-    // --json 的分组数据（name -> 行数组）
-    const data: Record<string, string[]> = {};
-    // 逐源输出尾部行
-    for (const s of existing) {
-      // 当前源的尾部行
-      const lines = readTail(s.file, n);
-      data[s.name] = lines;
-      if (!ctx.json) {
-        // 逐行输出（人读模式）
-        for (const l of lines) process.stdout.write(`${l}\n`);
+/**
+ * 任务事件输出（支持 -f 跟随到终态）。
+ */
+async function taskEvents(ctx: CliContext, root: string, taskId: string, flags: LogsFlags): Promise<number> {
+  // 任务存在性
+  const task = readTask(root, taskId);
+  if (task === null) {
+    throw new DaoyanCliError({ code: "task_not_found", message: `未找到 task ${taskId}` });
+  }
+  // 事件目录
+  const dir = taskDir(root, taskId);
+  // 其他机器同步来的 task：-f 不跟随（本机不会收到新事件）
+  const localMachine = loadMachineIfExists(root);
+  const foreign = localMachine !== null && task.machine_id !== localMachine.machine_id;
+  // 初始事件
+  let events = readEvents(dir);
+  // --run 过滤
+  if (flags.runId !== undefined) {
+    events = events.filter((e) => e.data.run_id === flags.runId);
+  }
+  // -n 截断
+  events = events.slice(-flags.n);
+
+  if (!flags.follow || foreign) {
+    if (ctx.json) emitData({ task_id: taskId, events, foreign });
+    else {
+      for (const ev of events) process.stdout.write(renderEvent(ev) + "\n");
+      if (events.length === 0) process.stdout.write("（暂无事件）\n");
+      if (foreign) process.stdout.write(`（task 属于机器 ${task.machine_id}；本机不跟随）\n`);
+    }
+    return 0;
+  }
+
+  // 跟随：先输出现有，再轮询到终态
+  printEvents(ctx, events, true);
+  // 已输出的最大 seq
+  let seen = events.length > 0 ? (events[events.length - 1]?.seq ?? 0) : 0;
+  // SIGINT 停止跟随
+  let stop = false;
+  const off = onSignal(() => {
+    stop = true;
+  });
+  try {
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 500));
+      // 新增事件
+      const next = readEvents(dir, seen);
+      if (next.length > 0) {
+        printEvents(ctx, next, true);
+        seen = next[next.length - 1]?.seq ?? seen;
       }
+      // 终态
+      const cur = readTask(root, taskId);
+      if (cur !== null && isTerminalStatus(cur.status)) {
+        // 补读尾部事件
+        const tail = readEvents(dir, seen);
+        if (tail.length > 0) printEvents(ctx, tail, true);
+        if (!ctx.json) process.stdout.write(`（task ${taskId} ${cur.status}）\n`);
+        return 0;
+      }
+      if (stop) return 130;
+    }
+  } finally {
+    off();
+  }
+}
+
+/**
+ * logs 命令入口。
+ */
+export async function runLogs(ctx: CliContext, args: string[]): Promise<number> {
+  const flags = parseArgs(args);
+  const { root } = requireProject(ctx);
+
+  // --task
+  if (flags.taskId !== undefined) {
+    return taskEvents(ctx, root, flags.taskId, flags);
+  }
+
+  // --run：先找 run 所属 task
+  if (flags.runId !== undefined) {
+    const run = readRun(root, flags.runId);
+    // 所属 task id
+    const taskId =
+      run?.task_id ??
+      listTasks(root).find((t) => t.runs.includes(flags.runId as string))?.task_id;
+    if (taskId === undefined) {
+      throw new DaoyanCliError({
+        code: "run_not_found",
+        message: `未找到 run ${flags.runId} 的所属 task`,
+      });
+    }
+    return taskEvents(ctx, root, taskId, flags);
+  }
+
+  // 默认：文件日志
+  const sources = fileSources(root, flags.src);
+  const existing = sources.filter((s) => existsSync(s.file));
+  if (existing.length === 0) {
+    if (ctx.json) {
+      emitData({ sources: {}, note: "暂无日志文件；运行任务后可用 logs --task <id>" });
+      return 0;
+    }
+    process.stdout.write("暂无日志文件。运行任务后可用：daoyan logs --task <task_id>\n");
+    return 0;
+  }
+
+  if (!flags.follow) {
+    // 分组数据
+    const data: Record<string, string[]> = {};
+    for (const s of existing) {
+      const lines = readTail(s.file, flags.n);
+      data[s.name] = lines;
+      if (!ctx.json) for (const l of lines) process.stdout.write(`${l}\n`);
     }
     if (ctx.json) emitData({ sources: data });
-    return;
+    return 0;
   }
 
-  // 跟随模式：dump 最近 n 行后按 offset 增量轮询（0.5s）；文件截断时重置
+  // 跟随文件（0.5s 轮询；截断重置）
   const offsets = new Map<string, number>();
-  // 逐源先输出最近的 n 行并记录偏移
   for (const s of existing) {
-    // 先输出的尾部行
-    const tail = readTail(s.file, n);
-    // 逐行输出尾部内容
-    for (const l of tail) process.stdout.write(`${l}\n`);
+    for (const l of readTail(s.file, flags.n)) process.stdout.write(`${l}\n`);
     offsets.set(s.file, statSync(s.file).size);
   }
-  for (;;) {
-    await new Promise((r) => setTimeout(r, 500));
-    // 逐源轮询增量
-    for (const s of existing) {
-      if (!existsSync(s.file)) continue;
-      // 当前文件大小
-      let size = 0;
-      try {
-        size = statSync(s.file).size;
-      } catch {
-        continue;
+  let stop = false;
+  const off = onSignal(() => {
+    stop = true;
+  });
+  try {
+    while (!stop) {
+      await new Promise((r) => setTimeout(r, 500));
+      for (const s of existing) {
+        if (!existsSync(s.file)) continue;
+        // 当前大小
+        let size = 0;
+        try {
+          size = statSync(s.file).size;
+        } catch {
+          continue;
+        }
+        const prev = offsets.get(s.file) ?? 0;
+        if (size === prev) continue;
+        if (size < prev) {
+          offsets.set(s.file, 0);
+          continue;
+        }
+        // 增量缓冲
+        const chunk = Buffer.alloc(size - prev);
+        try {
+          const fd = openSync(s.file, "r");
+          readSync(fd, chunk, 0, size - prev, prev);
+          closeSync(fd);
+        } catch {
+          continue;
+        }
+        for (const l of cleanLines(chunk.toString("utf8").replace(/\ufffd/g, ""))) {
+          process.stdout.write(`${l}\n`);
+        }
+        offsets.set(s.file, size);
       }
-      // 上次读取到的偏移
-      const prev = offsets.get(s.file) ?? 0;
-      if (size === prev) continue;
-      if (size < prev) {
-        offsets.set(s.file, 0); // 截断/重建，重跟
-        continue;
-      }
-      // 新增区间的字节缓冲
-      const chunk = Buffer.alloc(size - prev);
-      try {
-        // 从上次偏移继续读
-        const fd = openSync(s.file, "r");
-        readSync(fd, chunk, 0, size - prev, prev);
-        closeSync(fd);
-      } catch {
-        continue;
-      }
-      // 逐行输出清洗后的新增内容
-      for (const l of cleanLines(chunk.toString("utf8").replace(/\ufffd/g, ""))) {
-        process.stdout.write(`${l}\n`);
-      }
-      offsets.set(s.file, size);
     }
+    return 130;
+  } finally {
+    off();
   }
+}
+
+/**
+ * 任务摘要（调试导出）。
+ */
+export function logTaskSummary(root: string, taskId: string): Record<string, unknown> | null {
+  const task = readTask(root, taskId);
+  return task === null ? null : taskSummary(task);
 }

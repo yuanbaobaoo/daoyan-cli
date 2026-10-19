@@ -1,7 +1,7 @@
 # 发版规则（daoyan-cli）
 
-> 本项目以 **GitHub 为分发主通道**：用户经 `install.sh` / `npm i -g git+…` 安装，
-> `daoyan update` 检测 GitHub tags 自升级。npm registry 为可选通道。
+> 本项目以 **GitHub 为唯一分发通道**：用户经 `install.sh` / `npm i -g git+…` 从 GitHub 安装，
+> `daoyan update` 检测 GitHub tags 自升级。**不发布到 npm registry**；npm 仅作为安装器使用。
 > 本文是发版的唯一操作依据，AI 代理发版前必须逐条核对。
 
 ## 1. 版本号管理（双处同步，缺一不可）
@@ -51,7 +51,8 @@ git push origin master vX.Y.Z
 2. **dist 一致性校验**（与源码 diff，不一致失败）
 3. `npm pack` 打包 tgz
 4. 创建 GitHub Release（自动生成 release notes，附 `daoyan-cli-*.tgz` 产物）
-5. 尝试 `npm publish --provenance`（trusted publishing；见 §6，失败不阻塞 Release）
+
+不再执行 `npm publish`；npm registry 不是发布通道。
 
 发版后验证（人工或代理执行）：
 
@@ -62,21 +63,12 @@ daoyan update                  # 升级后 --version 应等于新版本
 
 ## 5. 不可违反的规则
 
-- **版本不可变**：同一版本号永不重发（npm 侧亦然，unpublish 有严格限制）。发错了就修完升 patch。
+- **版本不可变**：同一版本号永不重发；发错了就修完升 patch。
 - **tag 不可复用/修改**：tag 推送后不允许 delete + 重打同版本。
 - **不许跳过 dist 校验**：即使本地验证过，CI 的 dist 一致性检查失败必须回根源码修复，禁止手改 dist 糊弄通过。
-- **发布通道顺序**：GitHub Release 先行；npm registry 发布是增强项，不阻塞发版。
+- **唯一发布通道**：GitHub Release；不执行 `npm publish`，不发布到 npm registry。
 
-## 6. npm registry 发布（可选，当前未启用）
-
-账号开启了强制 2FA 且暂无设备，npm registry 发布走 **trusted publishing**（免 token/OTP）：
-
-- 前提：npmjs.com → 包设置 → Publishing access → 配置 Trusted Publisher，
-  指向本仓库 `yuanbaobaoo/daoyan-cli` + 工作流 `release.yml`
-- 配置完成后无需任何改动，CI 第 5 步自动生效
-- 未配置时该步骤失败（`continue-on-error`），不影响 GitHub Release
-
-## 7. 回滚与修复
+## 6. 回滚与修复
 
 - 用户侧回滚：`DAYOAN_REF=vX.Y.Z-1 curl -fsSL …/install.sh | bash` 固定旧版本
 - 发了坏版本：修复 → 按流程升 patch 发新版；**不要**试图覆盖已发布版本

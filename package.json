@@ -1,6 +1,7 @@
 {
   "name": "daoyan-cli",
   "version": "0.0.4",
+  "private": true,
   "description": "Agent 驱动的 ComfyUI 节点编辑器 + 执行运行时：节点编辑、异步 task、local/remote 引擎生命周期与产物版本留痕。An agent-native ComfyUI node editor and execution runtime.",
   "type": "module",
   "license": "Apache-2.0",
@@ -26,7 +27,6 @@
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
     "prepare": "test -f dist/cli.mjs || npm run build",
-    "prepublishOnly": "npm run typecheck && npm run build",
     "test": "node --experimental-strip-types --test test/*.test.mts"
   },
   "keywords": [

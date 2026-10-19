@@ -1,8 +1,7 @@
 name: Release
 
 # 推送 v* tag 时触发：校验 → 构建 → 打包 → 创建 GitHub Release（附 tgz 产物）。
-# npm 发布走 trusted publishing（OIDC）：需在 npmjs.com 的包设置里把本仓库/工作流
-# 配置为 trusted publisher；未配置前该步骤失败但不影响 GitHub Release（continue-on-error）。
+# 本项目只通过 GitHub Release 分发，不发布到 npm registry。
 on:
   push:
     tags:
@@ -10,7 +9,6 @@ on:
 
 permissions:
   contents: write # 创建 Release 与上传产物
-  id-token: write # npm trusted publishing（provenance）
 
 jobs:
   release:
@@ -21,7 +19,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          registry-url: https://registry.npmjs.org/
 
       - name: 安装依赖
         run: npm ci
@@ -45,7 +42,3 @@ jobs:
         with:
           files: daoyan-cli-*.tgz
           generate_release_notes: true
-
-      - name: npm 发布（trusted publishing，未配置前自动跳过失败）
-        run: npm publish --provenance --access public
-        continue-on-error: true

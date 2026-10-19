@@ -8,7 +8,7 @@ import { DaoyanCliError } from "../shared/errors.mts";
 import { emitData } from "../shared/json.mts";
 import { say } from "../shared/log.mts";
 import type { CliContext } from "../shared/context.mts";
-import { splitInlineFlag, takeValue, usageError } from "../shared/args.mts";
+import { splitInlineFlag, usageError } from "../shared/args.mts";
 import {
     loadMachine,
     loadMachineIfExists,
@@ -17,7 +17,8 @@ import {
     saveMachine,
 } from "../core/project/config.mts";
 import type { MachineLocalEngine } from "../core/project/types.mts";
-import { COMFY_TAGS_API, installEngineAt } from "../core/provision/init-flow.mts";
+import { COMFY_TAGS_API, installEngineAt, venvReady } from "../core/provision/init-flow.mts";
+import { applyToolchainFlag, resolveToolchainOptions, type ToolchainOptions } from "../core/provision/options.mts";
 import { acquireMachineLock } from "../core/machine/lock.mts";
 
 /**
@@ -146,17 +147,18 @@ export async function runEngine(ctx: CliContext, args: string[]): Promise<number
     }
 
     if (sub === "install") {
-        // 版本 tag + 可选 pip 源
+        // 版本 tag + 工具链参数
         let tag: string | undefined;
-        let mirror: string | undefined;
+        // pip / torch 工具链参数
+        const toolchain: ToolchainOptions = {};
         for (let i = 0; i < rest.length; i++) {
             const a = rest[i];
             if (a === undefined) break;
             const { name, inline } = splitInlineFlag(a);
-            if (name === "--mirror") {
-                const v = takeValue(rest, i, inline, "--mirror");
-                mirror = v.value;
-                i += v.skip;
+            // 工具链参数（--mirror / --fallback-mirror / --torch-index / --torch-cuda / --torch-cpu / --no-cache）
+            const toolchainFlag = applyToolchainFlag(toolchain, name, rest, i, inline);
+            if (toolchainFlag.handled) {
+                i += toolchainFlag.skip;
                 continue;
             }
             if (name.startsWith("-")) usageError(`未知参数 ${name}`);
@@ -164,8 +166,13 @@ export async function runEngine(ctx: CliContext, args: string[]): Promise<number
             tag = a;
         }
         if (tag === undefined || tag === "") {
-            usageError("用法：daoyan engine install <版本 tag> [--mirror <url>]");
+            usageError(
+                "用法：daoyan engine install <版本 tag> [--mirror <url>] [--fallback-mirror <url|none>] " +
+                    "[--torch-index <url>] [--torch-cuda <cuXXX>] [--torch-cpu] [--no-cache]",
+            );
         }
+        // 持锁前校验依赖参数（非法 URL / tag 立即失败）
+        resolveToolchainOptions(toolchain);
         // 持锁安装
         const lock = await acquireMachineLock({
             taskId: `metadata-engine-install-${process.pid}`,
@@ -176,24 +183,21 @@ export async function runEngine(ctx: CliContext, args: string[]): Promise<number
         });
         try {
             const base = join(root, "engine", "versions", tag);
-            // 已安装则直接返回
-            if (existsSync(join(base, "ComfyUI", "main.py")) && existsSync(join(base, ".venv", "bin", "python"))) {
-                say(`版本 ${tag} 已安装：${portablePath(root, base)}`);
-            } else {
-                say(`安装 ComfyUI ${tag} → engine/versions/${tag} ...`);
-                await installEngineAt({
-                    root,
-                    baseDir: base,
-                    version: tag,
-                    project,
-                    log: say,
-                    ...(mirror !== undefined ? { mirror } : {}),
-                });
-            }
+            say(`安装/校验 ComfyUI ${tag} → engine/versions/${tag} ...`);
+            // marker + pip check + smoke test 全部通过才会复用
+            const result = await installEngineAt({
+                root,
+                baseDir: base,
+                version: tag,
+                project,
+                toolchain,
+                log: say,
+            });
             if (ctx.json) {
                 emitData({
                     installed: tag,
                     dir: portablePath(root, base),
+                    toolchain: result.toolchain,
                     next_actions: [`engine use ${tag}`],
                 });
                 return 0;
@@ -225,10 +229,10 @@ export async function runEngine(ctx: CliContext, args: string[]): Promise<number
             if (existsSync(join(asPath, "main.py"))) {
                 comfyDir = asPath;
                 venvDir = join(asPath, ".venv");
-                if (!existsSync(join(venvDir, "bin", "python"))) {
+                if (!(await venvReady(venvDir))) {
                     throw new DaoyanCliError({
                         code: "config_invalid",
-                        message: `路径下缺少 venv：${join(venvDir, "bin", "python")}`,
+                        message: `路径下的 venv 不可用（需要 python + pip）：${venvDir}`,
                     });
                 }
             } else {
@@ -241,10 +245,10 @@ export async function runEngine(ctx: CliContext, args: string[]): Promise<number
                         message: `未找到版本 ${target}（${portablePath(root, comfyDir)}）。先安装：daoyan engine install ${target}`,
                     });
                 }
-                if (!existsSync(join(venvDir, "bin", "python"))) {
+                if (!(await venvReady(venvDir))) {
                     throw new DaoyanCliError({
                         code: "provision_failed",
-                        message: `版本 ${target} 缺少 venv：${portablePath(root, venvDir)}`,
+                        message: `版本 ${target} 的 venv 不可用（需要 python + pip）：${portablePath(root, venvDir)}。重新安装：daoyan engine install ${target}`,
                     });
                 }
                 version = target;

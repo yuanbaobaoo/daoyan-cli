@@ -1,12 +1,14 @@
 /** init 编排 —— local 模式部署项目专属 ComfyUI；remote 只写本机配置。
- *  步骤：python3 检测 → venv → clone ComfyUI（pin 版本）→ pip 依赖 → custom nodes
+ *  步骤：venv（pip 健康检查 + ensurepip 预检）→ clone/checkout ComfyUI（pin 版本）
+ *        → 探测驱动并安装匹配 CUDA 的 torch/torchvision → pip 依赖（主源/fallback）
+ *        → custom nodes → pip check + CUDA smoke test → 写工具链 marker
  *        → extra_model_paths.yaml；项目骨架（project.json v2 / shots / workflows / LFS）。
  *  init 只部署，不启动引擎。全程 spawn 数组传参，不经 shell。 */
-import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DaoyanCliError } from "../../shared/errors.mts";
-import { execCapture, execInherit } from "../../shared/exec.mts";
-import { ensureDir, writeFileAtomic } from "../../shared/fs.mts";
+import { execCapture, execInherit, execStream, type ExecResult } from "../../shared/exec.mts";
+import { ensureDir, sha256, sha256File } from "../../shared/fs.mts";
 import { freePort } from "../../shared/net.mts";
 import {
     EXTRA_MODELS_FILE,
@@ -20,6 +22,37 @@ import {
     type CustomNodeSpec,
     type ProjectConfig,
 } from "../project/types.mts";
+import {
+    DEFAULT_PIP_MIRROR,
+    resolveToolchainOptions,
+    type ResolvedToolchainOptions,
+    type ToolchainOptions,
+} from "./options.mts";
+import {
+    TOOLCHAIN_MARKER_FILE,
+    buildToolchainMarker,
+    inspectTorchPlan,
+    markerMismatchReason,
+    parsePythonVersion,
+    readToolchainMarker,
+    resolveTorchPlan,
+    runPipCheck,
+    runSmokeTest,
+    torchPlanForTag,
+    writeToolchainMarker,
+    type PythonInfo,
+    type SmokeResult,
+    type ToolchainMarker,
+    type TorchPlan,
+} from "./toolchain.mts";
+
+export {
+    DEFAULT_PIP_FALLBACK_MIRROR,
+    DEFAULT_PIP_MIRROR,
+    resolveToolchainOptions,
+    type ResolvedToolchainOptions,
+    type ToolchainOptions,
+} from "./options.mts";
 
 // ComfyUI 官方仓库（custom nodes 各自 repo 覆盖）
 const COMFY_REPO = "https://github.com/comfyanonymous/ComfyUI.git";
@@ -27,8 +60,14 @@ const COMFY_REPO = "https://github.com/comfyanonymous/ComfyUI.git";
 export const COMFY_TAGS_API = "https://api.github.com/repos/comfyanonymous/ComfyUI/tags";
 // 最低 Python 版本
 const MIN_PYTHON = "3.10";
-// 默认 pip 源（阿里云 PyPI，国内网络更稳）
-export const DEFAULT_PIP_MIRROR = "https://mirrors.aliyun.com/pypi/simple/";
+// venv 创建超时
+const VENV_TIMEOUT_MS = 180_000;
+// pip 安装超时（大 wheel 可能很慢；到点杀进程并给出可操作的错误）
+const PIP_INSTALL_TIMEOUT_MS = 3_600_000;
+// pip 网络重试次数
+const PIP_RETRIES = "5";
+// pip 单次网络超时（秒）
+const PIP_TIMEOUT_SECONDS = "60";
 
 /**
  * pip index 参数：未显式指定 --mirror 时默认阿里云 PyPI。
@@ -44,6 +83,52 @@ export function pipIndexArgs(mirror?: string): string[] {
  */
 export interface Logger {
     (m: string): void;
+}
+
+/**
+ * 工具链摘要（进入 init / engine install 的 JSON 输出）。
+ */
+export interface ToolchainSummary {
+    /**
+     * venv Python 版本。
+     */
+    python: string;
+    /**
+     * 平台标签。
+     */
+    platform: string;
+    /**
+     * 驱动版本。
+     */
+    driver: string | null;
+    /**
+     * 驱动支持的最高 CUDA 版本。
+     */
+    cuda_max: string | null;
+    /**
+     * compute capability。
+     */
+    compute_cap: string | null;
+    /**
+     * torch 后端。
+     */
+    torch_backend: "cuda" | "cpu";
+    /**
+     * 使用的 CUDA tag。
+     */
+    torch_tag: string | null;
+    /**
+     * 实际 torch 版本。
+     */
+    torch: string | null;
+    /**
+     * 实际 torchvision 版本。
+     */
+    torchvision: string | null;
+    /**
+     * 是否复用了已有安装。
+     */
+    reused: boolean;
 }
 
 /**
@@ -73,25 +158,25 @@ export function scaffoldProject(root: string, name: string): { created: string[]
     // project.json
     const projectFile = join(root, PROJECT_FILE);
     if (!existsSync(projectFile)) {
-        writeFileAtomic(projectFile, JSON.stringify(projectTemplate(name), null, 2) + "\n");
+        writeFileAtomically(projectFile, JSON.stringify(projectTemplate(name), null, 2) + "\n");
         created.push(PROJECT_FILE);
     }
     // shots.json
     const shotsFile = join(root, SHOTS_FILE);
     if (!existsSync(shotsFile)) {
-        writeFileAtomic(shotsFile, JSON.stringify(shotsTemplate(), null, 2) + "\n");
+        writeFileAtomically(shotsFile, JSON.stringify(shotsTemplate(), null, 2) + "\n");
         created.push(SHOTS_FILE);
     }
     // 空 workflow 占位（workflow new/import 可直接替换空图）
     const wf = join(root, WORKFLOWS_DIR, "t2v.json");
     if (!existsSync(wf)) {
-        writeFileAtomic(wf, "{}\n");
+        writeFileAtomically(wf, "{}\n");
         created.push(`${WORKFLOWS_DIR}/t2v.json`);
     }
     // .gitignore（保留用户已有内容；缺失才写）
     const ignore = join(root, ".gitignore");
     if (!existsSync(ignore)) {
-        writeFileAtomic(
+        writeFileAtomically(
             ignore,
             ["engine/", "logs/", ".dycli/", "relay_frames/", "concat_list.txt", "*.log", ".DS_Store", ""].join("\n"),
         );
@@ -100,7 +185,7 @@ export function scaffoldProject(root: string, name: string): { created: string[]
     // .gitattributes（LFS）
     const attrs = join(root, ".gitattributes");
     if (!existsSync(attrs)) {
-        writeFileAtomic(
+        writeFileAtomically(
             attrs,
             [
                 "runs/**/outputs/** filter=lfs diff=lfs merge=lfs -text",
@@ -148,7 +233,7 @@ function shotsTemplate(): Record<string, unknown> {
 /**
  * 检测宿主 python3 ≥ 3.10。
  */
-export async function detectPython(log: Logger): Promise<void> {
+export async function detectPython(log: Logger): Promise<PythonInfo> {
     // python3 --version
     const r = await execCapture("python3", ["--version"], { timeoutMs: 15_000 });
     if (r.code !== 0) {
@@ -158,19 +243,22 @@ export async function detectPython(log: Logger): Promise<void> {
                 "未找到可用的 python3（ComfyUI 依赖安装需要 ≥3.10）。Ubuntu：apt install python3 python3-venv；macOS：brew install python",
         });
     }
-    // 版本匹配
-    const m = /Python\s+(\d+)\.(\d+)/.exec(r.stdout.trim());
-    // 主版本
-    const major = m !== null ? Number(m[1]) : 0;
-    // 次版本
-    const minor = m !== null ? Number(m[2]) : 0;
-    if (major < 3 || (major === 3 && minor < 10)) {
+    // 版本信息
+    const info = parsePythonVersion(r.stdout);
+    if (info === null) {
+        throw new DaoyanCliError({
+            code: "external_tool_missing",
+            message: `无法解析 python3 版本：${r.stdout.trim()}`,
+        });
+    }
+    if (info.major < 3 || (info.major === 3 && info.minor < 10)) {
         throw new DaoyanCliError({
             code: "external_tool_missing",
             message: `python3 版本过低（${r.stdout.trim()}，要求 ≥${MIN_PYTHON}）`,
         });
     }
     log(`python3 就绪：${r.stdout.trim()}`);
+    return info;
 }
 
 /**
@@ -200,22 +288,133 @@ export async function latestComfyTag(): Promise<string> {
 }
 
 /**
- * 创建 Python venv（已存在则复用）。
+ * ensurepip 预检：缺少时给出与 Python 版本匹配的安装命令，不自动执行 apt。
  */
-export async function createVenv(root: string, venvDir: string, log: Logger): Promise<void> {
+async function ensurepipPreflight(system: PythonInfo, venvDir: string): Promise<void> {
+    // ensurepip 导入检测
+    const r = await execCapture("python3", ["-c", "import ensurepip"], { timeoutMs: 20_000 });
+    if (r.code === 0) return;
+    // 与版本匹配的 Debian/Ubuntu 包名
+    const aptPackage = `python${system.major}.${system.minor}-venv`;
+    // 平台提示
+    const platformHint =
+        process.platform === "linux"
+            ? `Ubuntu/Debian 请安装：apt-get install -y ${aptPackage}（或元包 python3-venv）`
+            : process.platform === "darwin"
+              ? "macOS 请执行：brew install python"
+              : `请安装带 ensurepip 的 Python ${system.major}.${system.minor}`;
+    // 建议的后续命令
+    const nextActions =
+        process.platform === "darwin"
+            ? ["brew install python", "rm -rf engine/.venv", "daoyan init --mode=local"]
+            : [`apt-get install -y ${aptPackage}`, "rm -rf engine/.venv", "daoyan init --mode=local"];
+    throw new DaoyanCliError({
+        code: "provision_failed",
+        message:
+            `当前 Python ${system.version} 缺少 ensurepip，无法创建带 pip 的 venv。\n` +
+            `${platformHint}\n` +
+            "安装后删除 engine/.venv，再重跑 daoyan init。",
+        hint: "dycli 不自动执行 apt（可能触发系统服务重启）；安装 venv 包后重试。",
+        details: {
+            stage: "ensurepip",
+            python: system.version,
+            venv_dir: venvDir,
+            last_error: (r.stderr || r.stdout).trim().slice(-2000),
+            ...(process.platform === "linux"
+                ? { apt_packages: [aptPackage, "python3-venv"] }
+                : { brew_package: "python" }),
+            next_actions: nextActions,
+        },
+        nextActions,
+    });
+}
+
+/**
+ * 读取 venv Python 版本；不可用返回 null。
+ */
+async function venvPythonInfo(venvDir: string): Promise<PythonInfo | null> {
+    // venv Python
+    const python = join(venvDir, "bin", "python");
+    if (!existsSync(python)) return null;
+    // 版本查询结果
+    const r = await execCapture(python, ["-c", "import sys; print('%d.%d.%d' % sys.version_info[:3])"], {
+        timeoutMs: 15_000,
+    });
+    if (r.code !== 0) return null;
+    return parsePythonVersion(r.stdout);
+}
+
+/**
+ * venv 是否可用：bin/python + bin/pip 且 `python -m pip --version` 成功。
+ */
+export async function venvReady(venvDir: string): Promise<boolean> {
+    // venv Python 信息
+    const info = await venvPythonInfo(venvDir);
+    if (info === null) return false;
+    if (!existsSync(join(venvDir, "bin", "pip"))) return false;
+    // pip 自检
+    const r = await execCapture(join(venvDir, "bin", "python"), ["-m", "pip", "--version"], { timeoutMs: 60_000 });
+    return r.code === 0;
+}
+
+/**
+ * 创建/修复 Python venv；返回 venv 的 Python 版本。
+ * 已存在但 pip 不可用时删除重建；系统缺少 ensurepip 时给出准确的 apt 提示。
+ */
+export async function createVenv(root: string, venvDir: string, log: Logger): Promise<PythonInfo> {
     if (existsSync(join(venvDir, "bin", "python"))) {
-        log(`复用已有 venv：${venvDir}`);
-        return;
+        // 已有 venv 的 Python 信息
+        const existing = await venvPythonInfo(venvDir);
+        // pip 是否可用
+        let pipOk = false;
+        if (existing !== null) {
+            // pip 自检结果
+            const pip = await execCapture(join(venvDir, "bin", "python"), ["-m", "pip", "--version"], {
+                timeoutMs: 60_000,
+            });
+            pipOk = pip.code === 0 && existsSync(join(venvDir, "bin", "pip"));
+        }
+        if (existing !== null && pipOk) {
+            log(`复用已有 venv：${venvDir}（Python ${existing.version}）`);
+            return existing;
+        }
+        log(`检测到不完整的 venv（缺少可用 pip），删除后重建：${venvDir}`);
+        rmSync(venvDir, { recursive: true, force: true });
     }
+    // 系统 Python 版本
+    const system = await detectPython(log);
+    await ensurepipPreflight(system, venvDir);
     log(`创建虚拟环境 ${venvDir} ...`);
-    // venv 创建退出码
-    const r = await execInherit("python3", ["-m", "venv", venvDir], { cwd: root });
-    if (r !== 0) {
+    // venv 创建结果
+    const r = await execCapture("python3", ["-m", "venv", venvDir], {
+        cwd: root,
+        timeoutMs: VENV_TIMEOUT_MS,
+    });
+    if (r.code !== 0) {
+        rmSync(venvDir, { recursive: true, force: true });
         throw new DaoyanCliError({
             code: "provision_failed",
-            message: `python3 -m venv 失败（退出码 ${r}）。Ubuntu 需 python3-venv 包`,
+            message: `python3 -m venv 失败（退出码 ${r.code}）。Ubuntu 需 python3-venv 包`,
+            details: {
+                stage: "venv",
+                python: system.version,
+                venv_dir: venvDir,
+                last_error: (r.stderr || r.stdout).trim().slice(-2000),
+            },
         });
     }
+    // 创建后的 venv Python
+    const info = await venvPythonInfo(venvDir);
+    if (info === null || !existsSync(join(venvDir, "bin", "pip"))) {
+        rmSync(venvDir, { recursive: true, force: true });
+        throw new DaoyanCliError({
+            code: "provision_failed",
+            message: `venv 创建完成但缺少 python/pip：${venvDir}`,
+            details: { stage: "venv", python: system.version, venv_dir: venvDir },
+        });
+    }
+    log(`venv 就绪：Python ${info.version}`);
+    return info;
 }
 
 /**
@@ -231,6 +430,16 @@ async function cloneRepo(
     if (existsSync(join(target, ".git"))) {
         log(`复用已有仓库：${target}`);
         return;
+    }
+    if (existsSync(target)) {
+        // 空目录（上次 clone 失败）：删除后重新 clone
+        if (readdirSync(target).length === 0) {
+            rmSync(target, { recursive: true, force: true });
+        } else {
+            // 已存在的非 git 目录（用户自装 ComfyUI / custom node）不覆盖、不 clone
+            log(`目录已存在且不是 git 检出，保留现有内容：${target}`);
+            return;
+        }
     }
     // clone 参数
     const args = ["clone", "--depth", "1"];
@@ -248,37 +457,112 @@ async function cloneRepo(
 }
 
 /**
- * 在 venv 内安装 ComfyUI 依赖。
+ * 单次 pip install（不判定失败，交给调用方决定是否回退）。
+ */
+async function runPipAttempt(opts: {
+    root: string;
+    venvDir: string;
+    packageArgs: string[];
+    indexUrl: string;
+    extraArgs?: string[];
+    noCache: boolean;
+}): Promise<ExecResult> {
+    // pip 可执行文件
+    const pip = join(opts.venvDir, "bin", "pip");
+    // pip 参数
+    const args = [
+        "install",
+        ...opts.packageArgs,
+        ...pipIndexArgs(opts.indexUrl),
+        "--retries",
+        PIP_RETRIES,
+        "--timeout",
+        PIP_TIMEOUT_SECONDS,
+        ...(opts.noCache ? ["--no-cache-dir"] : []),
+        ...(opts.extraArgs ?? []),
+    ];
+    return execStream(pip, args, { cwd: opts.root, timeoutMs: PIP_INSTALL_TIMEOUT_MS });
+}
+
+/**
+ * pip install：先主源，失败后回退 fallback（若配置）。
+ */
+async function pipInstallWithFallback(opts: {
+    root: string;
+    venvDir: string;
+    packageArgs: string[];
+    options: ResolvedToolchainOptions;
+    log: Logger;
+    label: string;
+    stage: string;
+}): Promise<string> {
+    // 依次尝试的源
+    const mirrors = [opts.options.mirror];
+    if (opts.options.fallbackMirror !== null) mirrors.push(opts.options.fallbackMirror);
+    // 最后一次失败结果
+    let last: ExecResult | null = null;
+    // 最后一次使用的源
+    let lastMirror = opts.options.mirror;
+    for (let i = 0; i < mirrors.length; i++) {
+        // 当前源
+        const mirror = mirrors[i] as string;
+        opts.log(`${opts.label}：使用${i === 0 ? "主源" : " fallback 源"} ${mirror} ...`);
+        // 当前尝试结果
+        const r = await runPipAttempt({
+            root: opts.root,
+            venvDir: opts.venvDir,
+            packageArgs: opts.packageArgs,
+            indexUrl: mirror,
+            noCache: opts.options.noCache,
+        });
+        if (r.code === 0) return mirror;
+        last = r;
+        lastMirror = mirror;
+        if (i < mirrors.length - 1) {
+            opts.log(`${opts.label} 主源失败（退出码 ${r.code}），回退 ${mirrors[i + 1]} 重试 ...`);
+        }
+    }
+    throw new DaoyanCliError({
+        code: "provision_failed",
+        message: `${opts.label}安装失败（退出码 ${last !== null ? last.code : -1}，最后使用的源 ${lastMirror}）`,
+        hint: "已尝试主源与 fallback；可用 --mirror / --fallback-mirror 指定可达镜像，或加 --no-cache 重试",
+        details: {
+            stage: opts.stage,
+            mirrors,
+            exit_code: last !== null ? last.code : -1,
+            last_error: last !== null ? last.stderr.trim().slice(-4000) : null,
+        },
+    });
+}
+
+/**
+ * 在 venv 内安装 ComfyUI 依赖（主源失败自动回退）。
  */
 export async function pipInstall(
     root: string,
     venvDir: string,
-    mirror: string | undefined,
+    options: ResolvedToolchainOptions,
     log: Logger,
     requirements?: string,
-): Promise<void> {
-    // pip 可执行文件
-    const pip = join(venvDir, "bin", "pip");
+): Promise<string> {
     // 依赖清单
     const req = requirements ?? join(root, "engine", "ComfyUI", "requirements.txt");
     if (!existsSync(req)) {
         throw new DaoyanCliError({ code: "provision_failed", message: `缺少 ${req}（clone 未完成？）` });
     }
-    // pip 源（默认阿里云）
-    const indexArgs = pipIndexArgs(mirror);
-    const sourceLabel = mirror !== undefined && mirror.trim() !== "" ? "自定义镜像" : "阿里云（默认）";
-    log(`安装 ComfyUI 依赖（pip install -r ${req}，源：${sourceLabel}，可能需要下载 torch，耗时较长）...`);
-    // pip 参数
-    const args = ["install", "-r", req, ...indexArgs];
-    // pip 退出码
-    const r = await execInherit(pip, args, { cwd: root });
-    if (r !== 0) {
-        throw new DaoyanCliError({
-            code: "provision_failed",
-            message: `pip install 失败（退出码 ${r}）。默认使用阿里云 PyPI；可用 --mirror 切换官方源或其他镜像重试`,
-        });
-    }
-    log("ComfyUI 依赖安装完成");
+    log(`安装 ComfyUI 依赖（pip install -r ${req}，可能需要下载 torch，耗时较长）...`);
+    // 实际使用的源
+    const used = await pipInstallWithFallback({
+        root,
+        venvDir,
+        packageArgs: ["-r", req],
+        options,
+        log,
+        label: "ComfyUI 依赖",
+        stage: "requirements",
+    });
+    log(`ComfyUI 依赖安装完成（源：${used}）`);
+    return used;
 }
 
 /**
@@ -288,7 +572,7 @@ export async function installCustomNodes(
     root: string,
     venvDir: string,
     nodes: CustomNodeSpec[],
-    mirror: string | undefined,
+    options: ResolvedToolchainOptions,
     log: Logger,
     comfyDir = join(root, "engine", "ComfyUI"),
 ): Promise<void> {
@@ -304,16 +588,17 @@ export async function installCustomNodes(
         const req = join(target, "requirements.txt");
         if (existsSync(req)) {
             log(`安装 ${node.name} 依赖...`);
-            // pip 参数（默认阿里云源）
-            const args = ["install", "-r", req, ...pipIndexArgs(mirror)];
-            // pip 退出码
-            const r = await execInherit(join(venvDir, "bin", "pip"), args, { cwd: root });
-            if (r !== 0) {
-                throw new DaoyanCliError({
-                    code: "provision_failed",
-                    message: `custom node ${node.name} 依赖安装失败（退出码 ${r}）。默认使用阿里云 PyPI；可用 --mirror 覆盖`,
-                });
-            }
+            // 实际使用的源
+            const used = await pipInstallWithFallback({
+                root,
+                venvDir,
+                packageArgs: ["-r", req],
+                options,
+                log,
+                label: `custom node ${node.name} 依赖`,
+                stage: `custom_node:${node.name}`,
+            });
+            log(`${node.name} 依赖安装完成（源：${used}）`);
         }
     }
     log(`custom nodes 安装完成：${nodes.map((n) => n.name).join(", ")}`);
@@ -354,55 +639,493 @@ async function checkoutComfyVersion(comfyDir: string, version: string, log: Logg
 }
 
 /**
- * 部署 local 引擎（幂等：已有目录复用；版本不同会 checkout）。
+ * custom nodes 规格 + 已安装目录/requirements 的稳定哈希。
+ * 目录缺失或 requirements 变化都会让 marker 失效。
+ */
+function customNodesHash(nodes: CustomNodeSpec[], comfyDir: string): string {
+    return sha256(
+        JSON.stringify(
+            nodes.map((n) => {
+                // node 安装目录
+                const dir = join(comfyDir, "custom_nodes", n.name);
+                // node requirements
+                const req = join(dir, "requirements.txt");
+                return {
+                    name: n.name,
+                    repo: n.repo,
+                    ref: n.ref ?? null,
+                    present: existsSync(dir),
+                    requirements_sha256: existsSync(req) ? sha256File(req) : null,
+                };
+            }),
+        ),
+    );
+}
+
+/**
+ * 读取 pip show 的版本；未安装返回 null。
+ */
+async function pipShowVersion(venvDir: string, pkg: string): Promise<string | null> {
+    // pip show 结果
+    const r = await execCapture(join(venvDir, "bin", "pip"), ["show", pkg], { timeoutMs: 60_000 });
+    if (r.code !== 0) return null;
+    // Version 行
+    const m = /^Version:\s*(.+)$/m.exec(r.stdout);
+    return m !== null ? (m[1] as string).trim() : null;
+}
+
+/**
+ * requirements.txt 中显式固定的 torch / torchvision 版本。
+ */
+function torchPinsInFile(file: string): Array<{ package: "torch" | "torchvision"; version: string }> {
+    // 解析结果
+    const out: Array<{ package: "torch" | "torchvision"; version: string }> = [];
+    for (const line of readFileSync(file, "utf8").split("\n")) {
+        // 去掉注释后的行
+        const trimmed = (line.split("#")[0] ?? "").trim();
+        // pin 匹配
+        const m = /^(torch|torchvision)\s*==\s*([^\s;]+)/.exec(trimmed);
+        if (m !== null) {
+            out.push({ package: m[1] as "torch" | "torchvision", version: m[2] as string });
+        }
+    }
+    return out;
+}
+
+/**
+ * requirements 若把 torch pin 到与所选 CUDA wheel 不同的版本，提前失败而不是静默覆盖。
+ */
+async function assertRequirementsCompatible(reqFile: string, venvDir: string, plan: TorchPlan): Promise<void> {
+    if (plan.backend === "cpu" && plan.cpuSource !== "forced") return;
+    // requirements 中的 torch pin
+    const pins = torchPinsInFile(reqFile);
+    if (pins.length === 0) return;
+    // 冲突项
+    const conflicts: Array<{ package: string; pin: string; installed: string }> = [];
+    for (const pin of pins) {
+        // 已安装版本
+        const installed = await pipShowVersion(venvDir, pin.package);
+        if (installed === null) continue;
+        // 忽略 local version（+cuXXX）
+        const installedBase = installed.split("+")[0] ?? installed;
+        // pin 的公共版本
+        const pinBase = pin.version.split("+")[0] ?? pin.version;
+        if (installedBase !== pinBase) conflicts.push({ package: pin.package, pin: pin.version, installed });
+    }
+    if (conflicts.length === 0) return;
+    throw new DaoyanCliError({
+        code: "provision_failed",
+        message: "requirements.txt 固定了与所选 CUDA torch 不一致的版本，已停止以避免覆盖",
+        hint: "修改 requirements.txt 的 torch/torchvision pin，或使用 --torch-cpu 显式安装 CPU 版",
+        details: {
+            stage: "requirements_conflict",
+            torch_tag: plan.tag,
+            torch_index: plan.indexRoot,
+            conflicts,
+        },
+    });
+}
+
+/**
+ * 安装 torch/torchvision（CUDA tag 或显式 CPU index）。
+ */
+async function installTorch(opts: {
+    root: string;
+    venvDir: string;
+    plan: TorchPlan;
+    options: ResolvedToolchainOptions;
+    log: Logger;
+    forceReinstall: boolean;
+}): Promise<void> {
+    // 平台默认 torch：不预装，交给 requirements
+    if (opts.plan.installIndexUrl === null) {
+        opts.log("使用平台默认 torch（不预装独立 wheel）");
+        return;
+    }
+    // 展示标签
+    const label = opts.plan.backend === "cuda" ? `torch（${opts.plan.tag}）` : "torch（CPU）";
+    opts.log(`安装 ${label}：index ${opts.plan.installIndexUrl}${opts.forceReinstall ? "（强制重装）" : ""} ...`);
+    // 安装结果
+    const r = await runPipAttempt({
+        root: opts.root,
+        venvDir: opts.venvDir,
+        packageArgs: ["torch", "torchvision"],
+        indexUrl: opts.plan.installIndexUrl,
+        ...(opts.forceReinstall ? { extraArgs: ["--force-reinstall"] } : {}),
+        noCache: opts.options.noCache,
+    });
+    if (r.code !== 0) {
+        throw new DaoyanCliError({
+            code: "provision_failed",
+            message: `${label} 安装失败（退出码 ${r.code}）`,
+            hint: "检查 --torch-index 是否可达，或改用 --torch-cpu；也可是驱动与 wheel 不匹配",
+            details: {
+                stage: "torch",
+                driver: opts.plan.gpu?.driver ?? null,
+                cuda_max: opts.plan.gpu?.cudaMax ?? null,
+                compute_cap: opts.plan.gpu?.computeCap ?? null,
+                python: opts.plan.python.version,
+                platform: opts.plan.platform,
+                torch_tag: opts.plan.tag,
+                torch_index: opts.plan.installIndexUrl,
+                last_error: r.stderr.trim().slice(-4000),
+                next_actions: [
+                    "daoyan init --mode=local --torch-index <镜像> ...",
+                    "升级 NVIDIA 驱动后重试",
+                    "daoyan init --mode=local --torch-cpu ...",
+                ],
+            },
+        });
+    }
+}
+
+/**
+ * 构造 smoke test 失败错误（含可操作的 details）。
+ */
+function smokeFailureError(
+    plan: TorchPlan,
+    smoke: SmokeResult,
+    opts: { stage: string; attemptedTags: string[]; offendingNodes?: string[] },
+): DaoyanCliError {
+    return new DaoyanCliError({
+        code: "provision_failed",
+        message: `torch 安装后自检失败：${smoke.error ?? "未知错误"}`,
+        hint: "按 details 判断是驱动/CUDA 不匹配还是 custom node 覆盖了 torch；不要手工猜版本",
+        details: {
+            stage: opts.stage,
+            driver: plan.gpu?.driver ?? null,
+            cuda_max: plan.gpu?.cudaMax ?? null,
+            compute_cap: plan.gpu?.computeCap ?? null,
+            python: plan.python.version,
+            platform: plan.platform,
+            torch_tag: plan.tag,
+            torch: smoke.torch,
+            torch_cuda: smoke.torchCuda,
+            torchvision: smoke.torchvision,
+            available: smoke.available,
+            error_class: smoke.errorClass,
+            attempted_tags: opts.attemptedTags,
+            offending_nodes: opts.offendingNodes ?? [],
+            next_actions: [
+                "daoyan init --mode=local --torch-cuda cu124 ...",
+                "daoyan init --mode=local --torch-index <镜像> ...",
+                "升级 NVIDIA 驱动后重试",
+                "daoyan init --mode=local --torch-cpu ...",
+            ],
+        },
+    });
+}
+
+/**
+ * 安装 torch 并做一次真实 CUDA 自检；失败时最多换一个更低 tag 重试一次。
+ */
+async function installTorchAndVerify(opts: {
+    root: string;
+    venvDir: string;
+    plan: TorchPlan;
+    options: ResolvedToolchainOptions;
+    log: Logger;
+}): Promise<{ plan: TorchPlan; smoke: SmokeResult | null }> {
+    // 无 GPU 的自动 CPU 模式：不预装 torch，等 requirements 安装后由最终自检覆盖
+    if (opts.plan.backend === "cpu" && opts.plan.cpuSource !== "forced") {
+        opts.log("未检测到 NVIDIA GPU：跳过 torch 预安装，由 requirements 安装平台默认版本");
+        return { plan: opts.plan, smoke: null };
+    }
+    // 显式 CPU 模式：从 CPU index 安装后做 import 自检，不重试
+    if (opts.plan.backend === "cpu") {
+        await installTorch({ ...opts, forceReinstall: false });
+        // 当前计划对应的自检
+        const smoke = await runSmokeTest(opts.venvDir, "cpu");
+        if (!smoke.ok) throw smokeFailureError(opts.plan, smoke, { stage: "smoke", attemptedTags: [] });
+        return { plan: opts.plan, smoke };
+    }
+    // CUDA：按候选 tag 依次尝试
+    for (let i = 0; i < opts.plan.candidates.length; i++) {
+        // 当前 tag
+        const tag = opts.plan.candidates[i] as string;
+        // 当前计划
+        const plan = torchPlanForTag(opts.plan, tag);
+        await installTorch({ ...opts, plan, forceReinstall: i > 0 });
+        // CUDA 自检
+        const smoke = await runSmokeTest(opts.venvDir, "cuda");
+        if (smoke.ok) return { plan, smoke };
+        // 可重试的错误类型
+        const retryable =
+            smoke.errorClass === "driver" || smoke.errorClass === "kernel" || smoke.errorClass === "device_function";
+        if (!retryable || i === opts.plan.candidates.length - 1) {
+            throw smokeFailureError(plan, smoke, {
+                stage: "smoke",
+                attemptedTags: opts.plan.candidates.slice(0, i + 1),
+            });
+        }
+        opts.log(`CUDA 自检失败（${smoke.errorClass}），改用更低 tag ${opts.plan.candidates[i + 1]} 重试一次 ...`);
+    }
+    // 理论上不可达
+    throw smokeFailureError(
+        opts.plan,
+        {
+            ok: false,
+            torch: null,
+            torchvision: null,
+            torchCuda: null,
+            available: null,
+            device: null,
+            error: "没有可用的 CUDA 候选 tag",
+            errorClass: "unknown",
+        },
+        { stage: "smoke", attemptedTags: opts.plan.candidates },
+    );
+}
+
+/**
+ * 找出可能覆盖 torch 的 custom nodes（仅用于失败详情）。
+ */
+function offendingNodes(nodes: CustomNodeSpec[], comfyDir: string, installedTorch: string | null): string[] {
+    if (installedTorch === null) return [];
+    // 已安装 torch 的公共版本
+    const installedBase = installedTorch.split("+")[0] ?? installedTorch;
+    // 冲突的 node
+    const out: string[] = [];
+    for (const node of nodes) {
+        // node requirements
+        const req = join(comfyDir, "custom_nodes", node.name, "requirements.txt");
+        if (!existsSync(req)) continue;
+        // torch pin
+        const conflicts = torchPinsInFile(req).some(
+            (p) => p.package === "torch" && (p.version.split("+")[0] ?? p.version) !== installedBase,
+        );
+        if (conflicts) out.push(node.name);
+    }
+    return out;
+}
+
+/**
+ * 输出工具链探测结果（不涉及 index 选择）。
+ */
+function logToolchainPlan(plan: TorchPlan, log: Logger): void {
+    if (plan.backend === "cuda") {
+        log(
+            `工具链：驱动 ${plan.gpu?.driver ?? "unknown"}，CUDA ≤ ${plan.gpu?.cudaMax ?? "unknown"}，` +
+                `compute ${plan.gpu?.computeCap ?? "unknown"}${plan.tag !== null ? ` → ${plan.tag}` : ""}`,
+        );
+        return;
+    }
+    // CPU 原因
+    const reason =
+        plan.cpuSource === "forced"
+            ? "显式 --torch-cpu"
+            : plan.cpuSource === "platform"
+              ? "非 Linux 平台"
+              : "未检测到 NVIDIA GPU";
+    log(`工具链：CPU 模式（${reason}）`);
+}
+
+/**
+ * 生成工具链摘要。
+ */
+function summarizeToolchain(marker: ToolchainMarker, reused: boolean): ToolchainSummary {
+    return {
+        python: marker.python,
+        platform: marker.platform,
+        driver: marker.driver,
+        cuda_max: marker.cuda_max,
+        compute_cap: marker.compute_cap,
+        torch_backend: marker.torch_backend,
+        torch_tag: marker.torch_tag,
+        torch: marker.torch,
+        torchvision: marker.torchvision,
+        reused,
+    };
+}
+
+/**
+ * 部署（或复用）一个 ComfyUI 安装，并保证工具链可用。
+ */
+async function provisionEngine(opts: {
+    root: string;
+    baseDir: string;
+    version: string;
+    project: ProjectConfig;
+    toolchain?: ToolchainOptions;
+    log: Logger;
+}): Promise<{ installed: boolean; marker: ToolchainMarker; summary: ToolchainSummary }> {
+    // venv 与 ComfyUI 目录
+    const venvDir = join(opts.baseDir, ".venv");
+    // ComfyUI 源码目录
+    const comfyDir = join(opts.baseDir, "ComfyUI");
+    // 1. clone / checkout（先保证源码版本正确，再决定依赖是否可复用）
+    await cloneRepo(opts.root, COMFY_REPO, comfyDir, opts.version, opts.log);
+    // 是否切换了版本
+    let switched = false;
+    if (existsSync(join(comfyDir, ".git"))) {
+        switched = await checkoutComfyVersion(comfyDir, opts.version, opts.log);
+    } else if (!existsSync(join(comfyDir, "main.py"))) {
+        throw new DaoyanCliError({
+            code: "provision_failed",
+            message: `ComfyUI 目录无效：${comfyDir}（缺少 main.py）`,
+        });
+    } else {
+        opts.log("ComfyUI 目录不是 git 检出，跳过版本切换（可用 engine use 指向其他目录）");
+    }
+    // requirements
+    const reqFile = join(comfyDir, "requirements.txt");
+    if (!existsSync(reqFile)) {
+        throw new DaoyanCliError({ code: "provision_failed", message: `缺少 ${reqFile}（clone 未完成？）` });
+    }
+    // requirements 哈希
+    const requirementsSha = sha256File(reqFile);
+    // custom nodes 规格
+    const nodes = opts.project.comfyui?.custom_nodes ?? [];
+    // custom nodes 哈希（复用判定；缺失目录/requirements 变化会让 marker 失效）
+    const nodesSha = customNodesHash(nodes, comfyDir);
+    // 安装参数
+    const options = resolveToolchainOptions(opts.toolchain);
+    // venv 是否健康
+    const healthy = await venvReady(venvDir);
+    // venv Python
+    let python: PythonInfo;
+    if (healthy) {
+        // 复用时的 Python 信息
+        const info = await venvPythonInfo(venvDir);
+        if (info === null) {
+            throw new DaoyanCliError({ code: "provision_failed", message: `无法读取 venv Python：${venvDir}` });
+        }
+        python = info;
+        opts.log(`复用已有 venv：${venvDir}（Python ${python.version}）`);
+    } else {
+        python = await createVenv(opts.root, venvDir, opts.log);
+    }
+    // 2. 工具链上下文：只探测驱动，不访问 wheel index（离线也能判断复用）
+    const context = await inspectTorchPlan({
+        python,
+        forceCpu: options.torchCpu,
+        forcedCuda: options.torchCuda,
+        indexRoot: options.torchIndex,
+    });
+    logToolchainPlan(context, opts.log);
+    // 3. 复用判定
+    // 已存在的 marker
+    const existingMarker = readToolchainMarker(venvDir);
+    // 不可复用原因
+    let mismatch: string | null = null;
+    if (switched) mismatch = "ComfyUI 版本已切换";
+    else if (!healthy) mismatch = "venv 已重建";
+    else if (existingMarker === null) mismatch = "缺少工具链标记";
+    else {
+        mismatch = markerMismatchReason(existingMarker, {
+            python: python.version,
+            platform: context.platform,
+            comfyuiTag: opts.version,
+            requirementsSha256: requirementsSha,
+            customNodesSha256: nodesSha,
+            plan: context,
+        });
+    }
+    if (mismatch === null && existingMarker !== null) {
+        // 依赖一致性
+        const check = await runPipCheck(venvDir);
+        if (!check.ok) {
+            mismatch = `pip check 失败：${check.output}`;
+        } else {
+            // 真实自检（CUDA 模式会分配显存）
+            const smoke = await runSmokeTest(venvDir, context.backend);
+            if (!smoke.ok) {
+                mismatch = `自检失败：${smoke.error ?? "未知错误"}`;
+            } else if (smoke.torch !== existingMarker.torch || smoke.torchvision !== existingMarker.torchvision) {
+                mismatch = `torch 版本已变化（marker ${existingMarker.torch ?? "unknown"} → 实际 ${smoke.torch ?? "unknown"}）`;
+            } else {
+                opts.log("引擎已安装（工具链校验通过），复用现有目录");
+                return { installed: false, marker: existingMarker, summary: summarizeToolchain(existingMarker, true) };
+            }
+        }
+    }
+    if (mismatch !== null) opts.log(`重新安装依赖：${mismatch}`);
+    // 4. 需要重装时再访问 index，选择与驱动匹配的 CUDA tag
+    const plan = await resolveTorchPlan({
+        python,
+        forceCpu: options.torchCpu,
+        forcedCuda: options.torchCuda,
+        indexRoot: options.torchIndex,
+        log: opts.log,
+    });
+    if (plan.tag !== null && plan.tag !== context.tag) {
+        opts.log(`工具链：选择 ${plan.tag}（候选 ${plan.candidates.join(" / ")}）`);
+    }
+    // 5. 清除旧 marker（成功后再写）
+    rmSync(join(venvDir, TOOLCHAIN_MARKER_FILE), { force: true });
+    // 6. 安装 torch 并做 CUDA 自检
+    const torchResult = await installTorchAndVerify({
+        root: opts.root,
+        venvDir,
+        plan,
+        options,
+        log: opts.log,
+    });
+    // 7. 冲突检查（requirements 不得静默覆盖已选 torch）
+    await assertRequirementsCompatible(reqFile, venvDir, torchResult.plan);
+    // 8. ComfyUI 依赖 + custom nodes
+    await pipInstall(opts.root, venvDir, options, opts.log, reqFile);
+    await installCustomNodes(opts.root, venvDir, nodes, options, opts.log, comfyDir);
+    // 9. 最终一致性检查（custom node 可能替换 torch）
+    const finalCheck = await runPipCheck(venvDir);
+    if (!finalCheck.ok) {
+        throw new DaoyanCliError({
+            code: "provision_failed",
+            message: "依赖一致性检查失败（pip check）",
+            hint: "按 details.output 修复冲突的包；custom node 可能固定了不兼容版本",
+            details: {
+                stage: "pip_check",
+                output: finalCheck.output,
+                custom_nodes: nodes.map((n) => n.name),
+            },
+        });
+    }
+    // 10. 最终自检
+    const finalSmoke = await runSmokeTest(venvDir, torchResult.plan.backend);
+    if (!finalSmoke.ok) {
+        // 已安装 torch 版本
+        const installedTorch = await pipShowVersion(venvDir, "torch");
+        throw smokeFailureError(torchResult.plan, finalSmoke, {
+            stage: "smoke_final",
+            attemptedTags: torchResult.plan.candidates,
+            offendingNodes: offendingNodes(nodes, comfyDir, installedTorch),
+        });
+    }
+    // 11. 写 marker（custom nodes 安装完成后重新计算哈希）
+    // 最终 custom nodes 哈希
+    const finalNodesSha = customNodesHash(nodes, comfyDir);
+    // 工具链标记
+    const marker = buildToolchainMarker({
+        plan: torchResult.plan,
+        smoke: finalSmoke,
+        comfyuiTag: opts.version,
+        requirementsSha256: requirementsSha,
+        customNodesSha256: finalNodesSha,
+    });
+    writeToolchainMarker(venvDir, marker);
+    return { installed: true, marker, summary: summarizeToolchain(marker, false) };
+}
+
+/**
+ * 部署 local 引擎（幂等：marker + pip check + smoke test 全部通过才复用）。
  */
 export async function deployLocalEngine(opts: {
     root: string;
     project: ProjectConfig;
     version: string;
-    mirror?: string;
+    toolchain?: ToolchainOptions;
     log: Logger;
-}): Promise<{ installed: boolean; version: string }> {
-    // venv 与 ComfyUI 目录
-    const venvDir = join(opts.root, "engine", ".venv");
-    const comfyDir = join(opts.root, "engine", "ComfyUI");
-    // 是否已完整安装
-    const already = existsSync(join(venvDir, "bin", "python")) && existsSync(join(comfyDir, "main.py"));
-    if (already) {
-        opts.log("引擎已安装，复用现有目录");
-        // 版本不同则切换（有 .git 才能切）
-        let switched = false;
-        if (existsSync(join(comfyDir, ".git"))) {
-            switched = await checkoutComfyVersion(comfyDir, opts.version, opts.log);
-        } else if (existsSync(join(comfyDir, "main.py"))) {
-            opts.log("ComfyUI 目录不是 git 检出，跳过版本切换（可用 engine use 指向其他目录）");
-        }
-        if (switched) {
-            await pipInstall(opts.root, venvDir, opts.mirror, opts.log, join(comfyDir, "requirements.txt"));
-        }
-        await installCustomNodes(
-            opts.root,
-            venvDir,
-            opts.project.comfyui?.custom_nodes ?? [],
-            opts.mirror,
-            opts.log,
-            comfyDir,
-        );
-        return { installed: false, version: opts.version };
-    }
-    await detectPython(opts.log);
-    await createVenv(opts.root, venvDir, opts.log);
-    await cloneRepo(opts.root, COMFY_REPO, comfyDir, opts.version, opts.log);
-    await pipInstall(opts.root, venvDir, opts.mirror, opts.log);
-    await installCustomNodes(
-        opts.root,
-        venvDir,
-        opts.project.comfyui?.custom_nodes ?? [],
-        opts.mirror,
-        opts.log,
-        comfyDir,
-    );
-    return { installed: true, version: opts.version };
+}): Promise<{ installed: boolean; version: string; toolchain: ToolchainSummary }> {
+    // 部署结果
+    const result = await provisionEngine({
+        root: opts.root,
+        baseDir: join(opts.root, "engine"),
+        version: opts.version,
+        project: opts.project,
+        ...(opts.toolchain !== undefined ? { toolchain: opts.toolchain } : {}),
+        log: opts.log,
+    });
+    return { installed: result.installed, version: opts.version, toolchain: result.summary };
 }
 
 /**
@@ -413,25 +1136,23 @@ export async function installEngineAt(opts: {
     baseDir: string;
     version: string;
     project: ProjectConfig;
-    mirror?: string;
+    toolchain?: ToolchainOptions;
     log: Logger;
-}): Promise<{ comfyDir: string; venvDir: string }> {
-    // 目标目录
-    const comfyDir = join(opts.baseDir, "ComfyUI");
-    const venvDir = join(opts.baseDir, ".venv");
-    await detectPython(opts.log);
-    await createVenv(opts.root, venvDir, opts.log);
-    await cloneRepo(opts.root, COMFY_REPO, comfyDir, opts.version, opts.log);
-    await pipInstall(opts.root, venvDir, opts.mirror, opts.log, join(comfyDir, "requirements.txt"));
-    await installCustomNodes(
-        opts.root,
-        venvDir,
-        opts.project.comfyui?.custom_nodes ?? [],
-        opts.mirror,
-        opts.log,
-        comfyDir,
-    );
-    return { comfyDir, venvDir };
+}): Promise<{ comfyDir: string; venvDir: string; toolchain: ToolchainSummary }> {
+    // 部署结果
+    const result = await provisionEngine({
+        root: opts.root,
+        baseDir: opts.baseDir,
+        version: opts.version,
+        project: opts.project,
+        ...(opts.toolchain !== undefined ? { toolchain: opts.toolchain } : {}),
+        log: opts.log,
+    });
+    return {
+        comfyDir: join(opts.baseDir, "ComfyUI"),
+        venvDir: join(opts.baseDir, ".venv"),
+        toolchain: result.summary,
+    };
 }
 
 /**

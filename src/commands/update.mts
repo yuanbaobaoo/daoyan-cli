@@ -1,5 +1,7 @@
-/** update —— 自升级：支持 GitHub 默认源，也支持用户自建 manifest / tgz 源与代理。
- *  - 默认：GitHub tags + `npm pack git+…`（与 install.sh 同一条路径）；
+/** update —— 自升级：默认走 GitHub Release 的 latest.json，也支持自定义 manifest / tgz 源与代理。
+ *  - 默认：Release `latest.json` + 预构建 tgz（可访问 github.com 即可，不依赖 raw/npm git）；
+ *  - 直连 GitHub 失败时默认尝试内置加速源（仅 github.com URL；可用 --github-proxy none 关闭）；
+ *  - 兜底：默认 manifest 不可达时回退 GitHub tags + `npm pack git+…`；
  *  - 自定义：`latest.json` + 预构建 tgz，校验 SHA-256 后 `npm install -g --ignore-scripts`；
  *  - `daoyan update proxy|source` 持久化到 ~/.dycli/update.json（用户级，不进项目）；
  *  - `--check` 只检测不安装。 */
@@ -19,6 +21,16 @@ import type { CliContext } from "../shared/context.mts";
 // 默认 GitHub 源（仅默认模式使用）
 const REPO_URL = "https://github.com/yuanbaobaoo/daoyan-cli.git";
 const GITHUB_TAGS_API = "https://api.github.com/repos/yuanbaobaoo/daoyan-cli/tags";
+// 默认更新清单：GitHub Release 资产，避免 npm 的 HTTPS→SSH 回退
+export const DEFAULT_UPDATE_MANIFEST = "https://github.com/yuanbaobaoo/daoyan-cli/releases/latest/download/latest.json";
+// 内置 GitHub 加速源：仅在直连 GitHub 网络失败时使用（按顺序尝试）
+export const DEFAULT_GITHUB_PROXIES: readonly string[] = ["https://gh-proxy.com", "https://gh.llkk.cc"];
+// 关闭内置加速源的取值
+const DISABLE_GITHUB_PROXY = "none";
+// 经加速源读取清单的超时
+const MIRROR_MANIFEST_TIMEOUT_MS = 15_000;
+// 直连下载前的可达性探测超时（避免网络不通时卡满整个下载超时）
+const DIRECT_PROBE_TIMEOUT_MS = 10_000;
 // 单次更新下载上限（50 MiB）
 const MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024;
 
@@ -74,6 +86,10 @@ export type UpdateSource =
           kind: "manifest";
           manifest: string;
           proxy?: string;
+          /**
+           * 默认 Release manifest 不可达时，是否回退 GitHub tags + git。
+           */
+          fallbackToGithub?: boolean;
       }
     | {
           kind: "from";
@@ -91,6 +107,10 @@ export interface UpdateFlags {
     from?: string;
     sha256?: string;
     proxy?: string;
+    /**
+     * GitHub 加速源：http(s) 基址、逗号分隔列表，或 none 关闭。
+     */
+    githubProxy?: string;
 }
 
 /**
@@ -243,6 +263,73 @@ function redactUrl(raw: string): string {
 }
 
 /**
+ * 是否为 github.com 的 URL（只有这类 URL 才套加速源）。
+ */
+export function isGithubUrl(raw: string): boolean {
+    try {
+        const u = new URL(raw);
+        return u.hostname === "github.com" || u.hostname === "www.github.com";
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * 生成加速源 URL：<base>/<原始 GitHub URL>（gh-proxy 系服务的通用格式）。
+ */
+export function githubMirrorUrl(base: string, url: string): string {
+    return `${base.replace(/\/+$/, "")}/${url}`;
+}
+
+/**
+ * 解析 --github-proxy / DYCLI_UPDATE_GITHUB_PROXY：逗号分隔，none 关闭。
+ */
+export function parseGithubProxyList(raw: string): string[] {
+    // 规范化后的原始值
+    const normalized = raw.trim();
+    if (normalized.toLowerCase() === DISABLE_GITHUB_PROXY) return [];
+    // 解析结果
+    const out: string[] = [];
+    for (const part of normalized.split(",")) {
+        // 去空白与末尾斜杠
+        const value = part.trim().replace(/\/+$/, "");
+        if (value === "") continue;
+        if (!isHttpUrl(value)) usageError(`--github-proxy 必须是 http(s) URL（收到 ${value}）`);
+        if (!out.includes(value)) out.push(value);
+    }
+    if (out.length === 0) usageError("--github-proxy 需要至少一个 http(s) URL，或使用 none 关闭");
+    return out;
+}
+
+/**
+ * 解析本次更新使用的 GitHub 加速源。
+ * 显式 CLI/环境变量优先；否则仅在未配置 HTTP 代理时启用内置列表。
+ */
+export function resolveGithubProxies(
+    flags: UpdateFlags,
+    env: NodeJS.ProcessEnv,
+    httpProxy: string | undefined,
+): string[] {
+    // 显式值：CLI > 环境变量
+    const raw = nonEmpty(flags.githubProxy) ?? nonEmpty(env.DYCLI_UPDATE_GITHUB_PROXY);
+    if (raw !== undefined) return parseGithubProxyList(raw);
+    // 已配置 HTTP 代理时，不默认叠加第三方加速源
+    if (httpProxy !== undefined) return [];
+    return [...DEFAULT_GITHUB_PROXIES];
+}
+
+/**
+ * 判断两个清单是否描述同一版本（多加速源一致性校验）。
+ */
+export function sameUpdateManifest(a: UpdateManifest, b: UpdateManifest): boolean {
+    // 版本（忽略 v 前缀）
+    const va = a.version.replace(/^v/i, "");
+    // 对侧版本
+    const vb = b.version.replace(/^v/i, "");
+    return va === vb && a.tgz === b.tgz && (a.sha256 ?? null) === (b.sha256 ?? null);
+}
+
+/**
  * 代理注入到子进程环境（不进入 argv）。
  */
 function proxyEnv(proxy: string): NodeJS.ProcessEnv {
@@ -277,7 +364,7 @@ async function fetchText(
 ): Promise<string> {
     if (proxy !== undefined) {
         // curl 参数
-        const args = ["-fsSL", "--max-time", String(Math.ceil(timeoutMs / 1000))];
+        const args = ["-fsSL", "--connect-timeout", "8", "--max-time", String(Math.ceil(timeoutMs / 1000))];
         for (const [k, v] of Object.entries(headers)) args.push("-H", `${k}: ${v}`);
         args.push(url);
         const r = await tryExecCapture("curl", args, {
@@ -330,6 +417,8 @@ async function downloadToFile(url: string, dest: string, proxy: string | undefin
             "curl",
             [
                 "-fsSL",
+                "--connect-timeout",
+                "8",
                 "--max-time",
                 String(Math.ceil(timeoutMs / 1000)),
                 "--max-filesize",
@@ -383,6 +472,36 @@ async function downloadToFile(url: string, dest: string, proxy: string | undefin
         });
     }
     writeFileSync(dest, Buffer.from(await res.arrayBuffer()));
+}
+
+/**
+ * 直连可达性探测：HEAD 成功（或 405 不允许 HEAD）才走直连下载，
+ * 避免网络不通时卡满整个下载超时。
+ */
+async function probeDownloadUrl(url: string): Promise<void> {
+    // HEAD 响应
+    let res: Response;
+    try {
+        res = await fetch(url, {
+            method: "HEAD",
+            redirect: "follow",
+            headers: { "user-agent": "daoyan-cli-update" },
+            signal: AbortSignal.timeout(DIRECT_PROBE_TIMEOUT_MS),
+        });
+    } catch (e) {
+        throw new DaoyanCliError({
+            code: "update_failed",
+            message: `直连探测失败：${redactUrl(url)}（${e instanceof Error ? e.message : String(e)}）`,
+            retryable: true,
+        });
+    }
+    if (!res.ok && res.status !== 405) {
+        throw new DaoyanCliError({
+            code: "update_failed",
+            message: `直连探测失败：${redactUrl(url)}（HTTP ${res.status}）`,
+            retryable: true,
+        });
+    }
 }
 
 /**
@@ -458,19 +577,35 @@ export function resolveTgz(source: string, tgz: string): { location: string; rem
 }
 
 /**
+ * 解析清单文本（JSON + 结构校验）。
+ */
+function parseManifestText(text: string, label: string): UpdateManifest {
+    // 原始 JSON
+    let raw: unknown;
+    try {
+        raw = JSON.parse(text) as unknown;
+    } catch (e) {
+        throw new DaoyanCliError({
+            code: "update_failed",
+            message: `更新清单不是合法 JSON：${label}（${e instanceof Error ? e.message : String(e)}）`,
+        });
+    }
+    return parseUpdateManifest(raw);
+}
+
+/**
  * 读取/下载 manifest。
+ * 直连失败时（仅 GitHub URL）依次读取内置加速源；多个源结果必须一致。
  */
 async function loadManifest(
     source: string,
     proxy: string | undefined,
-): Promise<{ manifest: UpdateManifest; source: string }> {
+    githubProxies: string[],
+): Promise<{ manifest: UpdateManifest; source: string; via_proxy: string | null }> {
     const remote = isHttpUrl(source);
     // 规范化后的清单地址
     const normalized = remote ? source : resolve(expandHome(source));
-    let text: string;
-    if (remote) {
-        text = await fetchText(normalized, proxy, 15_000);
-    } else {
+    if (!remote) {
         let st;
         try {
             st = statSync(normalized);
@@ -480,21 +615,63 @@ async function loadManifest(
         if (!st.isFile()) {
             throw new DaoyanCliError({ code: "update_failed", message: `更新清单不是文件：${normalized}` });
         }
-        text = readFileSync(normalized, "utf8");
+        return {
+            manifest: parseManifestText(readFileSync(normalized, "utf8"), normalized),
+            source: normalized,
+            via_proxy: null,
+        };
     }
-    // 解析 JSON
-    let raw: unknown;
+    // 直连（或用户配置的 HTTP 代理）
+    let directError: unknown = null;
     try {
-        raw = JSON.parse(text) as unknown;
+        const text = await fetchText(normalized, proxy, 15_000);
+        return { manifest: parseManifestText(text, redactUrl(normalized)), source: normalized, via_proxy: null };
     } catch (e) {
+        directError = e;
+    }
+    // 非 GitHub 或未启用加速源：保留原始错误
+    if (githubProxies.length === 0 || !isGithubUrl(normalized)) throw directError;
+    // 依次读取加速源
+    const results: Array<{ manifest: UpdateManifest; via: string }> = [];
+    // 各加速源错误
+    const errors: string[] = [];
+    for (const base of githubProxies) {
+        try {
+            const text = await fetchText(githubMirrorUrl(base, normalized), proxy, MIRROR_MANIFEST_TIMEOUT_MS);
+            results.push({ manifest: parseManifestText(text, redactUrl(base)), via: base });
+        } catch (e) {
+            errors.push(`${base}: ${e instanceof Error ? e.message : String(e)}`);
+        }
+    }
+    if (results.length === 0) {
         throw new DaoyanCliError({
             code: "update_failed",
-            message: `更新清单不是合法 JSON：${remote ? redactUrl(normalized) : normalized}（${
-                e instanceof Error ? e.message : String(e)
-            }）`,
+            message: `直连与 GitHub 加速源均不可用：${redactUrl(normalized)}`,
+            retryable: true,
+            hint: "可用 --github-proxy <url> 指定可达加速源，或用 --manifest 指向镜像清单",
+            details: {
+                direct_error: directError instanceof Error ? directError.message : String(directError),
+                mirror_errors: errors,
+            },
         });
     }
-    return { manifest: parseUpdateManifest(raw), source: normalized };
+    // 首选结果
+    const first = results[0] as { manifest: UpdateManifest; via: string };
+    for (const other of results.slice(1)) {
+        if (!sameUpdateManifest(first.manifest, other.manifest)) {
+            throw new DaoyanCliError({
+                code: "update_failed",
+                message: "多个 GitHub 加速源返回的清单不一致，已拒绝安装",
+                hint: "用 --github-proxy 指定可信加速源，或用 --manifest 指向官方镜像",
+                details: {
+                    mirror_mismatch: true,
+                    mirrors: results.map((r) => r.via),
+                    versions: results.map((r) => r.manifest.version),
+                },
+            });
+        }
+    }
+    return { manifest: first.manifest, source: normalized, via_proxy: first.via };
 }
 
 /**
@@ -528,31 +705,39 @@ async function latestTag(proxy?: string): Promise<{ tag: string | null; note: st
 }
 
 /**
- * 运行命令并只收集 stdout（stderr 直连终端，便于看 npm 进度）。
+ * 运行命令：stdout 收集（用于 npm pack 文件名），stderr 转发终端并保留尾部。
  */
 function spawnCapture(
     cmd: string,
     args: readonly string[],
     opts: { cwd?: string; env?: NodeJS.ProcessEnv } = {},
-): Promise<{ code: number; stdout: string }> {
+): Promise<{ code: number; stdout: string; stderr: string }> {
     return new Promise((resolvePromise, rejectPromise) => {
-        // 子进程句柄（stdout 管道收集；stderr 继承终端）
+        // 子进程句柄（stdout 管道收集；stderr 管道转发 + 保留尾部）
         const child = spawn(cmd, args, {
             cwd: opts.cwd,
             env: opts.env !== undefined ? { ...process.env, ...opts.env } : undefined,
-            stdio: ["ignore", "pipe", "inherit"],
+            stdio: ["ignore", "pipe", "pipe"],
         });
         // stdout 累计
         let out = "";
+        // stderr 尾部
+        let errTail = "";
         child.stdout?.on("data", (d: Buffer) => {
             out += d.toString();
+        });
+        child.stderr?.on("data", (d: Buffer) => {
+            process.stderr.write(d);
+            // 拼接后的 stderr
+            const next = errTail + d.toString();
+            errTail = next.length > 8_000 ? next.slice(-8_000) : next;
         });
         child.on("error", (e) =>
             rejectPromise(
                 new DaoyanCliError({ code: "external_tool_missing", message: `无法启动 ${cmd}：${e.message}` }),
             ),
         );
-        child.on("close", (code) => resolvePromise({ code: code ?? -1, stdout: out }));
+        child.on("close", (code) => resolvePromise({ code: code ?? -1, stdout: out, stderr: errTail }));
     });
 }
 
@@ -589,6 +774,12 @@ export function parseUpdateFlags(args: string[]): UpdateFlags {
             const sha = v.value.trim().toLowerCase();
             if (!/^[0-9a-f]{64}$/.test(sha)) usageError("--sha256 需要 64 位十六进制");
             out.sha256 = sha;
+            i += v.skip;
+            continue;
+        }
+        if (name === "--github-proxy") {
+            const v = takeValue(args, i, inline, "--github-proxy");
+            out.githubProxy = v.value;
             i += v.skip;
             continue;
         }
@@ -656,7 +847,7 @@ export function resolveUpdateSource(flags: UpdateFlags, env: NodeJS.ProcessEnv, 
     const envManifest = nonEmpty(env.DYCLI_UPDATE_MANIFEST);
     if (envManifest !== undefined) return { kind: "manifest", manifest: envManifest, ...proxyField };
     if (config.manifest !== undefined) return { kind: "manifest", manifest: config.manifest, ...proxyField };
-    return { kind: "github", ...proxyField };
+    return { kind: "manifest", manifest: DEFAULT_UPDATE_MANIFEST, fallbackToGithub: true, ...proxyField };
 }
 
 /**
@@ -695,6 +886,7 @@ function tgzName(location: string, fallback: string): string {
 
 /**
  * 把 tgz 落到本地（下载或校验本地文件），并校验 SHA-256。
+ * 直连失败时（仅 GitHub URL）依次尝试加速源；每个来源都必须通过 SHA-256。
  */
 async function materializeTgz(
     resolved: { location: string; remote: boolean },
@@ -702,35 +894,85 @@ async function materializeTgz(
     proxy: string | undefined,
     version: string,
     tmp: string,
-): Promise<string> {
-    // 本地 tgz 路径
-    let path: string;
-    if (resolved.remote) {
-        const fallback = `daoyan-cli-${version.replace(/^v/i, "")}.tgz`;
-        path = join(tmp, tgzName(resolved.location, fallback));
-        await downloadToFile(resolved.location, path, proxy, 120_000);
-    } else {
-        path = resolve(expandHome(resolved.location));
+    githubProxies: string[],
+    skipDirect = false,
+): Promise<{ path: string; via_proxy: string | null }> {
+    // 本地 tgz
+    if (!resolved.remote) {
+        // 本地文件路径
+        const localPath = resolve(expandHome(resolved.location));
         let st;
         try {
-            st = statSync(path);
+            st = statSync(localPath);
         } catch {
-            throw new DaoyanCliError({ code: "update_failed", message: `tgz 不存在：${path}` });
+            throw new DaoyanCliError({ code: "update_failed", message: `tgz 不存在：${localPath}` });
         }
-        if (!st.isFile()) throw new DaoyanCliError({ code: "update_failed", message: `tgz 不是文件：${path}` });
+        if (!st.isFile()) throw new DaoyanCliError({ code: "update_failed", message: `tgz 不是文件：${localPath}` });
+        if (sha256 !== undefined) {
+            // 实际哈希
+            const actual = sha256File(localPath);
+            if (actual !== sha256) {
+                throw new DaoyanCliError({
+                    code: "update_failed",
+                    message: `SHA-256 校验失败（期望 ${sha256} / 实际 ${actual}）`,
+                    hint: "确认下载源与清单是否对应同一版本",
+                });
+            }
+        }
+        return { path: localPath, via_proxy: null };
     }
-    // 校验
-    if (sha256 !== undefined) {
-        const actual = sha256File(path);
-        if (actual !== sha256) {
-            throw new DaoyanCliError({
-                code: "update_failed",
-                message: `SHA-256 校验失败（期望 ${sha256} / 实际 ${actual}）`,
-                hint: "确认下载源与清单是否对应同一版本",
-            });
+    // 本地下载路径
+    const fallback = `daoyan-cli-${version.replace(/^v/i, "")}.tgz`;
+    const path = join(tmp, tgzName(resolved.location, fallback));
+    // 候选地址：直连 + GitHub 加速源
+    const candidates: Array<{ url: string; via: string | null }> = [];
+    if (!skipDirect) candidates.push({ url: resolved.location, via: null });
+    if (githubProxies.length > 0 && isGithubUrl(resolved.location)) {
+        for (const base of githubProxies) {
+            candidates.push({ url: githubMirrorUrl(base, resolved.location), via: base });
         }
     }
-    return path;
+    // 各来源错误
+    const errors: string[] = [];
+    if (candidates.length === 0) {
+        throw new DaoyanCliError({
+            code: "update_failed",
+            message: "没有可用的 tgz 下载地址",
+            hint: "检查 --github-proxy / 更新清单配置",
+        });
+    }
+    for (const candidate of candidates) {
+        try {
+            // 直连先做 HEAD 探测，避免网络不通时卡满下载超时
+            if (candidate.via === null && proxy === undefined) {
+                await probeDownloadUrl(candidate.url);
+            }
+            // 清理上一次失败留下的文件
+            rmSync(path, { force: true });
+            await downloadToFile(candidate.url, path, proxy, 120_000);
+            if (sha256 !== undefined) {
+                // 实际哈希
+                const actual = sha256File(path);
+                if (actual !== sha256) {
+                    throw new DaoyanCliError({
+                        code: "update_failed",
+                        message: `SHA-256 校验失败（期望 ${sha256} / 实际 ${actual}）`,
+                    });
+                }
+            }
+            return { path, via_proxy: candidate.via };
+        } catch (e) {
+            errors.push(`${candidate.via ?? "直连"}: ${e instanceof Error ? e.message : String(e)}`);
+            rmSync(path, { force: true });
+        }
+    }
+    throw new DaoyanCliError({
+        code: "update_failed",
+        message: `下载 tgz 失败（已尝试 ${candidates.length} 个地址）`,
+        retryable: true,
+        hint: "可用 --github-proxy <url> 指定加速源，或用 --from 指定本地/其他来源的 tgz",
+        details: { errors, sha256 },
+    });
 }
 
 /**
@@ -740,15 +982,30 @@ async function updateFromManifest(
     ctx: CliContext,
     source: Extract<UpdateSource, { kind: "manifest" }>,
     checkOnly: boolean,
+    githubProxies: string[],
 ): Promise<void> {
     // 清单
-    let loaded: { manifest: UpdateManifest; source: string };
+    let loaded: { manifest: UpdateManifest; source: string; via_proxy: string | null };
     try {
-        loaded = await loadManifest(source.manifest, source.proxy);
+        loaded = await loadManifest(source.manifest, source.proxy, githubProxies);
     } catch (e) {
+        // 失败原因
+        const note = e instanceof Error ? e.message : String(e);
+        // 加速源清单互相矛盾：不可回退 git，直接失败
+        const mismatch =
+            e instanceof DaoyanCliError && typeof e.details === "object" && e.details !== null
+                ? e.details.mirror_mismatch === true
+                : false;
+        // 默认 Release manifest 不可达：回退 GitHub tags + git（旧版本兼容路径）
+        if (!checkOnly && source.fallbackToGithub === true && !mismatch) {
+            if (!ctx.json) say(`默认更新源不可达（${note}），回退 GitHub tags 安装 ...`);
+            await updateFromGitHub(ctx, checkOnly, source.proxy);
+            return;
+        }
+        // 加速源清单互相矛盾属于完整性问题，--check 也直接失败
+        if (checkOnly && mismatch) throw e;
         // --check 不因源不可用而失败
         if (!checkOnly) throw e;
-        const note = e instanceof Error ? e.message : String(e);
         if (ctx.json) {
             emitData({
                 current: `v${VERSION}`,
@@ -756,6 +1013,7 @@ async function updateFromManifest(
                 updateAvailable: false,
                 source: "manifest",
                 manifest: isHttpUrl(source.manifest) ? redactUrl(source.manifest) : source.manifest,
+                via_proxy: null,
                 note,
                 ...(source.proxy !== undefined ? { proxy: redactProxy(source.proxy) } : {}),
             });
@@ -763,6 +1021,11 @@ async function updateFromManifest(
         }
         say(`当前 v${VERSION}；无法读取更新源（${note}）`);
         return;
+    }
+    // 本次实际使用的加速源（清单或 tgz）
+    let viaProxy = loaded.via_proxy;
+    if (viaProxy !== null && !ctx.json) {
+        say(`GitHub 直连失败，本次清单来自加速源 ${viaProxy}`);
     }
     // 版本比较
     const currentStr = `v${VERSION}`;
@@ -780,6 +1043,7 @@ async function updateFromManifest(
                 updateAvailable: hasUpdate,
                 source: "manifest",
                 manifest: manifestLabel,
+                via_proxy: viaProxy,
                 ...proxyField,
             });
             return;
@@ -801,14 +1065,20 @@ async function updateFromManifest(
     // 临时目录
     const tmp = mkdtempSync(join(tmpdir(), "daoyan-cli-update-"));
     try {
-        const tgzPath = await materializeTgz(
+        const tgz = await materializeTgz(
             resolved,
             loaded.manifest.sha256,
             source.proxy,
             loaded.manifest.version,
             tmp,
+            githubProxies,
+            loaded.via_proxy !== null,
         );
-        await installTgz(tgzPath);
+        if (tgz.via_proxy !== null) {
+            viaProxy = tgz.via_proxy;
+            if (!ctx.json) say(`tgz 下载走加速源 ${tgz.via_proxy}`);
+        }
+        await installTgz(tgz.path);
         say(`升级完成：${loaded.manifest.tag}。验证：daoyan --version`);
         if (ctx.json) {
             emitData({
@@ -816,6 +1086,7 @@ async function updateFromManifest(
                 previous: currentStr,
                 source: "manifest",
                 manifest: manifestLabel,
+                via_proxy: viaProxy,
                 ...proxyField,
             });
         }
@@ -827,7 +1098,11 @@ async function updateFromManifest(
 /**
  * 直接从指定 tgz 安装。
  */
-async function updateFromTgz(ctx: CliContext, source: Extract<UpdateSource, { kind: "from" }>): Promise<void> {
+async function updateFromTgz(
+    ctx: CliContext,
+    source: Extract<UpdateSource, { kind: "from" }>,
+    githubProxies: string[],
+): Promise<void> {
     const remote = isHttpUrl(source.from);
     if (remote && source.sha256 === undefined) {
         throw new DaoyanCliError({
@@ -842,14 +1117,25 @@ async function updateFromTgz(ctx: CliContext, source: Extract<UpdateSource, { ki
     // 临时目录
     const tmp = mkdtempSync(join(tmpdir(), "daoyan-cli-update-"));
     try {
-        const tgzPath = await materializeTgz({ location, remote }, source.sha256, source.proxy, VERSION, tmp);
-        await installTgz(tgzPath);
+        const tgz = await materializeTgz(
+            { location, remote },
+            source.sha256,
+            source.proxy,
+            VERSION,
+            tmp,
+            githubProxies,
+        );
+        if (tgz.via_proxy !== null) {
+            if (!ctx.json) say(`tgz 下载走加速源 ${tgz.via_proxy}`);
+        }
+        await installTgz(tgz.path);
         say("安装完成。验证：daoyan --version");
         if (ctx.json) {
             emitData({
                 installed: true,
                 source: "from",
                 file: remote ? redactUrl(location) : location,
+                via_proxy: tgz.via_proxy,
             });
         }
     } finally {
@@ -900,10 +1186,15 @@ async function updateFromGitHub(ctx: CliContext, checkOnly: boolean, proxy: stri
             ...(proxy !== undefined ? { env: proxyEnv(proxy) } : {}),
         });
         if (pack.code !== 0) {
+            // 是否为 npm 从 HTTPS 静默回退 SSH 的典型错误
+            const sshFallback = /permission denied|publickey|ssh/i.test(pack.stderr);
             throw new DaoyanCliError({
                 code: "update_failed",
-                message: `npm pack 失败（退出码 ${pack.code}）。检查网络与 GitHub 可达性`,
-                hint: "可改用 daoyan update --manifest 或 --from 指定镜像",
+                message: `npm pack 失败（退出码 ${pack.code}）${sshFallback ? "：npm 可能在 HTTPS 失败后回退 SSH" : ""}`,
+                hint: sshFallback
+                    ? `改用 Release 清单绕过 npm git：daoyan update --manifest ${DEFAULT_UPDATE_MANIFEST}`
+                    : "可改用 daoyan update --manifest 或 --from 指定镜像",
+                details: { exit: pack.code, last_error: pack.stderr.trim().slice(-4000) },
             });
         }
         // tgz 文件名（最后一行）
@@ -975,7 +1266,7 @@ function runSourceCommand(ctx: CliContext, args: string[]): void {
         say(
             manifest !== null
                 ? `更新源：${redactUrl(manifest)}`
-                : "更新源：默认 GitHub（用 daoyan update source <manifest> 更换）",
+                : `更新源：默认 Release 清单（${DEFAULT_UPDATE_MANIFEST}）`,
         );
         return;
     }
@@ -986,7 +1277,7 @@ function runSourceCommand(ctx: CliContext, args: string[]): void {
             emitData({ manifest: null, path: updateConfigPath() });
             return;
         }
-        say("更新源已恢复为默认 GitHub");
+        say("更新源已恢复为默认 Release 清单");
         return;
     }
     if (args.length !== 1) usageError("用法：daoyan update source [<manifest>|--unset]");
@@ -1028,15 +1319,17 @@ export async function runUpdate(ctx: CliContext, args: string[]): Promise<void> 
     const flags = parseUpdateFlags(args);
     const config = readUpdateConfig();
     const source = resolveUpdateSource(flags, process.env, config);
+    // 本次更新的 GitHub 加速源（直连失败时使用）
+    const githubProxies = resolveGithubProxies(flags, process.env, source.proxy);
     if (flags.check && source.kind === "from") {
         usageError("--check 不能与 --from / DYCLI_UPDATE_FROM 一起使用");
     }
     if (source.kind === "from") {
-        await updateFromTgz(ctx, source);
+        await updateFromTgz(ctx, source, githubProxies);
         return;
     }
     if (source.kind === "manifest") {
-        await updateFromManifest(ctx, source, flags.check);
+        await updateFromManifest(ctx, source, flags.check, githubProxies);
         return;
     }
     await updateFromGitHub(ctx, flags.check, source.proxy);

@@ -34,6 +34,13 @@ test("Skill 生成哈希稳定且文件齐全", () => {
     assert.match(a.get("SKILL.md") ?? "", /ensurepip/);
     assert.match(a.get("reference/lifecycle.md") ?? "", /python3\.12-venv/);
     assert.match(a.get("reference/errors.md") ?? "", /ensurepip/);
+    // torch 工具链规则必须进入 Skill（禁止 Agent 手选 torch）
+    assert.match(a.get("SKILL.md") ?? "", /不要手工 `pip install torch`/);
+    assert.match(a.get("reference/lifecycle.md") ?? "", /\.dycli-toolchain\.json/);
+    assert.match(a.get("reference/lifecycle.md") ?? "", /--torch-cuda/);
+    assert.match(a.get("reference/errors.md") ?? "", /requirements_conflict/);
+    // update 的 GitHub 加速源说明进入 Skill
+    assert.match(a.get("SKILL.md") ?? "", /github-proxy/);
 });
 
 test("writeSkill 幂等，AGENTS.md 保留用户内容且不重复块", () => {

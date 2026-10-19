@@ -253,7 +253,7 @@ function skillMd(version: string, commands: readonly SkillCommand[]): string {
         "daoyan workflow node KSampler --json",
         "```",
         "",
-        "> local init 安装依赖时默认使用阿里云 PyPI（`https://mirrors.aliyun.com/pypi/simple/`）；网络/镜像不适用时用 `--mirror https://pypi.org/simple/` 覆盖。",
+        "> local init 会探测 NVIDIA 驱动/CUDA/compute capability，自动安装匹配的 torch（如 cu130）；**不要手工 `pip install torch`，也不要猜 cuXXX**。普通依赖默认阿里云 PyPI，失败自动回退官方 PyPI；可用 `--mirror` / `--fallback-mirror` / `--torch-index` / `--torch-cuda` / `--torch-cpu` 覆盖。",
         "",
         "## 核心闭环",
         "",
@@ -297,6 +297,8 @@ function skillMd(version: string, commands: readonly SkillCommand[]): string {
         "- `model_not_found` / `node_missing`：检查 `modelpath` / custom nodes，修正后重试。",
         "- `workflow_invalid`：`workflow validate <name> --json` 按 `issues[]` 修正。",
         "- `engine_unreachable`：remote 模式不会代为启动；检查 URL/网络。",
+        "- `update_failed`：GitHub 直连失败时默认尝试内置加速源（`--github-proxy none` 可关闭）；仍失败时用 `--manifest` 指向可达镜像，不要手工替换安装包。",
+        "- `provision_failed`：先看 `details.stage`。`ensurepip` 缺包按下一行处理；`torch` / `smoke` 表示驱动与 wheel 不匹配，按 `details.next_actions` 用 `--torch-cuda` / `--torch-index` / `--torch-cpu` 恢复，**不要自行猜测或手工安装 torch**。",
         "- `provision_failed` 且日志含 `ensurepip is not available` / `Failing command: .../.venv/bin/python3`：Ubuntu/Debian 缺少 `python3.X-venv`；安装对应包、删除半成品 `engine/.venv` 后重跑 `daoyan init`。完整步骤见 `reference/lifecycle.md`。",
         "",
         "完整错误码见 `reference/errors.md`。",
@@ -582,8 +584,36 @@ task start → machine lock → 回收残留引擎 → 恢复旧 GPU 租约
 \`\`\`
 
 - 任务之外没有常驻引擎；\`status\` 不拉起引擎；
-- 依赖安装默认使用阿里云 PyPI（\`https://mirrors.aliyun.com/pypi/simple/\`）；可用 \`--mirror\` 覆盖（官方源 \`https://pypi.org/simple/\`）；
+- 依赖安装默认使用阿里云 PyPI（\`https://mirrors.aliyun.com/pypi/simple/\`），失败自动回退官方 PyPI；可用 \`--mirror\` / \`--fallback-mirror\` 覆盖；
+- torch 由 \`init\` 根据驱动自动选择 CUDA tag，不需要也不允许手工安装；
 - 唯一例外：\`workflow nodes --refresh\` 的 metadata session（不加载模型，取完 /object_info 立即停止）。
+
+### init 的 Python/torch 工具链
+
+\`daoyan init --mode=local\` 与 \`daoyan engine install\` 共用同一套逻辑：
+
+1. 检查 venv 的 \`python\` / \`pip\`；不完整则删除 \`engine/.venv\` 重建（只删 dycli 管理的 venv）；
+2. 创建 venv 前检查 \`ensurepip\`，缺少时给出与 Python 版本匹配的 \`python3.X-venv\` 命令；
+3. 读取 \`nvidia-smi\` 的驱动版本、CUDA 上限、compute capability（多卡取最低）；
+4. 在 PyTorch index 中选择 \`cuXXX <= 驱动 CUDA\` 且存在当前 Python ABI / manylinux wheel 的最高 tag；
+5. 先装 torch/torchvision，再装 requirements；custom nodes 安装后重新 \`pip check\` + 自检；
+6. CUDA 自检会真实分配显存（不是只看 \`torch.cuda.is_available()\`）；
+7. 全部通过后写 \`engine/.venv/.dycli-toolchain.json\`（Python、平台、ComfyUI tag、requirements 哈希、驱动、tag、torch 版本）。
+
+复用条件（缺一不可）：venv 健康、marker 存在且 Python/平台/ComfyUI tag/requirements/custom nodes 哈希一致、\`pip check\` 通过、自检通过。否则重新安装依赖，**不会返回假成功**。
+
+常用覆盖参数（优先级 CLI > 环境变量 > 默认值）：
+
+| 参数 | 环境变量 | 默认 |
+|---|---|---|
+| \`--mirror <url>\` | \`DYCLI_PIP_MIRROR\` | 阿里云 PyPI |
+| \`--fallback-mirror <url\\|none>\` | \`DYCLI_PIP_FALLBACK_MIRROR\` | 官方 PyPI |
+| \`--torch-index <url>\` | \`DYCLI_TORCH_INDEX\` | \`https://download.pytorch.org/whl\` |
+| \`--torch-cuda <cuXXX>\` | \`DYCLI_TORCH_CUDA\` | 自动探测 |
+| \`--torch-cpu\` | \`DYCLI_TORCH_CPU=1\` | 关闭 |
+| \`--no-cache\` | — | 关闭 |
+
+失败时读取 \`provision_failed.details\`：\`stage\`（ensurepip/venv/torch/requirements/requirements_conflict/pip_check/smoke/smoke_final）、\`driver\`、\`cuda_max\`、\`compute_cap\`、\`torch_tag\`、\`attempted_tags\`、\`last_error\`、\`offending_nodes\`、\`next_actions\`。Agent 只按这些字段恢复，不要猜 torch 版本。
 
 ### init 失败：ensurepip is not available
 
@@ -736,6 +766,8 @@ ${rows}
 - \`workflow_invalid\`：按 \`issues[]\` 修图或 bindings。
 - \`engine_unreachable\`：remote 不代启；检查 URL/网络。
 - \`provision_failed\` + \`ensurepip is not available\`：安装 \`python3.X-venv\`（如 \`python3.12-venv\`），删除半成品 \`engine/.venv\`，重跑 \`daoyan init\`；详见 \`reference/lifecycle.md\`。
+- \`provision_failed\` + \`details.stage=torch|smoke\`：驱动与 CUDA wheel 不匹配；按 \`details.next_actions\` 用 \`--torch-cuda\` / \`--torch-index\` / \`--torch-cpu\`，不要手工安装 torch。
+- \`provision_failed\` + \`details.stage=requirements_conflict\`：requirements 固定了不同 torch；修改 pin 或显式 \`--torch-cpu\`。
 - \`worker_crashed\` / \`machine_lock_corrupt\`：下一次任务会做 stale 恢复；锁损坏需人工确认后删除。
 
 退出码：0 成功；1 业务失败；2 用法错误；130 取消/中断。

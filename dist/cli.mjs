@@ -111,7 +111,7 @@ var init_errors = __esm({
       update_failed: { retryable: true, hint: "\u68C0\u67E5\u7F51\u7EDC\u4E0E npm \u6743\u9650\u540E\u91CD\u8BD5\u3002" },
       provision_failed: {
         retryable: true,
-        hint: "\u68C0\u67E5\u7F51\u7EDC\u3001\u78C1\u76D8\u4E0E Python \u73AF\u5883\uFF1Bpip \u9ED8\u8BA4\u963F\u91CC\u4E91 PyPI\uFF0C\u53EF\u7528 --mirror \u8986\u76D6\u3002"
+        hint: "\u6309 details.stage\uFF08ensurepip/venv/torch/requirements/pip_check/smoke\uFF09\u5B9A\u4F4D\uFF1B\u4E0D\u8981\u624B\u5DE5\u731C torch \u7248\u672C\uFF0C\u7528 --torch-index / --torch-cuda / --torch-cpu\u3002"
       },
       artifact_download_failed: {
         retryable: true,
@@ -1041,7 +1041,7 @@ function skillMd(version, commands) {
     "daoyan workflow node KSampler --json",
     "```",
     "",
-    "> local init \u5B89\u88C5\u4F9D\u8D56\u65F6\u9ED8\u8BA4\u4F7F\u7528\u963F\u91CC\u4E91 PyPI\uFF08`https://mirrors.aliyun.com/pypi/simple/`\uFF09\uFF1B\u7F51\u7EDC/\u955C\u50CF\u4E0D\u9002\u7528\u65F6\u7528 `--mirror https://pypi.org/simple/` \u8986\u76D6\u3002",
+    "> local init \u4F1A\u63A2\u6D4B NVIDIA \u9A71\u52A8/CUDA/compute capability\uFF0C\u81EA\u52A8\u5B89\u88C5\u5339\u914D\u7684 torch\uFF08\u5982 cu130\uFF09\uFF1B**\u4E0D\u8981\u624B\u5DE5 `pip install torch`\uFF0C\u4E5F\u4E0D\u8981\u731C cuXXX**\u3002\u666E\u901A\u4F9D\u8D56\u9ED8\u8BA4\u963F\u91CC\u4E91 PyPI\uFF0C\u5931\u8D25\u81EA\u52A8\u56DE\u9000\u5B98\u65B9 PyPI\uFF1B\u53EF\u7528 `--mirror` / `--fallback-mirror` / `--torch-index` / `--torch-cuda` / `--torch-cpu` \u8986\u76D6\u3002",
     "",
     "## \u6838\u5FC3\u95ED\u73AF",
     "",
@@ -1085,6 +1085,8 @@ function skillMd(version, commands) {
     "- `model_not_found` / `node_missing`\uFF1A\u68C0\u67E5 `modelpath` / custom nodes\uFF0C\u4FEE\u6B63\u540E\u91CD\u8BD5\u3002",
     "- `workflow_invalid`\uFF1A`workflow validate <name> --json` \u6309 `issues[]` \u4FEE\u6B63\u3002",
     "- `engine_unreachable`\uFF1Aremote \u6A21\u5F0F\u4E0D\u4F1A\u4EE3\u4E3A\u542F\u52A8\uFF1B\u68C0\u67E5 URL/\u7F51\u7EDC\u3002",
+    "- `update_failed`\uFF1AGitHub \u76F4\u8FDE\u5931\u8D25\u65F6\u9ED8\u8BA4\u5C1D\u8BD5\u5185\u7F6E\u52A0\u901F\u6E90\uFF08`--github-proxy none` \u53EF\u5173\u95ED\uFF09\uFF1B\u4ECD\u5931\u8D25\u65F6\u7528 `--manifest` \u6307\u5411\u53EF\u8FBE\u955C\u50CF\uFF0C\u4E0D\u8981\u624B\u5DE5\u66FF\u6362\u5B89\u88C5\u5305\u3002",
+    "- `provision_failed`\uFF1A\u5148\u770B `details.stage`\u3002`ensurepip` \u7F3A\u5305\u6309\u4E0B\u4E00\u884C\u5904\u7406\uFF1B`torch` / `smoke` \u8868\u793A\u9A71\u52A8\u4E0E wheel \u4E0D\u5339\u914D\uFF0C\u6309 `details.next_actions` \u7528 `--torch-cuda` / `--torch-index` / `--torch-cpu` \u6062\u590D\uFF0C**\u4E0D\u8981\u81EA\u884C\u731C\u6D4B\u6216\u624B\u5DE5\u5B89\u88C5 torch**\u3002",
     "- `provision_failed` \u4E14\u65E5\u5FD7\u542B `ensurepip is not available` / `Failing command: .../.venv/bin/python3`\uFF1AUbuntu/Debian \u7F3A\u5C11 `python3.X-venv`\uFF1B\u5B89\u88C5\u5BF9\u5E94\u5305\u3001\u5220\u9664\u534A\u6210\u54C1 `engine/.venv` \u540E\u91CD\u8DD1 `daoyan init`\u3002\u5B8C\u6574\u6B65\u9AA4\u89C1 `reference/lifecycle.md`\u3002",
     "",
     "\u5B8C\u6574\u9519\u8BEF\u7801\u89C1 `reference/errors.md`\u3002",
@@ -1356,8 +1358,36 @@ task start \u2192 machine lock \u2192 \u56DE\u6536\u6B8B\u7559\u5F15\u64CE \u219
 \`\`\`
 
 - \u4EFB\u52A1\u4E4B\u5916\u6CA1\u6709\u5E38\u9A7B\u5F15\u64CE\uFF1B\`status\` \u4E0D\u62C9\u8D77\u5F15\u64CE\uFF1B
-- \u4F9D\u8D56\u5B89\u88C5\u9ED8\u8BA4\u4F7F\u7528\u963F\u91CC\u4E91 PyPI\uFF08\`https://mirrors.aliyun.com/pypi/simple/\`\uFF09\uFF1B\u53EF\u7528 \`--mirror\` \u8986\u76D6\uFF08\u5B98\u65B9\u6E90 \`https://pypi.org/simple/\`\uFF09\uFF1B
+- \u4F9D\u8D56\u5B89\u88C5\u9ED8\u8BA4\u4F7F\u7528\u963F\u91CC\u4E91 PyPI\uFF08\`https://mirrors.aliyun.com/pypi/simple/\`\uFF09\uFF0C\u5931\u8D25\u81EA\u52A8\u56DE\u9000\u5B98\u65B9 PyPI\uFF1B\u53EF\u7528 \`--mirror\` / \`--fallback-mirror\` \u8986\u76D6\uFF1B
+- torch \u7531 \`init\` \u6839\u636E\u9A71\u52A8\u81EA\u52A8\u9009\u62E9 CUDA tag\uFF0C\u4E0D\u9700\u8981\u4E5F\u4E0D\u5141\u8BB8\u624B\u5DE5\u5B89\u88C5\uFF1B
 - \u552F\u4E00\u4F8B\u5916\uFF1A\`workflow nodes --refresh\` \u7684 metadata session\uFF08\u4E0D\u52A0\u8F7D\u6A21\u578B\uFF0C\u53D6\u5B8C /object_info \u7ACB\u5373\u505C\u6B62\uFF09\u3002
+
+### init \u7684 Python/torch \u5DE5\u5177\u94FE
+
+\`daoyan init --mode=local\` \u4E0E \`daoyan engine install\` \u5171\u7528\u540C\u4E00\u5957\u903B\u8F91\uFF1A
+
+1. \u68C0\u67E5 venv \u7684 \`python\` / \`pip\`\uFF1B\u4E0D\u5B8C\u6574\u5219\u5220\u9664 \`engine/.venv\` \u91CD\u5EFA\uFF08\u53EA\u5220 dycli \u7BA1\u7406\u7684 venv\uFF09\uFF1B
+2. \u521B\u5EFA venv \u524D\u68C0\u67E5 \`ensurepip\`\uFF0C\u7F3A\u5C11\u65F6\u7ED9\u51FA\u4E0E Python \u7248\u672C\u5339\u914D\u7684 \`python3.X-venv\` \u547D\u4EE4\uFF1B
+3. \u8BFB\u53D6 \`nvidia-smi\` \u7684\u9A71\u52A8\u7248\u672C\u3001CUDA \u4E0A\u9650\u3001compute capability\uFF08\u591A\u5361\u53D6\u6700\u4F4E\uFF09\uFF1B
+4. \u5728 PyTorch index \u4E2D\u9009\u62E9 \`cuXXX <= \u9A71\u52A8 CUDA\` \u4E14\u5B58\u5728\u5F53\u524D Python ABI / manylinux wheel \u7684\u6700\u9AD8 tag\uFF1B
+5. \u5148\u88C5 torch/torchvision\uFF0C\u518D\u88C5 requirements\uFF1Bcustom nodes \u5B89\u88C5\u540E\u91CD\u65B0 \`pip check\` + \u81EA\u68C0\uFF1B
+6. CUDA \u81EA\u68C0\u4F1A\u771F\u5B9E\u5206\u914D\u663E\u5B58\uFF08\u4E0D\u662F\u53EA\u770B \`torch.cuda.is_available()\`\uFF09\uFF1B
+7. \u5168\u90E8\u901A\u8FC7\u540E\u5199 \`engine/.venv/.dycli-toolchain.json\`\uFF08Python\u3001\u5E73\u53F0\u3001ComfyUI tag\u3001requirements \u54C8\u5E0C\u3001\u9A71\u52A8\u3001tag\u3001torch \u7248\u672C\uFF09\u3002
+
+\u590D\u7528\u6761\u4EF6\uFF08\u7F3A\u4E00\u4E0D\u53EF\uFF09\uFF1Avenv \u5065\u5EB7\u3001marker \u5B58\u5728\u4E14 Python/\u5E73\u53F0/ComfyUI tag/requirements/custom nodes \u54C8\u5E0C\u4E00\u81F4\u3001\`pip check\` \u901A\u8FC7\u3001\u81EA\u68C0\u901A\u8FC7\u3002\u5426\u5219\u91CD\u65B0\u5B89\u88C5\u4F9D\u8D56\uFF0C**\u4E0D\u4F1A\u8FD4\u56DE\u5047\u6210\u529F**\u3002
+
+\u5E38\u7528\u8986\u76D6\u53C2\u6570\uFF08\u4F18\u5148\u7EA7 CLI > \u73AF\u5883\u53D8\u91CF > \u9ED8\u8BA4\u503C\uFF09\uFF1A
+
+| \u53C2\u6570 | \u73AF\u5883\u53D8\u91CF | \u9ED8\u8BA4 |
+|---|---|---|
+| \`--mirror <url>\` | \`DYCLI_PIP_MIRROR\` | \u963F\u91CC\u4E91 PyPI |
+| \`--fallback-mirror <url\\|none>\` | \`DYCLI_PIP_FALLBACK_MIRROR\` | \u5B98\u65B9 PyPI |
+| \`--torch-index <url>\` | \`DYCLI_TORCH_INDEX\` | \`https://download.pytorch.org/whl\` |
+| \`--torch-cuda <cuXXX>\` | \`DYCLI_TORCH_CUDA\` | \u81EA\u52A8\u63A2\u6D4B |
+| \`--torch-cpu\` | \`DYCLI_TORCH_CPU=1\` | \u5173\u95ED |
+| \`--no-cache\` | \u2014 | \u5173\u95ED |
+
+\u5931\u8D25\u65F6\u8BFB\u53D6 \`provision_failed.details\`\uFF1A\`stage\`\uFF08ensurepip/venv/torch/requirements/requirements_conflict/pip_check/smoke/smoke_final\uFF09\u3001\`driver\`\u3001\`cuda_max\`\u3001\`compute_cap\`\u3001\`torch_tag\`\u3001\`attempted_tags\`\u3001\`last_error\`\u3001\`offending_nodes\`\u3001\`next_actions\`\u3002Agent \u53EA\u6309\u8FD9\u4E9B\u5B57\u6BB5\u6062\u590D\uFF0C\u4E0D\u8981\u731C torch \u7248\u672C\u3002
 
 ### init \u5931\u8D25\uFF1Aensurepip is not available
 
@@ -1502,6 +1532,8 @@ ${rows}
 - \`workflow_invalid\`\uFF1A\u6309 \`issues[]\` \u4FEE\u56FE\u6216 bindings\u3002
 - \`engine_unreachable\`\uFF1Aremote \u4E0D\u4EE3\u542F\uFF1B\u68C0\u67E5 URL/\u7F51\u7EDC\u3002
 - \`provision_failed\` + \`ensurepip is not available\`\uFF1A\u5B89\u88C5 \`python3.X-venv\`\uFF08\u5982 \`python3.12-venv\`\uFF09\uFF0C\u5220\u9664\u534A\u6210\u54C1 \`engine/.venv\`\uFF0C\u91CD\u8DD1 \`daoyan init\`\uFF1B\u8BE6\u89C1 \`reference/lifecycle.md\`\u3002
+- \`provision_failed\` + \`details.stage=torch|smoke\`\uFF1A\u9A71\u52A8\u4E0E CUDA wheel \u4E0D\u5339\u914D\uFF1B\u6309 \`details.next_actions\` \u7528 \`--torch-cuda\` / \`--torch-index\` / \`--torch-cpu\`\uFF0C\u4E0D\u8981\u624B\u5DE5\u5B89\u88C5 torch\u3002
+- \`provision_failed\` + \`details.stage=requirements_conflict\`\uFF1Arequirements \u56FA\u5B9A\u4E86\u4E0D\u540C torch\uFF1B\u4FEE\u6539 pin \u6216\u663E\u5F0F \`--torch-cpu\`\u3002
 - \`worker_crashed\` / \`machine_lock_corrupt\`\uFF1A\u4E0B\u4E00\u6B21\u4EFB\u52A1\u4F1A\u505A stale \u6062\u590D\uFF1B\u9501\u635F\u574F\u9700\u4EBA\u5DE5\u786E\u8BA4\u540E\u5220\u9664\u3002
 
 \u9000\u51FA\u7801\uFF1A0 \u6210\u529F\uFF1B1 \u4E1A\u52A1\u5931\u8D25\uFF1B2 \u7528\u6CD5\u9519\u8BEF\uFF1B130 \u53D6\u6D88/\u4E2D\u65AD\u3002
@@ -2015,6 +2047,41 @@ function execCapture(cmd, args, opts = {}) {
     });
   });
 }
+function execStream(cmd, args, opts = {}) {
+  return new Promise((resolvePromise, rejectPromise) => {
+    const limit = opts.tailBytes ?? 8e3;
+    const child = spawn(cmd, args, {
+      cwd: opts.cwd,
+      env: opts.env !== void 0 ? { ...process.env, ...opts.env } : void 0,
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    let outTail = "";
+    let errTail = "";
+    const timer = opts.timeoutMs !== void 0 ? setTimeout(() => child.kill("SIGKILL"), opts.timeoutMs) : void 0;
+    child.stdout.on("data", (d) => {
+      process.stdout.write(d);
+      outTail = appendTail(outTail, d.toString(), limit);
+    });
+    child.stderr.on("data", (d) => {
+      process.stderr.write(d);
+      errTail = appendTail(errTail, d.toString(), limit);
+    });
+    child.on("error", (e) => {
+      if (timer !== void 0) clearTimeout(timer);
+      rejectPromise(
+        new DaoyanCliError({ code: "external_tool_missing", message: `\u65E0\u6CD5\u542F\u52A8 ${cmd}\uFF1A${e.message}` })
+      );
+    });
+    child.on("close", (code) => {
+      if (timer !== void 0) clearTimeout(timer);
+      resolvePromise({ code: code ?? -1, stdout: outTail, stderr: errTail });
+    });
+  });
+}
+function appendTail(current, chunk, limit) {
+  const next = current + chunk;
+  return next.length > limit ? next.slice(-limit) : next;
+}
 function execInherit(cmd, args, opts = {}) {
   return new Promise((resolvePromise, rejectPromise) => {
     const child = spawn(cmd, args, {
@@ -2181,6 +2248,41 @@ function redactUrl(raw) {
     return raw;
   }
 }
+function isGithubUrl(raw) {
+  try {
+    const u = new URL(raw);
+    return u.hostname === "github.com" || u.hostname === "www.github.com";
+  } catch {
+    return false;
+  }
+}
+function githubMirrorUrl(base, url) {
+  return `${base.replace(/\/+$/, "")}/${url}`;
+}
+function parseGithubProxyList(raw) {
+  const normalized = raw.trim();
+  if (normalized.toLowerCase() === DISABLE_GITHUB_PROXY) return [];
+  const out = [];
+  for (const part of normalized.split(",")) {
+    const value = part.trim().replace(/\/+$/, "");
+    if (value === "") continue;
+    if (!isHttpUrl(value)) usageError(`--github-proxy \u5FC5\u987B\u662F http(s) URL\uFF08\u6536\u5230 ${value}\uFF09`);
+    if (!out.includes(value)) out.push(value);
+  }
+  if (out.length === 0) usageError("--github-proxy \u9700\u8981\u81F3\u5C11\u4E00\u4E2A http(s) URL\uFF0C\u6216\u4F7F\u7528 none \u5173\u95ED");
+  return out;
+}
+function resolveGithubProxies(flags, env, httpProxy) {
+  const raw = nonEmpty(flags.githubProxy) ?? nonEmpty(env.DYCLI_UPDATE_GITHUB_PROXY);
+  if (raw !== void 0) return parseGithubProxyList(raw);
+  if (httpProxy !== void 0) return [];
+  return [...DEFAULT_GITHUB_PROXIES];
+}
+function sameUpdateManifest(a, b) {
+  const va = a.version.replace(/^v/i, "");
+  const vb = b.version.replace(/^v/i, "");
+  return va === vb && a.tgz === b.tgz && (a.sha256 ?? null) === (b.sha256 ?? null);
+}
 function proxyEnv(proxy) {
   return {
     HTTPS_PROXY: proxy,
@@ -2198,7 +2300,7 @@ function safeCurlDetail(stderr, url, proxy) {
 }
 async function fetchText(url, proxy, timeoutMs, headers = {}) {
   if (proxy !== void 0) {
-    const args = ["-fsSL", "--max-time", String(Math.ceil(timeoutMs / 1e3))];
+    const args = ["-fsSL", "--connect-timeout", "8", "--max-time", String(Math.ceil(timeoutMs / 1e3))];
     for (const [k, v] of Object.entries(headers)) args.push("-H", `${k}: ${v}`);
     args.push(url);
     const r = await tryExecCapture("curl", args, {
@@ -2246,6 +2348,8 @@ async function downloadToFile(url, dest, proxy, timeoutMs) {
       "curl",
       [
         "-fsSL",
+        "--connect-timeout",
+        "8",
         "--max-time",
         String(Math.ceil(timeoutMs / 1e3)),
         "--max-filesize",
@@ -2298,6 +2402,30 @@ async function downloadToFile(url, dest, proxy, timeoutMs) {
   }
   writeFileSync2(dest, Buffer.from(await res.arrayBuffer()));
 }
+async function probeDownloadUrl(url) {
+  let res;
+  try {
+    res = await fetch(url, {
+      method: "HEAD",
+      redirect: "follow",
+      headers: { "user-agent": "daoyan-cli-update" },
+      signal: AbortSignal.timeout(DIRECT_PROBE_TIMEOUT_MS)
+    });
+  } catch (e) {
+    throw new DaoyanCliError({
+      code: "update_failed",
+      message: `\u76F4\u8FDE\u63A2\u6D4B\u5931\u8D25\uFF1A${redactUrl(url)}\uFF08${e instanceof Error ? e.message : String(e)}\uFF09`,
+      retryable: true
+    });
+  }
+  if (!res.ok && res.status !== 405) {
+    throw new DaoyanCliError({
+      code: "update_failed",
+      message: `\u76F4\u8FDE\u63A2\u6D4B\u5931\u8D25\uFF1A${redactUrl(url)}\uFF08HTTP ${res.status}\uFF09`,
+      retryable: true
+    });
+  }
+}
 function parseUpdateManifest(raw) {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
     throw new DaoyanCliError({ code: "update_failed", message: "\u66F4\u65B0\u6E05\u5355\u5FC5\u987B\u662F JSON \u5BF9\u8C61" });
@@ -2349,13 +2477,22 @@ function resolveTgz(source, tgz) {
     remote: false
   };
 }
-async function loadManifest(source, proxy) {
+function parseManifestText(text, label) {
+  let raw;
+  try {
+    raw = JSON.parse(text);
+  } catch (e) {
+    throw new DaoyanCliError({
+      code: "update_failed",
+      message: `\u66F4\u65B0\u6E05\u5355\u4E0D\u662F\u5408\u6CD5 JSON\uFF1A${label}\uFF08${e instanceof Error ? e.message : String(e)}\uFF09`
+    });
+  }
+  return parseUpdateManifest(raw);
+}
+async function loadManifest(source, proxy, githubProxies) {
   const remote = isHttpUrl(source);
   const normalized = remote ? source : resolve2(expandHome(source));
-  let text;
-  if (remote) {
-    text = await fetchText(normalized, proxy, 15e3);
-  } else {
+  if (!remote) {
     let st;
     try {
       st = statSync(normalized);
@@ -2365,18 +2502,58 @@ async function loadManifest(source, proxy) {
     if (!st.isFile()) {
       throw new DaoyanCliError({ code: "update_failed", message: `\u66F4\u65B0\u6E05\u5355\u4E0D\u662F\u6587\u4EF6\uFF1A${normalized}` });
     }
-    text = readFileSync5(normalized, "utf8");
+    return {
+      manifest: parseManifestText(readFileSync5(normalized, "utf8"), normalized),
+      source: normalized,
+      via_proxy: null
+    };
   }
-  let raw;
+  let directError = null;
   try {
-    raw = JSON.parse(text);
+    const text = await fetchText(normalized, proxy, 15e3);
+    return { manifest: parseManifestText(text, redactUrl(normalized)), source: normalized, via_proxy: null };
   } catch (e) {
+    directError = e;
+  }
+  if (githubProxies.length === 0 || !isGithubUrl(normalized)) throw directError;
+  const results = [];
+  const errors = [];
+  for (const base of githubProxies) {
+    try {
+      const text = await fetchText(githubMirrorUrl(base, normalized), proxy, MIRROR_MANIFEST_TIMEOUT_MS);
+      results.push({ manifest: parseManifestText(text, redactUrl(base)), via: base });
+    } catch (e) {
+      errors.push(`${base}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  if (results.length === 0) {
     throw new DaoyanCliError({
       code: "update_failed",
-      message: `\u66F4\u65B0\u6E05\u5355\u4E0D\u662F\u5408\u6CD5 JSON\uFF1A${remote ? redactUrl(normalized) : normalized}\uFF08${e instanceof Error ? e.message : String(e)}\uFF09`
+      message: `\u76F4\u8FDE\u4E0E GitHub \u52A0\u901F\u6E90\u5747\u4E0D\u53EF\u7528\uFF1A${redactUrl(normalized)}`,
+      retryable: true,
+      hint: "\u53EF\u7528 --github-proxy <url> \u6307\u5B9A\u53EF\u8FBE\u52A0\u901F\u6E90\uFF0C\u6216\u7528 --manifest \u6307\u5411\u955C\u50CF\u6E05\u5355",
+      details: {
+        direct_error: directError instanceof Error ? directError.message : String(directError),
+        mirror_errors: errors
+      }
     });
   }
-  return { manifest: parseUpdateManifest(raw), source: normalized };
+  const first = results[0];
+  for (const other of results.slice(1)) {
+    if (!sameUpdateManifest(first.manifest, other.manifest)) {
+      throw new DaoyanCliError({
+        code: "update_failed",
+        message: "\u591A\u4E2A GitHub \u52A0\u901F\u6E90\u8FD4\u56DE\u7684\u6E05\u5355\u4E0D\u4E00\u81F4\uFF0C\u5DF2\u62D2\u7EDD\u5B89\u88C5",
+        hint: "\u7528 --github-proxy \u6307\u5B9A\u53EF\u4FE1\u52A0\u901F\u6E90\uFF0C\u6216\u7528 --manifest \u6307\u5411\u5B98\u65B9\u955C\u50CF",
+        details: {
+          mirror_mismatch: true,
+          mirrors: results.map((r) => r.via),
+          versions: results.map((r) => r.manifest.version)
+        }
+      });
+    }
+  }
+  return { manifest: first.manifest, source: normalized, via_proxy: first.via };
 }
 async function latestTag(proxy) {
   try {
@@ -2405,11 +2582,17 @@ function spawnCapture(cmd, args, opts = {}) {
     const child = spawn2(cmd, args, {
       cwd: opts.cwd,
       env: opts.env !== void 0 ? { ...process.env, ...opts.env } : void 0,
-      stdio: ["ignore", "pipe", "inherit"]
+      stdio: ["ignore", "pipe", "pipe"]
     });
     let out = "";
+    let errTail = "";
     child.stdout?.on("data", (d) => {
       out += d.toString();
+    });
+    child.stderr?.on("data", (d) => {
+      process.stderr.write(d);
+      const next = errTail + d.toString();
+      errTail = next.length > 8e3 ? next.slice(-8e3) : next;
     });
     child.on(
       "error",
@@ -2417,7 +2600,7 @@ function spawnCapture(cmd, args, opts = {}) {
         new DaoyanCliError({ code: "external_tool_missing", message: `\u65E0\u6CD5\u542F\u52A8 ${cmd}\uFF1A${e.message}` })
       )
     );
-    child.on("close", (code) => resolvePromise({ code: code ?? -1, stdout: out }));
+    child.on("close", (code) => resolvePromise({ code: code ?? -1, stdout: out, stderr: errTail }));
   });
 }
 function parseUpdateFlags(args) {
@@ -2448,6 +2631,12 @@ function parseUpdateFlags(args) {
       const sha = v.value.trim().toLowerCase();
       if (!/^[0-9a-f]{64}$/.test(sha)) usageError("--sha256 \u9700\u8981 64 \u4F4D\u5341\u516D\u8FDB\u5236");
       out.sha256 = sha;
+      i += v.skip;
+      continue;
+    }
+    if (name === "--github-proxy") {
+      const v = takeValue(args, i, inline, "--github-proxy");
+      out.githubProxy = v.value;
       i += v.skip;
       continue;
     }
@@ -2506,7 +2695,7 @@ function resolveUpdateSource(flags, env, config) {
   const envManifest = nonEmpty(env.DYCLI_UPDATE_MANIFEST);
   if (envManifest !== void 0) return { kind: "manifest", manifest: envManifest, ...proxyField };
   if (config.manifest !== void 0) return { kind: "manifest", manifest: config.manifest, ...proxyField };
-  return { kind: "github", ...proxyField };
+  return { kind: "manifest", manifest: DEFAULT_UPDATE_MANIFEST, fallbackToGithub: true, ...proxyField };
 }
 async function installTgz(tgzPath) {
   const npm = process.platform === "win32" ? "npm.cmd" : "npm";
@@ -2531,41 +2720,89 @@ function tgzName(location, fallback) {
     return /\.(tgz|tar\.gz)$/i.test(name) ? name : fallback;
   }
 }
-async function materializeTgz(resolved, sha2562, proxy, version, tmp) {
-  let path;
-  if (resolved.remote) {
-    const fallback = `daoyan-cli-${version.replace(/^v/i, "")}.tgz`;
-    path = join3(tmp, tgzName(resolved.location, fallback));
-    await downloadToFile(resolved.location, path, proxy, 12e4);
-  } else {
-    path = resolve2(expandHome(resolved.location));
+async function materializeTgz(resolved, sha2562, proxy, version, tmp, githubProxies, skipDirect = false) {
+  if (!resolved.remote) {
+    const localPath = resolve2(expandHome(resolved.location));
     let st;
     try {
-      st = statSync(path);
+      st = statSync(localPath);
     } catch {
-      throw new DaoyanCliError({ code: "update_failed", message: `tgz \u4E0D\u5B58\u5728\uFF1A${path}` });
+      throw new DaoyanCliError({ code: "update_failed", message: `tgz \u4E0D\u5B58\u5728\uFF1A${localPath}` });
     }
-    if (!st.isFile()) throw new DaoyanCliError({ code: "update_failed", message: `tgz \u4E0D\u662F\u6587\u4EF6\uFF1A${path}` });
+    if (!st.isFile()) throw new DaoyanCliError({ code: "update_failed", message: `tgz \u4E0D\u662F\u6587\u4EF6\uFF1A${localPath}` });
+    if (sha2562 !== void 0) {
+      const actual = sha256File(localPath);
+      if (actual !== sha2562) {
+        throw new DaoyanCliError({
+          code: "update_failed",
+          message: `SHA-256 \u6821\u9A8C\u5931\u8D25\uFF08\u671F\u671B ${sha2562} / \u5B9E\u9645 ${actual}\uFF09`,
+          hint: "\u786E\u8BA4\u4E0B\u8F7D\u6E90\u4E0E\u6E05\u5355\u662F\u5426\u5BF9\u5E94\u540C\u4E00\u7248\u672C"
+        });
+      }
+    }
+    return { path: localPath, via_proxy: null };
   }
-  if (sha2562 !== void 0) {
-    const actual = sha256File(path);
-    if (actual !== sha2562) {
-      throw new DaoyanCliError({
-        code: "update_failed",
-        message: `SHA-256 \u6821\u9A8C\u5931\u8D25\uFF08\u671F\u671B ${sha2562} / \u5B9E\u9645 ${actual}\uFF09`,
-        hint: "\u786E\u8BA4\u4E0B\u8F7D\u6E90\u4E0E\u6E05\u5355\u662F\u5426\u5BF9\u5E94\u540C\u4E00\u7248\u672C"
-      });
+  const fallback = `daoyan-cli-${version.replace(/^v/i, "")}.tgz`;
+  const path = join3(tmp, tgzName(resolved.location, fallback));
+  const candidates = [];
+  if (!skipDirect) candidates.push({ url: resolved.location, via: null });
+  if (githubProxies.length > 0 && isGithubUrl(resolved.location)) {
+    for (const base of githubProxies) {
+      candidates.push({ url: githubMirrorUrl(base, resolved.location), via: base });
     }
   }
-  return path;
+  const errors = [];
+  if (candidates.length === 0) {
+    throw new DaoyanCliError({
+      code: "update_failed",
+      message: "\u6CA1\u6709\u53EF\u7528\u7684 tgz \u4E0B\u8F7D\u5730\u5740",
+      hint: "\u68C0\u67E5 --github-proxy / \u66F4\u65B0\u6E05\u5355\u914D\u7F6E"
+    });
+  }
+  for (const candidate of candidates) {
+    try {
+      if (candidate.via === null && proxy === void 0) {
+        await probeDownloadUrl(candidate.url);
+      }
+      rmSync3(path, { force: true });
+      await downloadToFile(candidate.url, path, proxy, 12e4);
+      if (sha2562 !== void 0) {
+        const actual = sha256File(path);
+        if (actual !== sha2562) {
+          throw new DaoyanCliError({
+            code: "update_failed",
+            message: `SHA-256 \u6821\u9A8C\u5931\u8D25\uFF08\u671F\u671B ${sha2562} / \u5B9E\u9645 ${actual}\uFF09`
+          });
+        }
+      }
+      return { path, via_proxy: candidate.via };
+    } catch (e) {
+      errors.push(`${candidate.via ?? "\u76F4\u8FDE"}: ${e instanceof Error ? e.message : String(e)}`);
+      rmSync3(path, { force: true });
+    }
+  }
+  throw new DaoyanCliError({
+    code: "update_failed",
+    message: `\u4E0B\u8F7D tgz \u5931\u8D25\uFF08\u5DF2\u5C1D\u8BD5 ${candidates.length} \u4E2A\u5730\u5740\uFF09`,
+    retryable: true,
+    hint: "\u53EF\u7528 --github-proxy <url> \u6307\u5B9A\u52A0\u901F\u6E90\uFF0C\u6216\u7528 --from \u6307\u5B9A\u672C\u5730/\u5176\u4ED6\u6765\u6E90\u7684 tgz",
+    details: { errors, sha256: sha2562 }
+  });
 }
-async function updateFromManifest(ctx2, source, checkOnly) {
+async function updateFromManifest(ctx2, source, checkOnly, githubProxies) {
   let loaded;
   try {
-    loaded = await loadManifest(source.manifest, source.proxy);
+    loaded = await loadManifest(source.manifest, source.proxy, githubProxies);
   } catch (e) {
-    if (!checkOnly) throw e;
     const note = e instanceof Error ? e.message : String(e);
+    const mismatch = e instanceof DaoyanCliError && typeof e.details === "object" && e.details !== null ? e.details.mirror_mismatch === true : false;
+    if (!checkOnly && source.fallbackToGithub === true && !mismatch) {
+      if (!ctx2.json) say(`\u9ED8\u8BA4\u66F4\u65B0\u6E90\u4E0D\u53EF\u8FBE\uFF08${note}\uFF09\uFF0C\u56DE\u9000 GitHub tags \u5B89\u88C5 ...`);
+      await updateFromGitHub(ctx2, checkOnly, source.proxy);
+      return;
+    }
+    if (checkOnly && mismatch) throw e;
+    if (!checkOnly) throw e;
     if (ctx2.json) {
       emitData({
         current: `v${VERSION}`,
@@ -2573,6 +2810,7 @@ async function updateFromManifest(ctx2, source, checkOnly) {
         updateAvailable: false,
         source: "manifest",
         manifest: isHttpUrl(source.manifest) ? redactUrl(source.manifest) : source.manifest,
+        via_proxy: null,
         note,
         ...source.proxy !== void 0 ? { proxy: redactProxy(source.proxy) } : {}
       });
@@ -2580,6 +2818,10 @@ async function updateFromManifest(ctx2, source, checkOnly) {
     }
     say(`\u5F53\u524D v${VERSION}\uFF1B\u65E0\u6CD5\u8BFB\u53D6\u66F4\u65B0\u6E90\uFF08${note}\uFF09`);
     return;
+  }
+  let viaProxy = loaded.via_proxy;
+  if (viaProxy !== null && !ctx2.json) {
+    say(`GitHub \u76F4\u8FDE\u5931\u8D25\uFF0C\u672C\u6B21\u6E05\u5355\u6765\u81EA\u52A0\u901F\u6E90 ${viaProxy}`);
   }
   const currentStr = `v${VERSION}`;
   const currentV = parseSemver(VERSION);
@@ -2595,6 +2837,7 @@ async function updateFromManifest(ctx2, source, checkOnly) {
         updateAvailable: hasUpdate,
         source: "manifest",
         manifest: manifestLabel,
+        via_proxy: viaProxy,
         ...proxyField
       });
       return;
@@ -2614,14 +2857,20 @@ async function updateFromManifest(ctx2, source, checkOnly) {
   say(`\u68C0\u6D4B\u5230\u65B0\u7248\u672C ${loaded.manifest.tag}\uFF08\u5F53\u524D ${currentStr}\uFF09\uFF0C\u5F00\u59CB\u81EA\u5347\u7EA7...`);
   const tmp = mkdtempSync(join3(tmpdir(), "daoyan-cli-update-"));
   try {
-    const tgzPath = await materializeTgz(
+    const tgz = await materializeTgz(
       resolved,
       loaded.manifest.sha256,
       source.proxy,
       loaded.manifest.version,
-      tmp
+      tmp,
+      githubProxies,
+      loaded.via_proxy !== null
     );
-    await installTgz(tgzPath);
+    if (tgz.via_proxy !== null) {
+      viaProxy = tgz.via_proxy;
+      if (!ctx2.json) say(`tgz \u4E0B\u8F7D\u8D70\u52A0\u901F\u6E90 ${tgz.via_proxy}`);
+    }
+    await installTgz(tgz.path);
     say(`\u5347\u7EA7\u5B8C\u6210\uFF1A${loaded.manifest.tag}\u3002\u9A8C\u8BC1\uFF1Adaoyan --version`);
     if (ctx2.json) {
       emitData({
@@ -2629,6 +2878,7 @@ async function updateFromManifest(ctx2, source, checkOnly) {
         previous: currentStr,
         source: "manifest",
         manifest: manifestLabel,
+        via_proxy: viaProxy,
         ...proxyField
       });
     }
@@ -2636,7 +2886,7 @@ async function updateFromManifest(ctx2, source, checkOnly) {
     rmSync3(tmp, { recursive: true, force: true });
   }
 }
-async function updateFromTgz(ctx2, source) {
+async function updateFromTgz(ctx2, source, githubProxies) {
   const remote = isHttpUrl(source.from);
   if (remote && source.sha256 === void 0) {
     throw new DaoyanCliError({
@@ -2650,14 +2900,25 @@ async function updateFromTgz(ctx2, source) {
   say(`\u4ECE ${remote ? redactUrl(location) : location} \u5B89\u88C5...`);
   const tmp = mkdtempSync(join3(tmpdir(), "daoyan-cli-update-"));
   try {
-    const tgzPath = await materializeTgz({ location, remote }, source.sha256, source.proxy, VERSION, tmp);
-    await installTgz(tgzPath);
+    const tgz = await materializeTgz(
+      { location, remote },
+      source.sha256,
+      source.proxy,
+      VERSION,
+      tmp,
+      githubProxies
+    );
+    if (tgz.via_proxy !== null) {
+      if (!ctx2.json) say(`tgz \u4E0B\u8F7D\u8D70\u52A0\u901F\u6E90 ${tgz.via_proxy}`);
+    }
+    await installTgz(tgz.path);
     say("\u5B89\u88C5\u5B8C\u6210\u3002\u9A8C\u8BC1\uFF1Adaoyan --version");
     if (ctx2.json) {
       emitData({
         installed: true,
         source: "from",
-        file: remote ? redactUrl(location) : location
+        file: remote ? redactUrl(location) : location,
+        via_proxy: tgz.via_proxy
       });
     }
   } finally {
@@ -2697,10 +2958,12 @@ async function updateFromGitHub(ctx2, checkOnly, proxy) {
       ...proxy !== void 0 ? { env: proxyEnv(proxy) } : {}
     });
     if (pack.code !== 0) {
+      const sshFallback = /permission denied|publickey|ssh/i.test(pack.stderr);
       throw new DaoyanCliError({
         code: "update_failed",
-        message: `npm pack \u5931\u8D25\uFF08\u9000\u51FA\u7801 ${pack.code}\uFF09\u3002\u68C0\u67E5\u7F51\u7EDC\u4E0E GitHub \u53EF\u8FBE\u6027`,
-        hint: "\u53EF\u6539\u7528 daoyan update --manifest \u6216 --from \u6307\u5B9A\u955C\u50CF"
+        message: `npm pack \u5931\u8D25\uFF08\u9000\u51FA\u7801 ${pack.code}\uFF09${sshFallback ? "\uFF1Anpm \u53EF\u80FD\u5728 HTTPS \u5931\u8D25\u540E\u56DE\u9000 SSH" : ""}`,
+        hint: sshFallback ? `\u6539\u7528 Release \u6E05\u5355\u7ED5\u8FC7 npm git\uFF1Adaoyan update --manifest ${DEFAULT_UPDATE_MANIFEST}` : "\u53EF\u6539\u7528 daoyan update --manifest \u6216 --from \u6307\u5B9A\u955C\u50CF",
+        details: { exit: pack.code, last_error: pack.stderr.trim().slice(-4e3) }
       });
     }
     const tgz = pack.stdout.trim().split("\n").filter((l) => l !== "").pop();
@@ -2754,7 +3017,7 @@ function runSourceCommand(ctx2, args) {
       return;
     }
     say(
-      manifest2 !== null ? `\u66F4\u65B0\u6E90\uFF1A${redactUrl(manifest2)}` : "\u66F4\u65B0\u6E90\uFF1A\u9ED8\u8BA4 GitHub\uFF08\u7528 daoyan update source <manifest> \u66F4\u6362\uFF09"
+      manifest2 !== null ? `\u66F4\u65B0\u6E90\uFF1A${redactUrl(manifest2)}` : `\u66F4\u65B0\u6E90\uFF1A\u9ED8\u8BA4 Release \u6E05\u5355\uFF08${DEFAULT_UPDATE_MANIFEST}\uFF09`
     );
     return;
   }
@@ -2765,7 +3028,7 @@ function runSourceCommand(ctx2, args) {
       emitData({ manifest: null, path: updateConfigPath() });
       return;
     }
-    say("\u66F4\u65B0\u6E90\u5DF2\u6062\u590D\u4E3A\u9ED8\u8BA4 GitHub");
+    say("\u66F4\u65B0\u6E90\u5DF2\u6062\u590D\u4E3A\u9ED8\u8BA4 Release \u6E05\u5355");
     return;
   }
   if (args.length !== 1) usageError("\u7528\u6CD5\uFF1Adaoyan update source [<manifest>|--unset]");
@@ -2800,20 +3063,21 @@ async function runUpdate(ctx2, args) {
   const flags = parseUpdateFlags(args);
   const config = readUpdateConfig();
   const source = resolveUpdateSource(flags, process.env, config);
+  const githubProxies = resolveGithubProxies(flags, process.env, source.proxy);
   if (flags.check && source.kind === "from") {
     usageError("--check \u4E0D\u80FD\u4E0E --from / DYCLI_UPDATE_FROM \u4E00\u8D77\u4F7F\u7528");
   }
   if (source.kind === "from") {
-    await updateFromTgz(ctx2, source);
+    await updateFromTgz(ctx2, source, githubProxies);
     return;
   }
   if (source.kind === "manifest") {
-    await updateFromManifest(ctx2, source, flags.check);
+    await updateFromManifest(ctx2, source, flags.check, githubProxies);
     return;
   }
   await updateFromGitHub(ctx2, flags.check, source.proxy);
 }
-var REPO_URL, GITHUB_TAGS_API, MAX_DOWNLOAD_BYTES;
+var REPO_URL, GITHUB_TAGS_API, DEFAULT_UPDATE_MANIFEST, DEFAULT_GITHUB_PROXIES, DISABLE_GITHUB_PROXY, MIRROR_MANIFEST_TIMEOUT_MS, DIRECT_PROBE_TIMEOUT_MS, MAX_DOWNLOAD_BYTES;
 var init_update = __esm({
   "src/commands/update.mts"() {
     "use strict";
@@ -2826,6 +3090,11 @@ var init_update = __esm({
     init_version();
     REPO_URL = "https://github.com/yuanbaobaoo/daoyan-cli.git";
     GITHUB_TAGS_API = "https://api.github.com/repos/yuanbaobaoo/daoyan-cli/tags";
+    DEFAULT_UPDATE_MANIFEST = "https://github.com/yuanbaobaoo/daoyan-cli/releases/latest/download/latest.json";
+    DEFAULT_GITHUB_PROXIES = ["https://gh-proxy.com", "https://gh.llkk.cc"];
+    DISABLE_GITHUB_PROXY = "none";
+    MIRROR_MANIFEST_TIMEOUT_MS = 15e3;
+    DIRECT_PROBE_TIMEOUT_MS = 1e4;
     MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024;
   }
 });
@@ -2891,9 +3160,876 @@ var init_net = __esm({
   }
 });
 
-// src/core/provision/init-flow.mts
-import { existsSync as existsSync6, readFileSync as readFileSync6, renameSync as renameSync2, writeFileSync as writeFileSync3 } from "fs";
+// src/core/provision/toolchain.mts
+import { existsSync as existsSync6, readFileSync as readFileSync6 } from "fs";
 import { join as join4 } from "path";
+function parsePythonVersion(raw) {
+  const m = /(\d+)\.(\d+)(?:\.(\d+))?/.exec(raw.trim());
+  if (m === null) return null;
+  const major = Number(m[1]);
+  const minor = Number(m[2]);
+  const patch = m[3] !== void 0 ? Number(m[3]) : 0;
+  if (!Number.isFinite(major) || !Number.isFinite(minor) || !Number.isFinite(patch)) return null;
+  return { version: `${major}.${minor}.${patch}`, major, minor, patch };
+}
+function parseCudaVersion(raw) {
+  if (raw === null || raw === void 0) return null;
+  const m = /^(\d+)(?:\.(\d+))?$/.exec(raw.trim());
+  if (m === null) return null;
+  const major = Number(m[1]);
+  const minor = m[2] !== void 0 ? Number(m[2]) : 0;
+  if (!Number.isFinite(major) || !Number.isFinite(minor)) return null;
+  return { major, minor };
+}
+function parseCudaTag(tag) {
+  const m = /^cu(\d{2,4})$/i.exec(tag.trim());
+  if (m === null) return null;
+  const digits = m[1];
+  const minor = Number(digits.slice(-1));
+  const major = Number(digits.slice(0, -1));
+  if (!Number.isFinite(major) || !Number.isFinite(minor) || major < 7) return null;
+  return { tag: `cu${digits}`, cuda: { major, minor } };
+}
+function formatCudaVersion(v) {
+  return `${v.major}.${v.minor}`;
+}
+function compareCuda(a, b) {
+  return a.major !== b.major ? a.major - b.major : a.minor - b.minor;
+}
+function parseComputeCap(raw) {
+  if (raw === null || raw === void 0) return null;
+  const m = /^(\d+)\.(\d+)$/.exec(raw.trim());
+  if (m === null) return null;
+  const major = Number(m[1]);
+  const minor = Number(m[2]);
+  if (!Number.isFinite(major) || !Number.isFinite(minor)) return null;
+  return major + minor / 10;
+}
+function tagSupportsArch(tag, computeCap) {
+  const cc = parseComputeCap(computeCap);
+  if (cc === null) return true;
+  return !(tag.cuda.major >= 13 && cc < CUDA13_MIN_COMPUTE);
+}
+function selectTorchTags(input) {
+  const candidates = [];
+  const skipped = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const raw of input.available) {
+    const parsed = parseCudaTag(raw);
+    if (parsed === null) {
+      skipped.push({ tag: raw, reason: "\u4E0D\u662F\u5408\u6CD5\u7684 cuXXX tag" });
+      continue;
+    }
+    if (seen.has(parsed.tag)) continue;
+    seen.add(parsed.tag);
+    if (compareCuda(parsed.cuda, input.cudaMax) > 0) {
+      skipped.push({
+        tag: parsed.tag,
+        reason: `\u9700\u8981 CUDA ${formatCudaVersion(parsed.cuda)}\uFF0C\u9A71\u52A8\u6700\u9AD8 ${formatCudaVersion(input.cudaMax)}`
+      });
+      continue;
+    }
+    if (!tagSupportsArch(parsed, input.computeCap)) {
+      skipped.push({
+        tag: parsed.tag,
+        reason: `CUDA ${parsed.cuda.major} \u4E0D\u652F\u6301 compute capability ${input.computeCap ?? "\u672A\u77E5"}`
+      });
+      continue;
+    }
+    candidates.push(parsed.tag);
+  }
+  candidates.sort((a, b) => {
+    const left = parseCudaTag(a);
+    const right = parseCudaTag(b);
+    if (left === null || right === null) return 0;
+    return compareCuda(right.cuda, left.cuda);
+  });
+  return { candidates, skipped };
+}
+function extractWheelFiles(html) {
+  const out = [];
+  const re = /href\s*=\s*["']([^"']+\.whl)(?:#[^"']*)?["']/gi;
+  let m = re.exec(html);
+  while (m !== null) {
+    const href = m[1];
+    try {
+      out.push(decodeURIComponent(href));
+    } catch {
+      out.push(href);
+    }
+    m = re.exec(html);
+  }
+  return out;
+}
+function wheelMatchesFile(file, kind, python, arch) {
+  const base = (file.split("/").pop() ?? file).toLowerCase();
+  const token = arch === "x64" ? "x86_64" : arch === "arm64" ? "aarch64" : arch.toLowerCase();
+  if (!base.startsWith(`${kind}-`)) return false;
+  if (!base.includes(`-cp${python.major}${python.minor}-`)) return false;
+  return new RegExp(`(?:manylinux[^/]*|linux)_${token}\\.whl$`).test(base);
+}
+function wheelHtmlMatches(html, kind, python, arch) {
+  const files = extractWheelFiles(html);
+  return files.some((f) => wheelMatchesFile(f, kind, python, arch));
+}
+function proxyFromEnv() {
+  return process.env.HTTPS_PROXY ?? process.env.https_proxy ?? process.env.ALL_PROXY ?? process.env.all_proxy ?? process.env.HTTP_PROXY ?? process.env.http_proxy;
+}
+function proxyEnv2(proxy) {
+  return {
+    HTTPS_PROXY: proxy,
+    HTTP_PROXY: proxy,
+    ALL_PROXY: proxy,
+    https_proxy: proxy,
+    http_proxy: proxy,
+    all_proxy: proxy
+  };
+}
+async function fetchTextViaCurl(url, proxy) {
+  const seconds = String(Math.ceil(INDEX_TIMEOUT_MS / 1e3));
+  const r = await tryExecCapture(
+    "curl",
+    ["-fsSL", "--max-time", seconds, "-H", "user-agent: daoyan-cli-toolchain", url],
+    { timeoutMs: INDEX_TIMEOUT_MS + 5e3, env: proxyEnv2(proxy) }
+  );
+  if (r === null) {
+    throw new DaoyanCliError({
+      code: "external_tool_missing",
+      message: "\u68C0\u6D4B\u5230\u4EE3\u7406\u73AF\u5883\u53D8\u91CF\uFF0C\u4F46\u7F3A\u5C11 curl\uFF1B\u5B89\u88C5 curl \u6216\u53D6\u6D88\u4EE3\u7406\u540E\u91CD\u8BD5",
+      details: { stage: "index", url }
+    });
+  }
+  if (r.code !== 0) {
+    throw new DaoyanCliError({
+      code: "provision_failed",
+      message: `\u65E0\u6CD5\u8BBF\u95EE ${url}\uFF08curl \u9000\u51FA\u7801 ${r.code}\uFF09`,
+      details: { stage: "index", url, last_error: r.stderr.trim().slice(-2e3) }
+    });
+  }
+  if (r.stdout.length > INDEX_MAX_BYTES) {
+    throw new DaoyanCliError({
+      code: "provision_failed",
+      message: `wheel index \u54CD\u5E94\u8FC7\u5927\uFF08${r.stdout.length} bytes\uFF09\uFF1A${url}`,
+      details: { stage: "index", url }
+    });
+  }
+  return r.stdout;
+}
+async function fetchTextWithTimeout(url) {
+  const proxy = proxyFromEnv();
+  if (proxy !== void 0) return fetchTextViaCurl(url, proxy);
+  let res;
+  try {
+    res = await fetch(url, {
+      headers: { "user-agent": "daoyan-cli-toolchain", accept: "text/html" },
+      signal: AbortSignal.timeout(INDEX_TIMEOUT_MS)
+    });
+  } catch (e) {
+    throw new DaoyanCliError({
+      code: "provision_failed",
+      message: `\u65E0\u6CD5\u8BBF\u95EE ${url}\uFF08${e instanceof Error ? e.message : String(e)}\uFF09`,
+      details: { stage: "index", url }
+    });
+  }
+  if (!res.ok) {
+    throw new DaoyanCliError({
+      code: "provision_failed",
+      message: `\u65E0\u6CD5\u8BBF\u95EE ${url}\uFF08HTTP ${res.status}\uFF09`,
+      details: { stage: "index", url, status: res.status }
+    });
+  }
+  const text = await res.text();
+  if (text.length > INDEX_MAX_BYTES) {
+    throw new DaoyanCliError({
+      code: "provision_failed",
+      message: `wheel index \u54CD\u5E94\u8FC7\u5927\uFF08${text.length} bytes\uFF09\uFF1A${url}`,
+      details: { stage: "index", url }
+    });
+  }
+  return text;
+}
+async function discoverCudaTags(indexRoot, fetchText2 = fetchTextWithTimeout) {
+  const root = indexRoot.replace(/\/+$/, "");
+  let html;
+  try {
+    html = await fetchText2(`${root}/`);
+  } catch (e) {
+    return { tags: [], error: e instanceof Error ? e.message : String(e) };
+  }
+  const found = /* @__PURE__ */ new Set();
+  const re = /\bcu\d{2,4}\b/gi;
+  let m = re.exec(html);
+  while (m !== null) {
+    const parsed = parseCudaTag(m[0]);
+    if (parsed !== null) found.add(parsed.tag);
+    m = re.exec(html);
+  }
+  return { tags: [...found], error: null };
+}
+async function checkTagWheels(tag, python, arch, indexRoot, fetchText2 = fetchTextWithTimeout) {
+  const root = indexRoot.replace(/\/+$/, "");
+  const missing = [];
+  let error = null;
+  for (const kind of ["torch", "torchvision"]) {
+    const url = `${root}/${tag}/${kind}/`;
+    try {
+      const html = await fetchText2(url);
+      if (!wheelHtmlMatches(html, kind, python, arch)) missing.push(kind);
+    } catch (e) {
+      missing.push(kind);
+      error = e instanceof Error ? e.message : String(e);
+    }
+  }
+  return { tag, ok: missing.length === 0, missing, error };
+}
+function parseNvidiaSmiQuery(stdout) {
+  const devices = [];
+  for (const line of stdout.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed === "") continue;
+    const fields = trimmed.split(",").map((f) => f.trim());
+    if (fields.length < 2) continue;
+    const name = fields[0];
+    const driver = fields[1];
+    const computeRaw = fields[2] !== void 0 && fields[2] !== "[N/A]" ? fields[2] : null;
+    const cudaRaw = fields[3] !== void 0 && fields[3] !== "[N/A]" ? fields[3] : null;
+    devices.push({
+      name: name === "" ? "NVIDIA GPU" : name,
+      driver,
+      cuda: cudaRaw !== null && parseCudaVersion(cudaRaw) !== null ? cudaRaw : null,
+      computeCap: computeRaw !== null && parseComputeCap(computeRaw) !== null ? computeRaw : null
+    });
+  }
+  return devices;
+}
+function parseNvidiaSmiText(stdout) {
+  const driver = /Driver Version:\s*([\d.]+)/.exec(stdout);
+  const cuda = /CUDA Version:\s*([\d.]+)/.exec(stdout);
+  return { driver: driver !== null ? driver[1] : null, cuda: cuda !== null ? cuda[1] : null };
+}
+function inferComputeCap(name) {
+  const n = name.toUpperCase();
+  const table = [
+    { re: /H100|H200|H800|B100|B200|GB200/, cap: "9.0" },
+    { re: /RTX\s*50/, cap: "12.0" },
+    { re: /RTX\s*40|L40|L4\b/, cap: "8.9" },
+    { re: /A100|A30\b/, cap: "8.0" },
+    { re: /A10\b|A40|A6000|A5000|RTX\s*30/, cap: "8.6" },
+    { re: /RTX\s*20|T4\b|GTX\s*16/, cap: "7.5" },
+    { re: /V100/, cap: "7.0" },
+    { re: /P100/, cap: "6.0" },
+    { re: /P40|P4\b|P6\b|GTX\s*10/, cap: "6.1" },
+    { re: /M40|M60/, cap: "5.2" }
+  ];
+  for (const row of table) {
+    if (row.re.test(n)) return row.cap;
+  }
+  return null;
+}
+function lowestComputeCap(values) {
+  let best = null;
+  let bestText = null;
+  for (const raw of values) {
+    const cc = parseComputeCap(raw);
+    if (cc === null) continue;
+    if (best === null || cc < best) {
+      best = cc;
+      bestText = raw;
+    }
+  }
+  return bestText;
+}
+async function probeNvidiaGpu() {
+  const full = await tryExecCapture(
+    "nvidia-smi",
+    [`--query-gpu=${NVIDIA_QUERY_FIELDS}`, "--format=csv,noheader,nounits"],
+    { timeoutMs: PROBE_TIMEOUT_MS }
+  );
+  let sawCommand = full !== null;
+  let devices = full !== null && full.code === 0 ? parseNvidiaSmiQuery(full.stdout) : [];
+  if (devices.length === 0) {
+    const basic = await tryExecCapture(
+      "nvidia-smi",
+      [`--query-gpu=${NVIDIA_QUERY_BASIC}`, "--format=csv,noheader,nounits"],
+      { timeoutMs: PROBE_TIMEOUT_MS }
+    );
+    sawCommand = sawCommand || basic !== null;
+    devices = basic !== null && basic.code === 0 ? parseNvidiaSmiQuery(basic.stdout) : [];
+  }
+  const raw = await tryExecCapture("nvidia-smi", [], { timeoutMs: PROBE_TIMEOUT_MS });
+  sawCommand = sawCommand || raw !== null;
+  const rawInfo = raw !== null && raw.code === 0 ? parseNvidiaSmiText(raw.stdout) : { driver: null, cuda: null };
+  if (devices.length === 0) {
+    if (rawInfo.driver === null && rawInfo.cuda === null) {
+      return sawCommand ? { driver: "unknown", cudaMax: null, computeCap: null, devices: [] } : null;
+    }
+    return { driver: rawInfo.driver ?? "unknown", cudaMax: rawInfo.cuda, computeCap: null, devices: [] };
+  }
+  const cudaMax = devices.find((d) => d.cuda !== null)?.cuda ?? rawInfo.cuda;
+  const normalized = devices.map((d) => ({
+    ...d,
+    cuda: d.cuda ?? rawInfo.cuda,
+    computeCap: d.computeCap ?? inferComputeCap(d.name)
+  }));
+  const driver = normalized.find((d) => d.driver !== "")?.driver ?? rawInfo.driver ?? "unknown";
+  const computeCap = lowestComputeCap(normalized.map((d) => d.computeCap));
+  return { driver, cudaMax, computeCap, devices: normalized };
+}
+async function inspectTorchPlan(opts) {
+  const platform = opts.platform ?? process.platform;
+  const arch = opts.arch ?? process.arch;
+  const platformLabel = `${platform}-${arch}`;
+  const indexRoot = (opts.indexRoot ?? DEFAULT_TORCH_INDEX).replace(/\/+$/, "");
+  if (opts.forceCpu === true) {
+    return {
+      backend: "cpu",
+      cpuSource: "forced",
+      tag: null,
+      indexRoot,
+      installIndexUrl: platform === "linux" ? `${indexRoot}/cpu` : null,
+      python: opts.python,
+      platform: platformLabel,
+      arch,
+      gpu: null,
+      candidates: [],
+      attemptedTags: [],
+      forced: false
+    };
+  }
+  if (platform !== "linux") {
+    return {
+      backend: "cpu",
+      cpuSource: "platform",
+      tag: null,
+      indexRoot,
+      installIndexUrl: null,
+      python: opts.python,
+      platform: platformLabel,
+      arch,
+      gpu: null,
+      candidates: [],
+      attemptedTags: [],
+      forced: false
+    };
+  }
+  const gpu = opts.gpu !== void 0 ? opts.gpu : await probeNvidiaGpu();
+  if (opts.forcedCuda !== null && opts.forcedCuda !== void 0 && opts.forcedCuda !== "") {
+    const parsed = parseCudaTag(opts.forcedCuda);
+    if (parsed === null) {
+      throw new DaoyanCliError({
+        code: "provision_failed",
+        message: `--torch-cuda \u4E0D\u662F\u5408\u6CD5 tag\uFF1A${opts.forcedCuda}\uFF08\u793A\u4F8B cu130\uFF09`,
+        details: { stage: "select", tag: opts.forcedCuda }
+      });
+    }
+    return {
+      backend: "cuda",
+      cpuSource: null,
+      tag: parsed.tag,
+      indexRoot,
+      installIndexUrl: null,
+      python: opts.python,
+      platform: platformLabel,
+      arch,
+      gpu,
+      candidates: [],
+      attemptedTags: [],
+      forced: true
+    };
+  }
+  if (gpu === null) {
+    return {
+      backend: "cpu",
+      cpuSource: "no-gpu",
+      tag: null,
+      indexRoot,
+      installIndexUrl: null,
+      python: opts.python,
+      platform: platformLabel,
+      arch,
+      gpu: null,
+      candidates: [],
+      attemptedTags: [],
+      forced: false
+    };
+  }
+  return {
+    backend: "cuda",
+    cpuSource: null,
+    tag: null,
+    indexRoot,
+    installIndexUrl: null,
+    python: opts.python,
+    platform: platformLabel,
+    arch,
+    gpu,
+    candidates: [],
+    attemptedTags: [],
+    forced: false
+  };
+}
+async function resolveTorchPlan(opts) {
+  const context = await inspectTorchPlan(opts);
+  const fetchText2 = opts.fetchText ?? fetchTextWithTimeout;
+  if (context.backend === "cpu") return context;
+  if (context.forced && context.tag !== null) {
+    const check = await checkTagWheels(context.tag, opts.python, context.arch, context.indexRoot, fetchText2);
+    if (!check.ok) {
+      throw new DaoyanCliError({
+        code: "provision_failed",
+        message: `\u6307\u5B9A\u7684 ${context.tag} \u6CA1\u6709\u5339\u914D Python ${opts.python.version} / ${context.platform} \u7684 wheel`,
+        hint: "\u68C0\u67E5 --torch-index \u662F\u5426\u5305\u542B\u8BE5 tag\uFF0C\u6216\u6539\u7528\u81EA\u52A8\u9009\u62E9",
+        details: {
+          stage: "select",
+          tag: context.tag,
+          missing: check.missing,
+          python: opts.python.version,
+          platform: context.platform,
+          torch_index: context.indexRoot,
+          last_error: check.error
+        }
+      });
+    }
+    return {
+      ...context,
+      installIndexUrl: `${context.indexRoot}/${context.tag}`,
+      candidates: [context.tag],
+      attemptedTags: [context.tag]
+    };
+  }
+  const gpu = context.gpu;
+  if (gpu === null) {
+    throw new DaoyanCliError({
+      code: "provision_failed",
+      message: "\u5DE5\u5177\u94FE\u4E0A\u4E0B\u6587\u7F3A\u5C11 GPU \u4FE1\u606F",
+      details: { stage: "probe" }
+    });
+  }
+  const cudaMax = parseCudaVersion(gpu.cudaMax);
+  if (cudaMax === null) {
+    throw new DaoyanCliError({
+      code: "provision_failed",
+      message: `\u65E0\u6CD5\u4ECE\u9A71\u52A8 ${gpu.driver} \u83B7\u53D6 CUDA \u7248\u672C\uFF0C\u65E0\u6CD5\u9009\u62E9 torch wheel`,
+      hint: "\u7528 --torch-cuda cuXXX \u663E\u5F0F\u6307\u5B9A\uFF0C\u6216\u5347\u7EA7 NVIDIA \u9A71\u52A8\u540E\u91CD\u8BD5",
+      details: {
+        stage: "probe",
+        driver: gpu.driver,
+        compute_cap: gpu.computeCap,
+        python: opts.python.version,
+        platform: context.platform,
+        next_actions: [
+          "daoyan init --mode=local --torch-cuda cu124 ...",
+          "\u5347\u7EA7 NVIDIA \u9A71\u52A8\u540E\u91CD\u8BD5",
+          "daoyan init --mode=local --torch-cpu ..."
+        ]
+      }
+    });
+  }
+  const discovery = await discoverCudaTags(context.indexRoot, fetchText2);
+  const pool = discovery.tags.length > 0 ? discovery.tags : FALLBACK_CUDA_TAGS;
+  const selection = selectTorchTags({ available: pool, cudaMax, computeCap: gpu.computeCap });
+  if (selection.candidates.length === 0) {
+    throw new DaoyanCliError({
+      code: "provision_failed",
+      message: `\u9A71\u52A8 ${gpu.driver}\uFF08CUDA ${formatCudaVersion(cudaMax)}\uFF09\u6CA1\u6709\u53EF\u7528\u7684 CUDA torch tag`,
+      hint: "\u7528 --torch-cuda \u663E\u5F0F\u6307\u5B9A\uFF0C\u6216\u5347\u7EA7\u9A71\u52A8\u540E\u91CD\u8BD5",
+      details: {
+        stage: "select",
+        driver: gpu.driver,
+        cuda_max: formatCudaVersion(cudaMax),
+        compute_cap: gpu.computeCap,
+        python: opts.python.version,
+        platform: context.platform,
+        skipped: selection.skipped,
+        torch_index: context.indexRoot,
+        index_error: discovery.error,
+        next_actions: [
+          "daoyan init --mode=local --torch-cuda cu118 ...",
+          "\u5347\u7EA7 NVIDIA \u9A71\u52A8\u540E\u91CD\u8BD5",
+          "daoyan init --mode=local --torch-cpu ..."
+        ]
+      }
+    });
+  }
+  const verified = [];
+  const attempted = [];
+  let lastCheck = null;
+  for (const tag2 of selection.candidates.slice(0, MAX_CANDIDATE_CHECKS)) {
+    attempted.push(tag2);
+    const check = await checkTagWheels(tag2, opts.python, context.arch, context.indexRoot, fetchText2);
+    lastCheck = check;
+    if (check.ok) {
+      verified.push(tag2);
+    } else {
+      opts.log?.(
+        `\u8DF3\u8FC7 ${tag2}\uFF1A\u7F3A\u5C11 ${check.missing.join(" / ")} \u7684 ${opts.python.version}/${context.platform} wheel`
+      );
+    }
+  }
+  if (verified.length === 0) {
+    throw new DaoyanCliError({
+      code: "provision_failed",
+      message: `\u65E0\u6CD5\u627E\u5230\u4E0E\u9A71\u52A8 ${gpu.driver} / Python ${opts.python.version} \u5339\u914D\u7684 torch wheel`,
+      hint: "\u53EF\u6307\u5B9A --torch-index \u955C\u50CF\uFF0C\u6216\u6539\u7528 --torch-cpu\uFF1B\u8BE6\u89C1 details.attempted_tags",
+      details: {
+        stage: "select",
+        driver: gpu.driver,
+        cuda_max: formatCudaVersion(cudaMax),
+        compute_cap: gpu.computeCap,
+        python: opts.python.version,
+        platform: context.platform,
+        attempted_tags: attempted,
+        missing: lastCheck?.missing ?? [],
+        torch_index: context.indexRoot,
+        index_error: discovery.error,
+        last_error: lastCheck?.error ?? null,
+        next_actions: [
+          "daoyan init --mode=local --torch-index <\u955C\u50CF> ...",
+          "daoyan init --mode=local --torch-cuda cu124 ...",
+          "\u5347\u7EA7 NVIDIA \u9A71\u52A8\u540E\u91CD\u8BD5",
+          "daoyan init --mode=local --torch-cpu ..."
+        ]
+      }
+    });
+  }
+  const tag = verified[0];
+  return {
+    ...context,
+    tag,
+    installIndexUrl: `${context.indexRoot}/${tag}`,
+    candidates: verified,
+    attemptedTags: attempted
+  };
+}
+function torchPlanForTag(plan, tag) {
+  if (plan.tag === tag) return plan;
+  return { ...plan, tag, installIndexUrl: `${plan.indexRoot}/${tag}` };
+}
+function asOptionalString(v) {
+  return typeof v === "string" && v !== "" ? v : null;
+}
+function readToolchainMarker(venvDir) {
+  const file = join4(venvDir, TOOLCHAIN_MARKER_FILE);
+  if (!existsSync6(file)) return null;
+  let raw;
+  try {
+    raw = JSON.parse(readFileSync6(file, "utf8"));
+  } catch {
+    return null;
+  }
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+  const o = raw;
+  if (o.schema_version !== TOOLCHAIN_MARKER_SCHEMA) return null;
+  if (o.torch_backend !== "cuda" && o.torch_backend !== "cpu") return null;
+  const required = [
+    "installed_at",
+    "python",
+    "platform",
+    "comfyui_tag",
+    "requirements_sha256",
+    "custom_nodes_sha256",
+    "torch"
+  ];
+  for (const key of required) {
+    if (typeof o[key] !== "string") return null;
+  }
+  return {
+    schema_version: TOOLCHAIN_MARKER_SCHEMA,
+    installed_at: o.installed_at,
+    python: o.python,
+    platform: o.platform,
+    comfyui_tag: o.comfyui_tag,
+    requirements_sha256: o.requirements_sha256,
+    custom_nodes_sha256: o.custom_nodes_sha256,
+    driver: asOptionalString(o.driver),
+    cuda_max: asOptionalString(o.cuda_max),
+    compute_cap: asOptionalString(o.compute_cap),
+    torch_backend: o.torch_backend,
+    torch_tag: asOptionalString(o.torch_tag),
+    torch_index: asOptionalString(o.torch_index),
+    torch: asOptionalString(o.torch),
+    torchvision: asOptionalString(o.torchvision)
+  };
+}
+function writeToolchainMarker(venvDir, marker) {
+  writeJsonAtomic(join4(venvDir, TOOLCHAIN_MARKER_FILE), marker);
+}
+function buildToolchainMarker(input) {
+  const plan = input.plan;
+  return {
+    schema_version: TOOLCHAIN_MARKER_SCHEMA,
+    installed_at: nowIso(),
+    python: plan.python.version,
+    platform: plan.platform,
+    comfyui_tag: input.comfyuiTag,
+    requirements_sha256: input.requirementsSha256,
+    custom_nodes_sha256: input.customNodesSha256,
+    driver: plan.gpu?.driver ?? null,
+    cuda_max: plan.gpu?.cudaMax ?? null,
+    compute_cap: plan.gpu?.computeCap ?? null,
+    torch_backend: plan.backend,
+    torch_tag: plan.backend === "cuda" ? plan.tag : null,
+    torch_index: plan.backend === "cuda" ? plan.indexRoot : null,
+    torch: input.smoke.torch,
+    torchvision: input.smoke.torchvision
+  };
+}
+function markerMismatchReason(marker, expected) {
+  if (marker.schema_version !== TOOLCHAIN_MARKER_SCHEMA) return "\u5DE5\u5177\u94FE\u6807\u8BB0 schema \u5DF2\u53D8\u5316";
+  if (marker.python !== expected.python) return `Python \u5DF2\u53D8\u5316\uFF08${marker.python} \u2192 ${expected.python}\uFF09`;
+  if (marker.platform !== expected.platform) return `\u5E73\u53F0\u5DF2\u53D8\u5316\uFF08${marker.platform} \u2192 ${expected.platform}\uFF09`;
+  if (marker.comfyui_tag !== expected.comfyuiTag) {
+    return `ComfyUI \u7248\u672C\u5DF2\u53D8\u5316\uFF08${marker.comfyui_tag} \u2192 ${expected.comfyuiTag}\uFF09`;
+  }
+  if (marker.requirements_sha256 !== expected.requirementsSha256) return "requirements.txt \u5DF2\u53D8\u5316";
+  if (marker.custom_nodes_sha256 !== expected.customNodesSha256) return "custom nodes \u914D\u7F6E\u5DF2\u53D8\u5316";
+  if (marker.torch_backend !== expected.plan.backend) {
+    return `torch \u540E\u7AEF\u5DF2\u53D8\u5316\uFF08${marker.torch_backend} \u2192 ${expected.plan.backend}\uFF09`;
+  }
+  if (expected.plan.backend === "cuda") {
+    const markerTag = marker.torch_tag !== null ? parseCudaTag(marker.torch_tag) : null;
+    if (markerTag === null) return "\u5DE5\u5177\u94FE\u6807\u8BB0\u7F3A\u5C11 CUDA tag";
+    if (expected.plan.forced) {
+      if (marker.torch_tag !== expected.plan.tag) {
+        return `\u663E\u5F0F\u6307\u5B9A\u7684 CUDA tag \u5DF2\u53D8\u5316\uFF08${marker.torch_tag} \u2192 ${expected.plan.tag}\uFF09`;
+      }
+    } else {
+      const cudaMax = parseCudaVersion(expected.plan.gpu?.cudaMax ?? null);
+      if (cudaMax === null) return "\u65E0\u6CD5\u786E\u8BA4\u5F53\u524D\u9A71\u52A8\u7684 CUDA \u7248\u672C";
+      if (compareCuda(markerTag.cuda, cudaMax) > 0) {
+        return `torch tag ${marker.torch_tag} \u9700\u8981 CUDA ${formatCudaVersion(markerTag.cuda)}\uFF0C\u9A71\u52A8\u4EC5\u652F\u6301 ${formatCudaVersion(cudaMax)}`;
+      }
+      if (!tagSupportsArch(markerTag, expected.plan.gpu?.computeCap ?? null)) {
+        return `torch tag ${marker.torch_tag} \u4E0E\u5F53\u524D compute capability ${expected.plan.gpu?.computeCap ?? "\u672A\u77E5"} \u4E0D\u517C\u5BB9`;
+      }
+    }
+  }
+  if (marker.torch === null) return "\u5DE5\u5177\u94FE\u6807\u8BB0\u7F3A\u5C11 torch \u7248\u672C";
+  return null;
+}
+async function runPipCheck(venvDir) {
+  const pip = join4(venvDir, "bin", "pip");
+  const r = await execCapture(pip, ["check"], { timeoutMs: PIP_CHECK_TIMEOUT_MS });
+  const output = `${r.stdout}${r.stderr}`.trim().slice(-4e3);
+  return { ok: r.code === 0, output };
+}
+function buildSmokeScript(backend) {
+  if (backend === "cpu") {
+    return [
+      "import json",
+      'info = {"ok": False, "torch": None, "torchvision": None, "torch_cuda": None, "available": None, "device": None, "error": None}',
+      "try:",
+      "    import torch",
+      '    info["torch"] = torch.__version__',
+      '    info["torch_cuda"] = torch.version.cuda',
+      "    try:",
+      "        import torchvision",
+      '        info["torchvision"] = torchvision.__version__',
+      "    except Exception as e:",
+      '        info["torchvision_error"] = str(e)',
+      '    info["ok"] = True',
+      "except Exception as e:",
+      '    info["error"] = str(e)',
+      'print("DYCLI_SMOKE " + json.dumps(info))'
+    ].join("\n");
+  }
+  return [
+    "import json",
+    'info = {"ok": False, "torch": None, "torchvision": None, "torch_cuda": None, "available": None, "device": None, "error": None}',
+    "try:",
+    "    import torch",
+    '    info["torch"] = torch.__version__',
+    '    info["torch_cuda"] = torch.version.cuda',
+    "    try:",
+    "        import torchvision",
+    '        info["torchvision"] = torchvision.__version__',
+    "    except Exception as e:",
+    '        info["torchvision_error"] = str(e)',
+    '    info["available"] = bool(torch.cuda.is_available())',
+    '    if not info["available"]:',
+    '        raise RuntimeError("torch.cuda.is_available() == False")',
+    '    x = torch.zeros(1, device="cuda")',
+    "    x.add_(1)",
+    "    torch.cuda.synchronize()",
+    '    info["device"] = torch.cuda.get_device_name(0)',
+    '    info["ok"] = True',
+    "except Exception as e:",
+    '    info["error"] = str(e)',
+    'print("DYCLI_SMOKE " + json.dumps(info))'
+  ].join("\n");
+}
+function classifyCudaError(text) {
+  const lower = text.toLowerCase();
+  if (lower.includes("driver version is insufficient")) return "driver";
+  if (lower.includes("is_available() == false")) return "driver";
+  if (lower.includes("no cuda gpus are available") || lower.includes("no cuda-capable device")) return "driver";
+  if (lower.includes("no kernel image is available")) return "kernel";
+  if (lower.includes("invalid device function")) return "device_function";
+  if (lower.includes("out of memory")) return "oom";
+  return "unknown";
+}
+async function runSmokeTest(venvDir, backend) {
+  const python = join4(venvDir, "bin", "python");
+  const r = await execCapture(python, ["-c", buildSmokeScript(backend)], { timeoutMs: SMOKE_TIMEOUT_MS });
+  const line = r.stdout.split("\n").map((l) => l.trim()).find((l) => l.startsWith(SMOKE_PREFIX));
+  if (line === void 0) {
+    return {
+      ok: false,
+      torch: null,
+      torchvision: null,
+      torchCuda: null,
+      available: null,
+      device: null,
+      error: (r.stderr || r.stdout).trim().slice(-2e3) || `python \u9000\u51FA\u7801 ${r.code}`,
+      errorClass: backend === "cuda" ? classifyCudaError(r.stderr) : "unknown"
+    };
+  }
+  let raw;
+  try {
+    raw = JSON.parse(line.slice(SMOKE_PREFIX.length));
+  } catch {
+    return {
+      ok: false,
+      torch: null,
+      torchvision: null,
+      torchCuda: null,
+      available: null,
+      device: null,
+      error: `smoke test \u8F93\u51FA\u4E0D\u662F JSON\uFF1A${line.slice(0, 300)}`,
+      errorClass: "unknown"
+    };
+  }
+  const o = typeof raw === "object" && raw !== null ? raw : {};
+  const error = asOptionalString(o.error);
+  const ok = o.ok === true;
+  return {
+    ok,
+    torch: asOptionalString(o.torch),
+    torchvision: asOptionalString(o.torchvision),
+    torchCuda: asOptionalString(o.torch_cuda),
+    available: typeof o.available === "boolean" ? o.available : null,
+    device: asOptionalString(o.device),
+    error,
+    errorClass: ok ? null : backend === "cuda" ? classifyCudaError(error ?? "") : "unknown"
+  };
+}
+var DEFAULT_TORCH_INDEX, FALLBACK_CUDA_TAGS, TOOLCHAIN_MARKER_FILE, TOOLCHAIN_MARKER_SCHEMA, MAX_CANDIDATE_CHECKS, CUDA13_MIN_COMPUTE, INDEX_TIMEOUT_MS, PROBE_TIMEOUT_MS, SMOKE_TIMEOUT_MS, PIP_CHECK_TIMEOUT_MS, SMOKE_PREFIX, INDEX_MAX_BYTES, NVIDIA_QUERY_FIELDS, NVIDIA_QUERY_BASIC;
+var init_toolchain = __esm({
+  "src/core/provision/toolchain.mts"() {
+    "use strict";
+    init_errors();
+    init_exec();
+    init_fs();
+    DEFAULT_TORCH_INDEX = "https://download.pytorch.org/whl";
+    FALLBACK_CUDA_TAGS = ["cu130", "cu129", "cu128", "cu126", "cu124", "cu121", "cu118"];
+    TOOLCHAIN_MARKER_FILE = ".dycli-toolchain.json";
+    TOOLCHAIN_MARKER_SCHEMA = 1;
+    MAX_CANDIDATE_CHECKS = 3;
+    CUDA13_MIN_COMPUTE = 7.5;
+    INDEX_TIMEOUT_MS = 2e4;
+    PROBE_TIMEOUT_MS = 2e4;
+    SMOKE_TIMEOUT_MS = 18e4;
+    PIP_CHECK_TIMEOUT_MS = 12e4;
+    SMOKE_PREFIX = "DYCLI_SMOKE ";
+    INDEX_MAX_BYTES = 8 * 1024 * 1024;
+    NVIDIA_QUERY_FIELDS = "name,driver_version,compute_cap,cuda_version";
+    NVIDIA_QUERY_BASIC = "name,driver_version";
+  }
+});
+
+// src/core/provision/options.mts
+function nonEmpty2(raw) {
+  if (raw === void 0) return void 0;
+  const value = raw.trim();
+  return value === "" ? void 0 : value;
+}
+function normalizeIndexUrl(raw, label, stripSlash = false) {
+  const value = raw.trim();
+  if (value === "") usageError(`${label} \u4E0D\u80FD\u4E3A\u7A7A`);
+  if (!isHttpUrl(value)) usageError(`${label} \u5FC5\u987B\u662F http(s) URL\uFF08\u6536\u5230 ${value}\uFF09`);
+  return stripSlash ? value.replace(/\/+$/, "") : value;
+}
+function trimSlash(url) {
+  return url.replace(/\/+$/, "");
+}
+function isTruthy(raw) {
+  if (raw === void 0) return false;
+  return ["1", "true", "yes", "on"].includes(raw.trim().toLowerCase());
+}
+function resolveToolchainOptions(cli, env = process.env) {
+  const mirrorRaw = cli?.mirror ?? nonEmpty2(env.DYCLI_PIP_MIRROR) ?? DEFAULT_PIP_MIRROR;
+  const mirror = normalizeIndexUrl(mirrorRaw, "--mirror");
+  const fallbackRaw = cli?.fallbackMirror ?? nonEmpty2(env.DYCLI_PIP_FALLBACK_MIRROR) ?? DEFAULT_PIP_FALLBACK_MIRROR;
+  let fallbackMirror = null;
+  if (fallbackRaw.trim().toLowerCase() !== DISABLE_VALUE) {
+    const fallback = normalizeIndexUrl(fallbackRaw, "--fallback-mirror");
+    fallbackMirror = trimSlash(fallback) === trimSlash(mirror) ? null : fallback;
+  }
+  const torchIndex = normalizeIndexUrl(
+    cli?.torchIndex ?? nonEmpty2(env.DYCLI_TORCH_INDEX) ?? DEFAULT_TORCH_INDEX,
+    "--torch-index",
+    true
+  );
+  const torchCudaRaw = cli?.torchCuda ?? nonEmpty2(env.DYCLI_TORCH_CUDA);
+  const torchCuda = torchCudaRaw !== void 0 && torchCudaRaw.toLowerCase() !== DISABLE_VALUE ? torchCudaRaw.toLowerCase() : null;
+  if (torchCuda !== null && parseCudaTag(torchCuda) === null) {
+    usageError(`--torch-cuda \u9700\u8981\u5F62\u5982 cu130 \u7684 tag\uFF08\u6536\u5230 ${torchCuda}\uFF09`);
+  }
+  const torchCpu = cli?.torchCpu === true || isTruthy(nonEmpty2(env.DYCLI_TORCH_CPU));
+  if (torchCpu && torchCuda !== null) {
+    usageError("--torch-cpu \u4E0E --torch-cuda / DYCLI_TORCH_CUDA \u4E0D\u80FD\u540C\u65F6\u4F7F\u7528");
+  }
+  return {
+    mirror,
+    fallbackMirror,
+    torchIndex,
+    torchCuda,
+    torchCpu,
+    noCache: cli?.noCache === true
+  };
+}
+function hasToolchainOptions(opts) {
+  return Object.values(opts).some((v) => v !== void 0 && v !== false);
+}
+function applyToolchainFlag(target, name, args, index, inline) {
+  if (name === "--torch-cpu") {
+    if (inline !== void 0) usageError("--torch-cpu \u4E0D\u63A5\u53D7\u53C2\u6570");
+    target.torchCpu = true;
+    return { handled: true, skip: 0 };
+  }
+  if (name === "--no-cache") {
+    if (inline !== void 0) usageError("--no-cache \u4E0D\u63A5\u53D7\u53C2\u6570");
+    target.noCache = true;
+    return { handled: true, skip: 0 };
+  }
+  const key = VALUE_FLAGS[name];
+  if (key === void 0) return { handled: false, skip: 0 };
+  const { value, skip } = takeValue(args, index, inline, name);
+  target[key] = value;
+  return { handled: true, skip };
+}
+var DEFAULT_PIP_MIRROR, DEFAULT_PIP_FALLBACK_MIRROR, DISABLE_VALUE, VALUE_FLAGS;
+var init_options = __esm({
+  "src/core/provision/options.mts"() {
+    "use strict";
+    init_args();
+    init_fs();
+    init_toolchain();
+    DEFAULT_PIP_MIRROR = "https://mirrors.aliyun.com/pypi/simple/";
+    DEFAULT_PIP_FALLBACK_MIRROR = "https://pypi.org/simple/";
+    DISABLE_VALUE = "none";
+    VALUE_FLAGS = {
+      "--mirror": "mirror",
+      "--fallback-mirror": "fallbackMirror",
+      "--torch-index": "torchIndex",
+      "--torch-cuda": "torchCuda"
+    };
+  }
+});
+
+// src/core/provision/init-flow.mts
+import { existsSync as existsSync7, readFileSync as readFileSync7, readdirSync as readdirSync2, renameSync as renameSync2, rmSync as rmSync4, writeFileSync as writeFileSync3 } from "fs";
+import { join as join5 } from "path";
 function pipIndexArgs(mirror) {
   const index = mirror !== void 0 && mirror.trim() !== "" ? mirror.trim() : DEFAULT_PIP_MIRROR;
   return ["--index-url", index];
@@ -2911,34 +4047,34 @@ function projectTemplate(name) {
 function scaffoldProject(root, name) {
   const created = [];
   for (const d of [WORKFLOWS_DIR, INPUTS_DIR, FINAL_DIR, LOG_DIR, RELAY_DIR]) {
-    ensureDir(join4(root, d));
+    ensureDir(join5(root, d));
   }
-  const projectFile = join4(root, PROJECT_FILE);
-  if (!existsSync6(projectFile)) {
-    writeFileAtomic(projectFile, JSON.stringify(projectTemplate(name), null, 2) + "\n");
+  const projectFile = join5(root, PROJECT_FILE);
+  if (!existsSync7(projectFile)) {
+    writeFileAtomically(projectFile, JSON.stringify(projectTemplate(name), null, 2) + "\n");
     created.push(PROJECT_FILE);
   }
-  const shotsFile = join4(root, SHOTS_FILE);
-  if (!existsSync6(shotsFile)) {
-    writeFileAtomic(shotsFile, JSON.stringify(shotsTemplate(), null, 2) + "\n");
+  const shotsFile = join5(root, SHOTS_FILE);
+  if (!existsSync7(shotsFile)) {
+    writeFileAtomically(shotsFile, JSON.stringify(shotsTemplate(), null, 2) + "\n");
     created.push(SHOTS_FILE);
   }
-  const wf = join4(root, WORKFLOWS_DIR, "t2v.json");
-  if (!existsSync6(wf)) {
-    writeFileAtomic(wf, "{}\n");
+  const wf = join5(root, WORKFLOWS_DIR, "t2v.json");
+  if (!existsSync7(wf)) {
+    writeFileAtomically(wf, "{}\n");
     created.push(`${WORKFLOWS_DIR}/t2v.json`);
   }
-  const ignore = join4(root, ".gitignore");
-  if (!existsSync6(ignore)) {
-    writeFileAtomic(
+  const ignore = join5(root, ".gitignore");
+  if (!existsSync7(ignore)) {
+    writeFileAtomically(
       ignore,
       ["engine/", "logs/", ".dycli/", "relay_frames/", "concat_list.txt", "*.log", ".DS_Store", ""].join("\n")
     );
     created.push(".gitignore");
   }
-  const attrs = join4(root, ".gitattributes");
-  if (!existsSync6(attrs)) {
-    writeFileAtomic(
+  const attrs = join5(root, ".gitattributes");
+  if (!existsSync7(attrs)) {
+    writeFileAtomically(
       attrs,
       [
         "runs/**/outputs/** filter=lfs diff=lfs merge=lfs -text",
@@ -2986,16 +4122,21 @@ async function detectPython(log) {
       message: "\u672A\u627E\u5230\u53EF\u7528\u7684 python3\uFF08ComfyUI \u4F9D\u8D56\u5B89\u88C5\u9700\u8981 \u22653.10\uFF09\u3002Ubuntu\uFF1Aapt install python3 python3-venv\uFF1BmacOS\uFF1Abrew install python"
     });
   }
-  const m = /Python\s+(\d+)\.(\d+)/.exec(r.stdout.trim());
-  const major = m !== null ? Number(m[1]) : 0;
-  const minor = m !== null ? Number(m[2]) : 0;
-  if (major < 3 || major === 3 && minor < 10) {
+  const info = parsePythonVersion(r.stdout);
+  if (info === null) {
+    throw new DaoyanCliError({
+      code: "external_tool_missing",
+      message: `\u65E0\u6CD5\u89E3\u6790 python3 \u7248\u672C\uFF1A${r.stdout.trim()}`
+    });
+  }
+  if (info.major < 3 || info.major === 3 && info.minor < 10) {
     throw new DaoyanCliError({
       code: "external_tool_missing",
       message: `python3 \u7248\u672C\u8FC7\u4F4E\uFF08${r.stdout.trim()}\uFF0C\u8981\u6C42 \u2265${MIN_PYTHON}\uFF09`
     });
   }
   log(`python3 \u5C31\u7EEA\uFF1A${r.stdout.trim()}`);
+  return info;
 }
 async function latestComfyTag() {
   const res = await fetch(COMFY_TAGS_API, {
@@ -3017,24 +4158,106 @@ async function latestComfyTag() {
     message: "GitHub tags \u4E2D\u672A\u627E\u5230\u53EF\u7528\u7248\u672C\uFF08\u53EF\u7528 --version \u56FA\u5B9A\u7248\u672C\u7ED5\u8FC7\uFF09"
   });
 }
+async function ensurepipPreflight(system, venvDir) {
+  const r = await execCapture("python3", ["-c", "import ensurepip"], { timeoutMs: 2e4 });
+  if (r.code === 0) return;
+  const aptPackage = `python${system.major}.${system.minor}-venv`;
+  const platformHint = process.platform === "linux" ? `Ubuntu/Debian \u8BF7\u5B89\u88C5\uFF1Aapt-get install -y ${aptPackage}\uFF08\u6216\u5143\u5305 python3-venv\uFF09` : process.platform === "darwin" ? "macOS \u8BF7\u6267\u884C\uFF1Abrew install python" : `\u8BF7\u5B89\u88C5\u5E26 ensurepip \u7684 Python ${system.major}.${system.minor}`;
+  const nextActions = process.platform === "darwin" ? ["brew install python", "rm -rf engine/.venv", "daoyan init --mode=local"] : [`apt-get install -y ${aptPackage}`, "rm -rf engine/.venv", "daoyan init --mode=local"];
+  throw new DaoyanCliError({
+    code: "provision_failed",
+    message: `\u5F53\u524D Python ${system.version} \u7F3A\u5C11 ensurepip\uFF0C\u65E0\u6CD5\u521B\u5EFA\u5E26 pip \u7684 venv\u3002
+${platformHint}
+\u5B89\u88C5\u540E\u5220\u9664 engine/.venv\uFF0C\u518D\u91CD\u8DD1 daoyan init\u3002`,
+    hint: "dycli \u4E0D\u81EA\u52A8\u6267\u884C apt\uFF08\u53EF\u80FD\u89E6\u53D1\u7CFB\u7EDF\u670D\u52A1\u91CD\u542F\uFF09\uFF1B\u5B89\u88C5 venv \u5305\u540E\u91CD\u8BD5\u3002",
+    details: {
+      stage: "ensurepip",
+      python: system.version,
+      venv_dir: venvDir,
+      last_error: (r.stderr || r.stdout).trim().slice(-2e3),
+      ...process.platform === "linux" ? { apt_packages: [aptPackage, "python3-venv"] } : { brew_package: "python" },
+      next_actions: nextActions
+    },
+    nextActions
+  });
+}
+async function venvPythonInfo(venvDir) {
+  const python = join5(venvDir, "bin", "python");
+  if (!existsSync7(python)) return null;
+  const r = await execCapture(python, ["-c", "import sys; print('%d.%d.%d' % sys.version_info[:3])"], {
+    timeoutMs: 15e3
+  });
+  if (r.code !== 0) return null;
+  return parsePythonVersion(r.stdout);
+}
+async function venvReady(venvDir) {
+  const info = await venvPythonInfo(venvDir);
+  if (info === null) return false;
+  if (!existsSync7(join5(venvDir, "bin", "pip"))) return false;
+  const r = await execCapture(join5(venvDir, "bin", "python"), ["-m", "pip", "--version"], { timeoutMs: 6e4 });
+  return r.code === 0;
+}
 async function createVenv(root, venvDir, log) {
-  if (existsSync6(join4(venvDir, "bin", "python"))) {
-    log(`\u590D\u7528\u5DF2\u6709 venv\uFF1A${venvDir}`);
-    return;
+  if (existsSync7(join5(venvDir, "bin", "python"))) {
+    const existing = await venvPythonInfo(venvDir);
+    let pipOk = false;
+    if (existing !== null) {
+      const pip = await execCapture(join5(venvDir, "bin", "python"), ["-m", "pip", "--version"], {
+        timeoutMs: 6e4
+      });
+      pipOk = pip.code === 0 && existsSync7(join5(venvDir, "bin", "pip"));
+    }
+    if (existing !== null && pipOk) {
+      log(`\u590D\u7528\u5DF2\u6709 venv\uFF1A${venvDir}\uFF08Python ${existing.version}\uFF09`);
+      return existing;
+    }
+    log(`\u68C0\u6D4B\u5230\u4E0D\u5B8C\u6574\u7684 venv\uFF08\u7F3A\u5C11\u53EF\u7528 pip\uFF09\uFF0C\u5220\u9664\u540E\u91CD\u5EFA\uFF1A${venvDir}`);
+    rmSync4(venvDir, { recursive: true, force: true });
   }
+  const system = await detectPython(log);
+  await ensurepipPreflight(system, venvDir);
   log(`\u521B\u5EFA\u865A\u62DF\u73AF\u5883 ${venvDir} ...`);
-  const r = await execInherit("python3", ["-m", "venv", venvDir], { cwd: root });
-  if (r !== 0) {
+  const r = await execCapture("python3", ["-m", "venv", venvDir], {
+    cwd: root,
+    timeoutMs: VENV_TIMEOUT_MS
+  });
+  if (r.code !== 0) {
+    rmSync4(venvDir, { recursive: true, force: true });
     throw new DaoyanCliError({
       code: "provision_failed",
-      message: `python3 -m venv \u5931\u8D25\uFF08\u9000\u51FA\u7801 ${r}\uFF09\u3002Ubuntu \u9700 python3-venv \u5305`
+      message: `python3 -m venv \u5931\u8D25\uFF08\u9000\u51FA\u7801 ${r.code}\uFF09\u3002Ubuntu \u9700 python3-venv \u5305`,
+      details: {
+        stage: "venv",
+        python: system.version,
+        venv_dir: venvDir,
+        last_error: (r.stderr || r.stdout).trim().slice(-2e3)
+      }
     });
   }
+  const info = await venvPythonInfo(venvDir);
+  if (info === null || !existsSync7(join5(venvDir, "bin", "pip"))) {
+    rmSync4(venvDir, { recursive: true, force: true });
+    throw new DaoyanCliError({
+      code: "provision_failed",
+      message: `venv \u521B\u5EFA\u5B8C\u6210\u4F46\u7F3A\u5C11 python/pip\uFF1A${venvDir}`,
+      details: { stage: "venv", python: system.version, venv_dir: venvDir }
+    });
+  }
+  log(`venv \u5C31\u7EEA\uFF1APython ${info.version}`);
+  return info;
 }
 async function cloneRepo(root, repo, target, ref, log) {
-  if (existsSync6(join4(target, ".git"))) {
+  if (existsSync7(join5(target, ".git"))) {
     log(`\u590D\u7528\u5DF2\u6709\u4ED3\u5E93\uFF1A${target}`);
     return;
+  }
+  if (existsSync7(target)) {
+    if (readdirSync2(target).length === 0) {
+      rmSync4(target, { recursive: true, force: true });
+    } else {
+      log(`\u76EE\u5F55\u5DF2\u5B58\u5728\u4E14\u4E0D\u662F git \u68C0\u51FA\uFF0C\u4FDD\u7559\u73B0\u6709\u5185\u5BB9\uFF1A${target}`);
+      return;
+    }
   }
   const args = ["clone", "--depth", "1"];
   if (ref !== void 0 && ref !== "") args.push("--branch", ref);
@@ -3048,43 +4271,93 @@ async function cloneRepo(root, repo, target, ref, log) {
     });
   }
 }
-async function pipInstall(root, venvDir, mirror, log, requirements) {
-  const pip = join4(venvDir, "bin", "pip");
-  const req = requirements ?? join4(root, "engine", "ComfyUI", "requirements.txt");
-  if (!existsSync6(req)) {
+async function runPipAttempt(opts) {
+  const pip = join5(opts.venvDir, "bin", "pip");
+  const args = [
+    "install",
+    ...opts.packageArgs,
+    ...pipIndexArgs(opts.indexUrl),
+    "--retries",
+    PIP_RETRIES,
+    "--timeout",
+    PIP_TIMEOUT_SECONDS,
+    ...opts.noCache ? ["--no-cache-dir"] : [],
+    ...opts.extraArgs ?? []
+  ];
+  return execStream(pip, args, { cwd: opts.root, timeoutMs: PIP_INSTALL_TIMEOUT_MS });
+}
+async function pipInstallWithFallback(opts) {
+  const mirrors = [opts.options.mirror];
+  if (opts.options.fallbackMirror !== null) mirrors.push(opts.options.fallbackMirror);
+  let last = null;
+  let lastMirror = opts.options.mirror;
+  for (let i = 0; i < mirrors.length; i++) {
+    const mirror = mirrors[i];
+    opts.log(`${opts.label}\uFF1A\u4F7F\u7528${i === 0 ? "\u4E3B\u6E90" : " fallback \u6E90"} ${mirror} ...`);
+    const r = await runPipAttempt({
+      root: opts.root,
+      venvDir: opts.venvDir,
+      packageArgs: opts.packageArgs,
+      indexUrl: mirror,
+      noCache: opts.options.noCache
+    });
+    if (r.code === 0) return mirror;
+    last = r;
+    lastMirror = mirror;
+    if (i < mirrors.length - 1) {
+      opts.log(`${opts.label} \u4E3B\u6E90\u5931\u8D25\uFF08\u9000\u51FA\u7801 ${r.code}\uFF09\uFF0C\u56DE\u9000 ${mirrors[i + 1]} \u91CD\u8BD5 ...`);
+    }
+  }
+  throw new DaoyanCliError({
+    code: "provision_failed",
+    message: `${opts.label}\u5B89\u88C5\u5931\u8D25\uFF08\u9000\u51FA\u7801 ${last !== null ? last.code : -1}\uFF0C\u6700\u540E\u4F7F\u7528\u7684\u6E90 ${lastMirror}\uFF09`,
+    hint: "\u5DF2\u5C1D\u8BD5\u4E3B\u6E90\u4E0E fallback\uFF1B\u53EF\u7528 --mirror / --fallback-mirror \u6307\u5B9A\u53EF\u8FBE\u955C\u50CF\uFF0C\u6216\u52A0 --no-cache \u91CD\u8BD5",
+    details: {
+      stage: opts.stage,
+      mirrors,
+      exit_code: last !== null ? last.code : -1,
+      last_error: last !== null ? last.stderr.trim().slice(-4e3) : null
+    }
+  });
+}
+async function pipInstall(root, venvDir, options, log, requirements) {
+  const req = requirements ?? join5(root, "engine", "ComfyUI", "requirements.txt");
+  if (!existsSync7(req)) {
     throw new DaoyanCliError({ code: "provision_failed", message: `\u7F3A\u5C11 ${req}\uFF08clone \u672A\u5B8C\u6210\uFF1F\uFF09` });
   }
-  const indexArgs = pipIndexArgs(mirror);
-  const sourceLabel = mirror !== void 0 && mirror.trim() !== "" ? "\u81EA\u5B9A\u4E49\u955C\u50CF" : "\u963F\u91CC\u4E91\uFF08\u9ED8\u8BA4\uFF09";
-  log(`\u5B89\u88C5 ComfyUI \u4F9D\u8D56\uFF08pip install -r ${req}\uFF0C\u6E90\uFF1A${sourceLabel}\uFF0C\u53EF\u80FD\u9700\u8981\u4E0B\u8F7D torch\uFF0C\u8017\u65F6\u8F83\u957F\uFF09...`);
-  const args = ["install", "-r", req, ...indexArgs];
-  const r = await execInherit(pip, args, { cwd: root });
-  if (r !== 0) {
-    throw new DaoyanCliError({
-      code: "provision_failed",
-      message: `pip install \u5931\u8D25\uFF08\u9000\u51FA\u7801 ${r}\uFF09\u3002\u9ED8\u8BA4\u4F7F\u7528\u963F\u91CC\u4E91 PyPI\uFF1B\u53EF\u7528 --mirror \u5207\u6362\u5B98\u65B9\u6E90\u6216\u5176\u4ED6\u955C\u50CF\u91CD\u8BD5`
-    });
-  }
-  log("ComfyUI \u4F9D\u8D56\u5B89\u88C5\u5B8C\u6210");
+  log(`\u5B89\u88C5 ComfyUI \u4F9D\u8D56\uFF08pip install -r ${req}\uFF0C\u53EF\u80FD\u9700\u8981\u4E0B\u8F7D torch\uFF0C\u8017\u65F6\u8F83\u957F\uFF09...`);
+  const used = await pipInstallWithFallback({
+    root,
+    venvDir,
+    packageArgs: ["-r", req],
+    options,
+    log,
+    label: "ComfyUI \u4F9D\u8D56",
+    stage: "requirements"
+  });
+  log(`ComfyUI \u4F9D\u8D56\u5B89\u88C5\u5B8C\u6210\uFF08\u6E90\uFF1A${used}\uFF09`);
+  return used;
 }
-async function installCustomNodes(root, venvDir, nodes, mirror, log, comfyDir = join4(root, "engine", "ComfyUI")) {
+async function installCustomNodes(root, venvDir, nodes, options, log, comfyDir = join5(root, "engine", "ComfyUI")) {
   if (nodes.length === 0) return;
-  const base = join4(comfyDir, "custom_nodes");
+  const base = join5(comfyDir, "custom_nodes");
   ensureDir(base);
   for (const node of nodes) {
-    const target = join4(base, node.name);
+    const target = join5(base, node.name);
     await cloneRepo(root, node.repo, target, node.ref, log);
-    const req = join4(target, "requirements.txt");
-    if (existsSync6(req)) {
+    const req = join5(target, "requirements.txt");
+    if (existsSync7(req)) {
       log(`\u5B89\u88C5 ${node.name} \u4F9D\u8D56...`);
-      const args = ["install", "-r", req, ...pipIndexArgs(mirror)];
-      const r = await execInherit(join4(venvDir, "bin", "pip"), args, { cwd: root });
-      if (r !== 0) {
-        throw new DaoyanCliError({
-          code: "provision_failed",
-          message: `custom node ${node.name} \u4F9D\u8D56\u5B89\u88C5\u5931\u8D25\uFF08\u9000\u51FA\u7801 ${r}\uFF09\u3002\u9ED8\u8BA4\u4F7F\u7528\u963F\u91CC\u4E91 PyPI\uFF1B\u53EF\u7528 --mirror \u8986\u76D6`
-        });
-      }
+      const used = await pipInstallWithFallback({
+        root,
+        venvDir,
+        packageArgs: ["-r", req],
+        options,
+        log,
+        label: `custom node ${node.name} \u4F9D\u8D56`,
+        stage: `custom_node:${node.name}`
+      });
+      log(`${node.name} \u4F9D\u8D56\u5B89\u88C5\u5B8C\u6210\uFF08\u6E90\uFF1A${used}\uFF09`);
     }
   }
   log(`custom nodes \u5B89\u88C5\u5B8C\u6210\uFF1A${nodes.map((n) => n.name).join(", ")}`);
@@ -3116,61 +4389,365 @@ async function checkoutComfyVersion(comfyDir, version, log) {
   }
   return true;
 }
-async function deployLocalEngine(opts) {
-  const venvDir = join4(opts.root, "engine", ".venv");
-  const comfyDir = join4(opts.root, "engine", "ComfyUI");
-  const already = existsSync6(join4(venvDir, "bin", "python")) && existsSync6(join4(comfyDir, "main.py"));
-  if (already) {
-    opts.log("\u5F15\u64CE\u5DF2\u5B89\u88C5\uFF0C\u590D\u7528\u73B0\u6709\u76EE\u5F55");
-    let switched = false;
-    if (existsSync6(join4(comfyDir, ".git"))) {
-      switched = await checkoutComfyVersion(comfyDir, opts.version, opts.log);
-    } else if (existsSync6(join4(comfyDir, "main.py"))) {
-      opts.log("ComfyUI \u76EE\u5F55\u4E0D\u662F git \u68C0\u51FA\uFF0C\u8DF3\u8FC7\u7248\u672C\u5207\u6362\uFF08\u53EF\u7528 engine use \u6307\u5411\u5176\u4ED6\u76EE\u5F55\uFF09");
-    }
-    if (switched) {
-      await pipInstall(opts.root, venvDir, opts.mirror, opts.log, join4(comfyDir, "requirements.txt"));
-    }
-    await installCustomNodes(
-      opts.root,
-      venvDir,
-      opts.project.comfyui?.custom_nodes ?? [],
-      opts.mirror,
-      opts.log,
-      comfyDir
-    );
-    return { installed: false, version: opts.version };
-  }
-  await detectPython(opts.log);
-  await createVenv(opts.root, venvDir, opts.log);
-  await cloneRepo(opts.root, COMFY_REPO, comfyDir, opts.version, opts.log);
-  await pipInstall(opts.root, venvDir, opts.mirror, opts.log);
-  await installCustomNodes(
-    opts.root,
-    venvDir,
-    opts.project.comfyui?.custom_nodes ?? [],
-    opts.mirror,
-    opts.log,
-    comfyDir
+function customNodesHash(nodes, comfyDir) {
+  return sha256(
+    JSON.stringify(
+      nodes.map((n) => {
+        const dir = join5(comfyDir, "custom_nodes", n.name);
+        const req = join5(dir, "requirements.txt");
+        return {
+          name: n.name,
+          repo: n.repo,
+          ref: n.ref ?? null,
+          present: existsSync7(dir),
+          requirements_sha256: existsSync7(req) ? sha256File(req) : null
+        };
+      })
+    )
   );
-  return { installed: true, version: opts.version };
+}
+async function pipShowVersion(venvDir, pkg) {
+  const r = await execCapture(join5(venvDir, "bin", "pip"), ["show", pkg], { timeoutMs: 6e4 });
+  if (r.code !== 0) return null;
+  const m = /^Version:\s*(.+)$/m.exec(r.stdout);
+  return m !== null ? m[1].trim() : null;
+}
+function torchPinsInFile(file) {
+  const out = [];
+  for (const line of readFileSync7(file, "utf8").split("\n")) {
+    const trimmed = (line.split("#")[0] ?? "").trim();
+    const m = /^(torch|torchvision)\s*==\s*([^\s;]+)/.exec(trimmed);
+    if (m !== null) {
+      out.push({ package: m[1], version: m[2] });
+    }
+  }
+  return out;
+}
+async function assertRequirementsCompatible(reqFile, venvDir, plan) {
+  if (plan.backend === "cpu" && plan.cpuSource !== "forced") return;
+  const pins = torchPinsInFile(reqFile);
+  if (pins.length === 0) return;
+  const conflicts = [];
+  for (const pin of pins) {
+    const installed = await pipShowVersion(venvDir, pin.package);
+    if (installed === null) continue;
+    const installedBase = installed.split("+")[0] ?? installed;
+    const pinBase = pin.version.split("+")[0] ?? pin.version;
+    if (installedBase !== pinBase) conflicts.push({ package: pin.package, pin: pin.version, installed });
+  }
+  if (conflicts.length === 0) return;
+  throw new DaoyanCliError({
+    code: "provision_failed",
+    message: "requirements.txt \u56FA\u5B9A\u4E86\u4E0E\u6240\u9009 CUDA torch \u4E0D\u4E00\u81F4\u7684\u7248\u672C\uFF0C\u5DF2\u505C\u6B62\u4EE5\u907F\u514D\u8986\u76D6",
+    hint: "\u4FEE\u6539 requirements.txt \u7684 torch/torchvision pin\uFF0C\u6216\u4F7F\u7528 --torch-cpu \u663E\u5F0F\u5B89\u88C5 CPU \u7248",
+    details: {
+      stage: "requirements_conflict",
+      torch_tag: plan.tag,
+      torch_index: plan.indexRoot,
+      conflicts
+    }
+  });
+}
+async function installTorch(opts) {
+  if (opts.plan.installIndexUrl === null) {
+    opts.log("\u4F7F\u7528\u5E73\u53F0\u9ED8\u8BA4 torch\uFF08\u4E0D\u9884\u88C5\u72EC\u7ACB wheel\uFF09");
+    return;
+  }
+  const label = opts.plan.backend === "cuda" ? `torch\uFF08${opts.plan.tag}\uFF09` : "torch\uFF08CPU\uFF09";
+  opts.log(`\u5B89\u88C5 ${label}\uFF1Aindex ${opts.plan.installIndexUrl}${opts.forceReinstall ? "\uFF08\u5F3A\u5236\u91CD\u88C5\uFF09" : ""} ...`);
+  const r = await runPipAttempt({
+    root: opts.root,
+    venvDir: opts.venvDir,
+    packageArgs: ["torch", "torchvision"],
+    indexUrl: opts.plan.installIndexUrl,
+    ...opts.forceReinstall ? { extraArgs: ["--force-reinstall"] } : {},
+    noCache: opts.options.noCache
+  });
+  if (r.code !== 0) {
+    throw new DaoyanCliError({
+      code: "provision_failed",
+      message: `${label} \u5B89\u88C5\u5931\u8D25\uFF08\u9000\u51FA\u7801 ${r.code}\uFF09`,
+      hint: "\u68C0\u67E5 --torch-index \u662F\u5426\u53EF\u8FBE\uFF0C\u6216\u6539\u7528 --torch-cpu\uFF1B\u4E5F\u53EF\u662F\u9A71\u52A8\u4E0E wheel \u4E0D\u5339\u914D",
+      details: {
+        stage: "torch",
+        driver: opts.plan.gpu?.driver ?? null,
+        cuda_max: opts.plan.gpu?.cudaMax ?? null,
+        compute_cap: opts.plan.gpu?.computeCap ?? null,
+        python: opts.plan.python.version,
+        platform: opts.plan.platform,
+        torch_tag: opts.plan.tag,
+        torch_index: opts.plan.installIndexUrl,
+        last_error: r.stderr.trim().slice(-4e3),
+        next_actions: [
+          "daoyan init --mode=local --torch-index <\u955C\u50CF> ...",
+          "\u5347\u7EA7 NVIDIA \u9A71\u52A8\u540E\u91CD\u8BD5",
+          "daoyan init --mode=local --torch-cpu ..."
+        ]
+      }
+    });
+  }
+}
+function smokeFailureError(plan, smoke, opts) {
+  return new DaoyanCliError({
+    code: "provision_failed",
+    message: `torch \u5B89\u88C5\u540E\u81EA\u68C0\u5931\u8D25\uFF1A${smoke.error ?? "\u672A\u77E5\u9519\u8BEF"}`,
+    hint: "\u6309 details \u5224\u65AD\u662F\u9A71\u52A8/CUDA \u4E0D\u5339\u914D\u8FD8\u662F custom node \u8986\u76D6\u4E86 torch\uFF1B\u4E0D\u8981\u624B\u5DE5\u731C\u7248\u672C",
+    details: {
+      stage: opts.stage,
+      driver: plan.gpu?.driver ?? null,
+      cuda_max: plan.gpu?.cudaMax ?? null,
+      compute_cap: plan.gpu?.computeCap ?? null,
+      python: plan.python.version,
+      platform: plan.platform,
+      torch_tag: plan.tag,
+      torch: smoke.torch,
+      torch_cuda: smoke.torchCuda,
+      torchvision: smoke.torchvision,
+      available: smoke.available,
+      error_class: smoke.errorClass,
+      attempted_tags: opts.attemptedTags,
+      offending_nodes: opts.offendingNodes ?? [],
+      next_actions: [
+        "daoyan init --mode=local --torch-cuda cu124 ...",
+        "daoyan init --mode=local --torch-index <\u955C\u50CF> ...",
+        "\u5347\u7EA7 NVIDIA \u9A71\u52A8\u540E\u91CD\u8BD5",
+        "daoyan init --mode=local --torch-cpu ..."
+      ]
+    }
+  });
+}
+async function installTorchAndVerify(opts) {
+  if (opts.plan.backend === "cpu" && opts.plan.cpuSource !== "forced") {
+    opts.log("\u672A\u68C0\u6D4B\u5230 NVIDIA GPU\uFF1A\u8DF3\u8FC7 torch \u9884\u5B89\u88C5\uFF0C\u7531 requirements \u5B89\u88C5\u5E73\u53F0\u9ED8\u8BA4\u7248\u672C");
+    return { plan: opts.plan, smoke: null };
+  }
+  if (opts.plan.backend === "cpu") {
+    await installTorch({ ...opts, forceReinstall: false });
+    const smoke = await runSmokeTest(opts.venvDir, "cpu");
+    if (!smoke.ok) throw smokeFailureError(opts.plan, smoke, { stage: "smoke", attemptedTags: [] });
+    return { plan: opts.plan, smoke };
+  }
+  for (let i = 0; i < opts.plan.candidates.length; i++) {
+    const tag = opts.plan.candidates[i];
+    const plan = torchPlanForTag(opts.plan, tag);
+    await installTorch({ ...opts, plan, forceReinstall: i > 0 });
+    const smoke = await runSmokeTest(opts.venvDir, "cuda");
+    if (smoke.ok) return { plan, smoke };
+    const retryable = smoke.errorClass === "driver" || smoke.errorClass === "kernel" || smoke.errorClass === "device_function";
+    if (!retryable || i === opts.plan.candidates.length - 1) {
+      throw smokeFailureError(plan, smoke, {
+        stage: "smoke",
+        attemptedTags: opts.plan.candidates.slice(0, i + 1)
+      });
+    }
+    opts.log(`CUDA \u81EA\u68C0\u5931\u8D25\uFF08${smoke.errorClass}\uFF09\uFF0C\u6539\u7528\u66F4\u4F4E tag ${opts.plan.candidates[i + 1]} \u91CD\u8BD5\u4E00\u6B21 ...`);
+  }
+  throw smokeFailureError(
+    opts.plan,
+    {
+      ok: false,
+      torch: null,
+      torchvision: null,
+      torchCuda: null,
+      available: null,
+      device: null,
+      error: "\u6CA1\u6709\u53EF\u7528\u7684 CUDA \u5019\u9009 tag",
+      errorClass: "unknown"
+    },
+    { stage: "smoke", attemptedTags: opts.plan.candidates }
+  );
+}
+function offendingNodes(nodes, comfyDir, installedTorch) {
+  if (installedTorch === null) return [];
+  const installedBase = installedTorch.split("+")[0] ?? installedTorch;
+  const out = [];
+  for (const node of nodes) {
+    const req = join5(comfyDir, "custom_nodes", node.name, "requirements.txt");
+    if (!existsSync7(req)) continue;
+    const conflicts = torchPinsInFile(req).some(
+      (p) => p.package === "torch" && (p.version.split("+")[0] ?? p.version) !== installedBase
+    );
+    if (conflicts) out.push(node.name);
+  }
+  return out;
+}
+function logToolchainPlan(plan, log) {
+  if (plan.backend === "cuda") {
+    log(
+      `\u5DE5\u5177\u94FE\uFF1A\u9A71\u52A8 ${plan.gpu?.driver ?? "unknown"}\uFF0CCUDA \u2264 ${plan.gpu?.cudaMax ?? "unknown"}\uFF0Ccompute ${plan.gpu?.computeCap ?? "unknown"}${plan.tag !== null ? ` \u2192 ${plan.tag}` : ""}`
+    );
+    return;
+  }
+  const reason = plan.cpuSource === "forced" ? "\u663E\u5F0F --torch-cpu" : plan.cpuSource === "platform" ? "\u975E Linux \u5E73\u53F0" : "\u672A\u68C0\u6D4B\u5230 NVIDIA GPU";
+  log(`\u5DE5\u5177\u94FE\uFF1ACPU \u6A21\u5F0F\uFF08${reason}\uFF09`);
+}
+function summarizeToolchain(marker, reused) {
+  return {
+    python: marker.python,
+    platform: marker.platform,
+    driver: marker.driver,
+    cuda_max: marker.cuda_max,
+    compute_cap: marker.compute_cap,
+    torch_backend: marker.torch_backend,
+    torch_tag: marker.torch_tag,
+    torch: marker.torch,
+    torchvision: marker.torchvision,
+    reused
+  };
+}
+async function provisionEngine(opts) {
+  const venvDir = join5(opts.baseDir, ".venv");
+  const comfyDir = join5(opts.baseDir, "ComfyUI");
+  await cloneRepo(opts.root, COMFY_REPO, comfyDir, opts.version, opts.log);
+  let switched = false;
+  if (existsSync7(join5(comfyDir, ".git"))) {
+    switched = await checkoutComfyVersion(comfyDir, opts.version, opts.log);
+  } else if (!existsSync7(join5(comfyDir, "main.py"))) {
+    throw new DaoyanCliError({
+      code: "provision_failed",
+      message: `ComfyUI \u76EE\u5F55\u65E0\u6548\uFF1A${comfyDir}\uFF08\u7F3A\u5C11 main.py\uFF09`
+    });
+  } else {
+    opts.log("ComfyUI \u76EE\u5F55\u4E0D\u662F git \u68C0\u51FA\uFF0C\u8DF3\u8FC7\u7248\u672C\u5207\u6362\uFF08\u53EF\u7528 engine use \u6307\u5411\u5176\u4ED6\u76EE\u5F55\uFF09");
+  }
+  const reqFile = join5(comfyDir, "requirements.txt");
+  if (!existsSync7(reqFile)) {
+    throw new DaoyanCliError({ code: "provision_failed", message: `\u7F3A\u5C11 ${reqFile}\uFF08clone \u672A\u5B8C\u6210\uFF1F\uFF09` });
+  }
+  const requirementsSha = sha256File(reqFile);
+  const nodes = opts.project.comfyui?.custom_nodes ?? [];
+  const nodesSha = customNodesHash(nodes, comfyDir);
+  const options = resolveToolchainOptions(opts.toolchain);
+  const healthy = await venvReady(venvDir);
+  let python;
+  if (healthy) {
+    const info = await venvPythonInfo(venvDir);
+    if (info === null) {
+      throw new DaoyanCliError({ code: "provision_failed", message: `\u65E0\u6CD5\u8BFB\u53D6 venv Python\uFF1A${venvDir}` });
+    }
+    python = info;
+    opts.log(`\u590D\u7528\u5DF2\u6709 venv\uFF1A${venvDir}\uFF08Python ${python.version}\uFF09`);
+  } else {
+    python = await createVenv(opts.root, venvDir, opts.log);
+  }
+  const context = await inspectTorchPlan({
+    python,
+    forceCpu: options.torchCpu,
+    forcedCuda: options.torchCuda,
+    indexRoot: options.torchIndex
+  });
+  logToolchainPlan(context, opts.log);
+  const existingMarker = readToolchainMarker(venvDir);
+  let mismatch = null;
+  if (switched) mismatch = "ComfyUI \u7248\u672C\u5DF2\u5207\u6362";
+  else if (!healthy) mismatch = "venv \u5DF2\u91CD\u5EFA";
+  else if (existingMarker === null) mismatch = "\u7F3A\u5C11\u5DE5\u5177\u94FE\u6807\u8BB0";
+  else {
+    mismatch = markerMismatchReason(existingMarker, {
+      python: python.version,
+      platform: context.platform,
+      comfyuiTag: opts.version,
+      requirementsSha256: requirementsSha,
+      customNodesSha256: nodesSha,
+      plan: context
+    });
+  }
+  if (mismatch === null && existingMarker !== null) {
+    const check = await runPipCheck(venvDir);
+    if (!check.ok) {
+      mismatch = `pip check \u5931\u8D25\uFF1A${check.output}`;
+    } else {
+      const smoke = await runSmokeTest(venvDir, context.backend);
+      if (!smoke.ok) {
+        mismatch = `\u81EA\u68C0\u5931\u8D25\uFF1A${smoke.error ?? "\u672A\u77E5\u9519\u8BEF"}`;
+      } else if (smoke.torch !== existingMarker.torch || smoke.torchvision !== existingMarker.torchvision) {
+        mismatch = `torch \u7248\u672C\u5DF2\u53D8\u5316\uFF08marker ${existingMarker.torch ?? "unknown"} \u2192 \u5B9E\u9645 ${smoke.torch ?? "unknown"}\uFF09`;
+      } else {
+        opts.log("\u5F15\u64CE\u5DF2\u5B89\u88C5\uFF08\u5DE5\u5177\u94FE\u6821\u9A8C\u901A\u8FC7\uFF09\uFF0C\u590D\u7528\u73B0\u6709\u76EE\u5F55");
+        return { installed: false, marker: existingMarker, summary: summarizeToolchain(existingMarker, true) };
+      }
+    }
+  }
+  if (mismatch !== null) opts.log(`\u91CD\u65B0\u5B89\u88C5\u4F9D\u8D56\uFF1A${mismatch}`);
+  const plan = await resolveTorchPlan({
+    python,
+    forceCpu: options.torchCpu,
+    forcedCuda: options.torchCuda,
+    indexRoot: options.torchIndex,
+    log: opts.log
+  });
+  if (plan.tag !== null && plan.tag !== context.tag) {
+    opts.log(`\u5DE5\u5177\u94FE\uFF1A\u9009\u62E9 ${plan.tag}\uFF08\u5019\u9009 ${plan.candidates.join(" / ")}\uFF09`);
+  }
+  rmSync4(join5(venvDir, TOOLCHAIN_MARKER_FILE), { force: true });
+  const torchResult = await installTorchAndVerify({
+    root: opts.root,
+    venvDir,
+    plan,
+    options,
+    log: opts.log
+  });
+  await assertRequirementsCompatible(reqFile, venvDir, torchResult.plan);
+  await pipInstall(opts.root, venvDir, options, opts.log, reqFile);
+  await installCustomNodes(opts.root, venvDir, nodes, options, opts.log, comfyDir);
+  const finalCheck = await runPipCheck(venvDir);
+  if (!finalCheck.ok) {
+    throw new DaoyanCliError({
+      code: "provision_failed",
+      message: "\u4F9D\u8D56\u4E00\u81F4\u6027\u68C0\u67E5\u5931\u8D25\uFF08pip check\uFF09",
+      hint: "\u6309 details.output \u4FEE\u590D\u51B2\u7A81\u7684\u5305\uFF1Bcustom node \u53EF\u80FD\u56FA\u5B9A\u4E86\u4E0D\u517C\u5BB9\u7248\u672C",
+      details: {
+        stage: "pip_check",
+        output: finalCheck.output,
+        custom_nodes: nodes.map((n) => n.name)
+      }
+    });
+  }
+  const finalSmoke = await runSmokeTest(venvDir, torchResult.plan.backend);
+  if (!finalSmoke.ok) {
+    const installedTorch = await pipShowVersion(venvDir, "torch");
+    throw smokeFailureError(torchResult.plan, finalSmoke, {
+      stage: "smoke_final",
+      attemptedTags: torchResult.plan.candidates,
+      offendingNodes: offendingNodes(nodes, comfyDir, installedTorch)
+    });
+  }
+  const finalNodesSha = customNodesHash(nodes, comfyDir);
+  const marker = buildToolchainMarker({
+    plan: torchResult.plan,
+    smoke: finalSmoke,
+    comfyuiTag: opts.version,
+    requirementsSha256: requirementsSha,
+    customNodesSha256: finalNodesSha
+  });
+  writeToolchainMarker(venvDir, marker);
+  return { installed: true, marker, summary: summarizeToolchain(marker, false) };
+}
+async function deployLocalEngine(opts) {
+  const result = await provisionEngine({
+    root: opts.root,
+    baseDir: join5(opts.root, "engine"),
+    version: opts.version,
+    project: opts.project,
+    ...opts.toolchain !== void 0 ? { toolchain: opts.toolchain } : {},
+    log: opts.log
+  });
+  return { installed: result.installed, version: opts.version, toolchain: result.summary };
 }
 async function installEngineAt(opts) {
-  const comfyDir = join4(opts.baseDir, "ComfyUI");
-  const venvDir = join4(opts.baseDir, ".venv");
-  await detectPython(opts.log);
-  await createVenv(opts.root, venvDir, opts.log);
-  await cloneRepo(opts.root, COMFY_REPO, comfyDir, opts.version, opts.log);
-  await pipInstall(opts.root, venvDir, opts.mirror, opts.log, join4(comfyDir, "requirements.txt"));
-  await installCustomNodes(
-    opts.root,
-    venvDir,
-    opts.project.comfyui?.custom_nodes ?? [],
-    opts.mirror,
-    opts.log,
-    comfyDir
-  );
-  return { comfyDir, venvDir };
+  const result = await provisionEngine({
+    root: opts.root,
+    baseDir: opts.baseDir,
+    version: opts.version,
+    project: opts.project,
+    ...opts.toolchain !== void 0 ? { toolchain: opts.toolchain } : {},
+    log: opts.log
+  });
+  return {
+    comfyDir: join5(opts.baseDir, "ComfyUI"),
+    venvDir: join5(opts.baseDir, ".venv"),
+    toolchain: result.summary
+  };
 }
 function writeExtraModelPaths(root, modelpath) {
   if (modelpath === void 0 || modelpath === "") return null;
@@ -3195,8 +4772,8 @@ function writeExtraModelPaths(root, modelpath) {
     "  vae: vae",
     ""
   ].join("\n");
-  const file = join4(root, EXTRA_MODELS_FILE);
-  ensureDir(join4(root, ".dycli"));
+  const file = join5(root, EXTRA_MODELS_FILE);
+  ensureDir(join5(root, ".dycli"));
   writeFileAtomically(file, yaml);
   return file;
 }
@@ -3209,7 +4786,7 @@ async function allocatePort(existing) {
   if (existing !== void 0 && existing > 0) return existing;
   return freePort("127.0.0.1");
 }
-var COMFY_REPO, COMFY_TAGS_API, MIN_PYTHON, DEFAULT_PIP_MIRROR;
+var COMFY_REPO, COMFY_TAGS_API, MIN_PYTHON, VENV_TIMEOUT_MS, PIP_INSTALL_TIMEOUT_MS, PIP_RETRIES, PIP_TIMEOUT_SECONDS;
 var init_init_flow = __esm({
   "src/core/provision/init-flow.mts"() {
     "use strict";
@@ -3218,10 +4795,16 @@ var init_init_flow = __esm({
     init_fs();
     init_net();
     init_types();
+    init_options();
+    init_toolchain();
+    init_options();
     COMFY_REPO = "https://github.com/comfyanonymous/ComfyUI.git";
     COMFY_TAGS_API = "https://api.github.com/repos/comfyanonymous/ComfyUI/tags";
     MIN_PYTHON = "3.10";
-    DEFAULT_PIP_MIRROR = "https://mirrors.aliyun.com/pypi/simple/";
+    VENV_TIMEOUT_MS = 18e4;
+    PIP_INSTALL_TIMEOUT_MS = 36e5;
+    PIP_RETRIES = "5";
+    PIP_TIMEOUT_SECONDS = "60";
   }
 });
 
@@ -3247,27 +4830,27 @@ __export(store_exports, {
   taskSummary: () => taskSummary,
   updateTask: () => updateTask
 });
-import { existsSync as existsSync7, readdirSync as readdirSync2, rmSync as rmSync4 } from "fs";
-import { join as join5 } from "path";
+import { existsSync as existsSync8, readdirSync as readdirSync3, rmSync as rmSync5 } from "fs";
+import { join as join6 } from "path";
 function newTaskId(machineId) {
   return `t_${makeId(machineId)}`;
 }
 function taskDir(root, taskId) {
-  return join5(root, TASKS_DIR, taskId);
+  return join6(root, TASKS_DIR, taskId);
 }
 function taskFile(root, taskId) {
-  return join5(taskDir(root, taskId), TASK_FILE);
+  return join6(taskDir(root, taskId), TASK_FILE);
 }
 function createTask(root, record) {
   const dir = taskDir(root, record.task_id);
-  if (existsSync7(join5(dir, TASK_FILE))) {
+  if (existsSync8(join6(dir, TASK_FILE))) {
     throw new DaoyanCliError({
       code: "config_invalid",
       message: `task ${record.task_id} \u5DF2\u5B58\u5728\uFF08id \u51B2\u7A81\uFF0C\u8BF7\u91CD\u8BD5\uFF09`
     });
   }
   ensureDir(dir);
-  writeJsonAtomic(join5(dir, TASK_FILE), record);
+  writeJsonAtomic(join6(dir, TASK_FILE), record);
   return record;
 }
 function readTask(root, taskId) {
@@ -3304,10 +4887,10 @@ function nextActionsFor(taskId, status) {
   return [`logs --task ${taskId} --json`, `status --json`];
 }
 function listTasks(root) {
-  const dir = join5(root, TASKS_DIR);
-  if (!existsSync7(dir)) return [];
+  const dir = join6(root, TASKS_DIR);
+  if (!existsSync8(dir)) return [];
   const out = [];
-  for (const ent of readdirSync2(dir, { withFileTypes: true })) {
+  for (const ent of readdirSync3(dir, { withFileTypes: true })) {
     if (!ent.isDirectory()) continue;
     const rec = readTask(root, ent.name);
     if (rec !== null) out.push(rec);
@@ -3323,18 +4906,18 @@ function activeTasks(root) {
 }
 function requestCancel(root, taskId) {
   ensureDir(taskDir(root, taskId));
-  writeJsonAtomic(join5(taskDir(root, taskId), CANCEL_FILE), {
+  writeJsonAtomic(join6(taskDir(root, taskId), CANCEL_FILE), {
     requested_at: nowIso(),
     by_pid: process.pid
   });
 }
 function isCancelRequested(root, taskId) {
-  return existsSync7(join5(taskDir(root, taskId), CANCEL_FILE));
+  return existsSync8(join6(taskDir(root, taskId), CANCEL_FILE));
 }
 function clearCancelRequest(root, taskId) {
-  const file = join5(taskDir(root, taskId), CANCEL_FILE);
-  if (existsSync7(file)) {
-    rmSync4(file, { force: true });
+  const file = join6(taskDir(root, taskId), CANCEL_FILE);
+  if (existsSync8(file)) {
+    rmSync5(file, { force: true });
   }
 }
 function appendTaskRun(root, taskId, runId) {
@@ -3553,8 +5136,8 @@ var init_client = __esm({
 });
 
 // src/core/workflow/catalog.mts
-import { existsSync as existsSync8, rmSync as rmSync5 } from "fs";
-import { join as join6 } from "path";
+import { existsSync as existsSync9, rmSync as rmSync6 } from "fs";
+import { join as join7 } from "path";
 function extractNodeDef(raw, classType) {
   const nodeRaw = raw[classType];
   if (typeof nodeRaw !== "object" || nodeRaw === null || Array.isArray(nodeRaw)) return null;
@@ -3636,8 +5219,8 @@ function comfyVersionOf(stats) {
   return null;
 }
 function readCatalog(root) {
-  const file = join6(root, CATALOG_FILE);
-  if (!existsSync8(file)) return null;
+  const file = join7(root, CATALOG_FILE);
+  if (!existsSync9(file)) return null;
   const cat = readJsonIfExists(file);
   if (cat === null || typeof cat !== "object" || typeof cat.raw !== "object" || cat.raw === null) {
     throw new DaoyanCliError({
@@ -3648,7 +5231,7 @@ function readCatalog(root) {
   return cat;
 }
 function writeCatalog(root, catalog) {
-  writeJsonAtomic(join6(root, CATALOG_FILE), catalog);
+  writeJsonAtomic(join7(root, CATALOG_FILE), catalog);
 }
 function catalogSize(catalog) {
   return Object.keys(catalog.raw).length;
@@ -3805,11 +5388,11 @@ var init_detect = __esm({
 });
 
 // src/core/gpu/lease.mts
-import { chmodSync as chmodSync2, existsSync as existsSync9, rmSync as rmSync6 } from "fs";
+import { chmodSync as chmodSync2, existsSync as existsSync10, rmSync as rmSync7 } from "fs";
 import { homedir as homedir2 } from "os";
-import { dirname as dirname5, join as join7 } from "path";
+import { dirname as dirname5, join as join8 } from "path";
 function leasePath() {
-  return join7(homedir2(), ".dycli", "gpu", "lease.json");
+  return join8(homedir2(), ".dycli", "gpu", "lease.json");
 }
 function isLease(v) {
   if (typeof v !== "object" || v === null) return false;
@@ -3817,7 +5400,7 @@ function isLease(v) {
   return o.version === 1 && typeof o.task_id === "string" && typeof o.project === "string" && typeof o.created_at === "string" && Array.isArray(o.entries);
 }
 function inspectLease(path = leasePath()) {
-  if (!existsSync9(path)) return { status: "absent", path };
+  if (!existsSync10(path)) return { status: "absent", path };
   try {
     const raw = readJsonIfExists(path);
     if (raw === null) return { status: "absent", path };
@@ -3839,8 +5422,8 @@ function newLease(taskId, project) {
   return { version: 1, task_id: taskId, project, created_at: nowIso(), entries: [] };
 }
 function clearLease(path = leasePath()) {
-  if (existsSync9(path)) {
-    rmSync6(path, { force: true });
+  if (existsSync10(path)) {
+    rmSync7(path, { force: true });
   }
 }
 var init_lease = __esm({
@@ -3900,7 +5483,7 @@ var init_targets = __esm({
 });
 
 // src/core/gpu/cri.mts
-import { existsSync as existsSync10 } from "fs";
+import { existsSync as existsSync11 } from "fs";
 async function crictlAvailable() {
   if (crictlChecked !== null) return crictlChecked;
   const r = await tryExecCapture("crictl", ["--version"], { timeoutMs: 5e3 });
@@ -3911,7 +5494,7 @@ function crictlArgs(endpoint, args) {
   return endpoint !== void 0 ? ["--runtime-endpoint", endpoint, ...args] : args;
 }
 function availableCriEndpoints() {
-  return CRI_ENDPOINTS.filter((ep) => existsSync10(ep.replace(/^unix:\/\//, "")));
+  return CRI_ENDPOINTS.filter((ep) => existsSync11(ep.replace(/^unix:\/\//, "")));
 }
 function crictlEndpointCandidates(recorded) {
   const out = recorded !== void 0 ? [recorded, void 0] : [void 0];
@@ -3921,7 +5504,7 @@ function crictlEndpointCandidates(recorded) {
   return out;
 }
 function availableContainerdSockets() {
-  return CONTAINERD_SOCKETS.filter((p) => existsSync10(p));
+  return CONTAINERD_SOCKETS.filter((p) => existsSync11(p));
 }
 function isEndpointError(stderr) {
   return /connect|connection|no such file|refused|socket|failed to connect|code = Unavailable/i.test(stderr);
@@ -3954,7 +5537,7 @@ var init_cri = __esm({
 });
 
 // src/core/gpu/containers.mts
-import { readFileSync as readFileSync7 } from "fs";
+import { readFileSync as readFileSync8 } from "fs";
 function containerIdFromCgroup(cgroup) {
   const kubernetes = /kubepods(?:[\/.]|$)/i.test(cgroup);
   const patterns = [
@@ -3984,7 +5567,7 @@ function containerIdFromCgroup(cgroup) {
 function readContainerInfo(pid) {
   if (process.platform !== "linux") return null;
   try {
-    return containerIdFromCgroup(readFileSync7(`/proc/${pid}/cgroup`, "utf8"));
+    return containerIdFromCgroup(readFileSync8(`/proc/${pid}/cgroup`, "utf8"));
   } catch {
     return null;
   }
@@ -4002,14 +5585,14 @@ function commandArray(v) {
 }
 function readProcessCmdline(pid) {
   try {
-    return readFileSync7(`/proc/${pid}/cmdline`, "utf8").split("\0").filter((x) => x !== "");
+    return readFileSync8(`/proc/${pid}/cmdline`, "utf8").split("\0").filter((x) => x !== "");
   } catch {
     return [];
   }
 }
 function readParentPid(pid) {
   try {
-    const stat = readFileSync7(`/proc/${pid}/stat`, "utf8");
+    const stat = readFileSync8(`/proc/${pid}/stat`, "utf8");
     const close = stat.lastIndexOf(")");
     if (close < 0) return null;
     const rest = stat.slice(close + 2).split(/\s+/);
@@ -4962,7 +6545,7 @@ var init_vllm = __esm({
 });
 
 // src/core/gpu/providers/process.mts
-import { readFileSync as readFileSync8, readlinkSync } from "fs";
+import { readFileSync as readFileSync9, readlinkSync } from "fs";
 import { spawn as spawn3 } from "child_process";
 async function listProcesses() {
   const r = await tryExecCapture("ps", ["-eo", "pid=,uid=,comm=,args="], { timeoutMs: 1e4 });
@@ -4996,7 +6579,7 @@ async function ancestorPids() {
 function cmdlineOf(info) {
   if (process.platform === "linux") {
     try {
-      const parts = readFileSync8(`/proc/${info.pid}/cmdline`, "utf8").split("\0").filter((x) => x !== "");
+      const parts = readFileSync9(`/proc/${info.pid}/cmdline`, "utf8").split("\0").filter((x) => x !== "");
       if (parts.length > 0) return parts;
     } catch {
     }
@@ -5370,25 +6953,25 @@ __export(local_session_exports, {
 });
 import {
   closeSync,
-  existsSync as existsSync11,
+  existsSync as existsSync12,
   openSync,
-  readFileSync as readFileSync9,
+  readFileSync as readFileSync10,
   readSync,
-  rmSync as rmSync7,
+  rmSync as rmSync8,
   statSync as statSync2,
   unlinkSync,
   writeFileSync as writeFileSync4
 } from "fs";
 import { spawn as spawn4 } from "child_process";
-import { join as join8 } from "path";
+import { join as join9 } from "path";
 function enginePidFile(root) {
-  return join8(root, LOG_DIR, ENGINE_PID_FILE);
+  return join9(root, LOG_DIR, ENGINE_PID_FILE);
 }
 function readEnginePid(root) {
   const file = enginePidFile(root);
-  if (!existsSync11(file)) return null;
+  if (!existsSync12(file)) return null;
   try {
-    const text = readFileSync9(file, "utf8").trim();
+    const text = readFileSync10(file, "utf8").trim();
     if (/^\d+$/.test(text)) {
       return { pid: Number(text), port: 0, comfyui_dir: "", task_id: "", started_at: "" };
     }
@@ -5399,7 +6982,7 @@ function readEnginePid(root) {
   }
 }
 function writeEnginePid(root, rec) {
-  ensureDir(join8(root, LOG_DIR));
+  ensureDir(join9(root, LOG_DIR));
   writeFileSync4(enginePidFile(root), JSON.stringify(rec, null, 2) + "\n", { mode: 384 });
 }
 function pidAlive(pid) {
@@ -5460,7 +7043,7 @@ async function stopResidualEngine(root, log) {
   }
   if (!await verifyOwnEngine(rec)) {
     log(`PID ${rec.pid} \u4E0D\u5C5E\u4E8E\u672C\u9879\u76EE ComfyUI\uFF1B\u5220\u9664\u8FC7\u671F PID \u6587\u4EF6\uFF0C\u4E0D kill`);
-    rmSync7(enginePidFile(root), { force: true });
+    rmSync8(enginePidFile(root), { force: true });
     return;
   }
   if (rec.port > 0) {
@@ -5470,10 +7053,10 @@ async function stopResidualEngine(root, log) {
     }
   }
   await stopPid(rec.pid, log);
-  rmSync7(enginePidFile(root), { force: true });
+  rmSync8(enginePidFile(root), { force: true });
 }
 function tailFile(file, lines) {
-  if (!existsSync11(file)) return "(\u6587\u4EF6\u4E0D\u5B58\u5728)";
+  if (!existsSync12(file)) return "(\u6587\u4EF6\u4E0D\u5B58\u5728)";
   let size = 0;
   try {
     size = statSync2(file).size;
@@ -5584,14 +7167,14 @@ var init_local_session = __esm({
         }
         const started = Date.now();
         const comfyDir = this.comfyDir();
-        const venvPython = join8(this.venvDir(), "bin", "python");
-        if (!existsSync11(venvPython)) {
+        const venvPython = join9(this.venvDir(), "bin", "python");
+        if (!existsSync12(venvPython)) {
           throw new DaoyanCliError({
             code: "engine_start_failed",
             message: `venv \u4E0D\u5B58\u5728\uFF1A${venvPython}\u3002\u8FD0\u884C daoyan init --mode=local \u90E8\u7F72\u5F15\u64CE`
           });
         }
-        if (!existsSync11(join8(comfyDir, "main.py"))) {
+        if (!existsSync12(join9(comfyDir, "main.py"))) {
           throw new DaoyanCliError({
             code: "engine_start_failed",
             message: `ComfyUI \u76EE\u5F55\u65E0\u6548\uFF1A${comfyDir}\uFF08\u7F3A\u5C11 main.py\uFF09\u3002\u8FD0\u884C daoyan init --mode=local`
@@ -5603,9 +7186,9 @@ var init_local_session = __esm({
             message: `\u7AEF\u53E3 ${eng.port} \u5DF2\u88AB\u5176\u4ED6\u8FDB\u7A0B\u5360\u7528\uFF08\u4E0D\u662F\u672C\u9879\u76EE\u521A\u56DE\u6536\u7684\u5F15\u64CE\uFF09\uFF1B\u8BF7\u91CA\u653E\u7AEF\u53E3\u6216\u4FEE\u6539 machine.json`
           });
         }
-        const logDir = join8(this.opts.root, LOG_DIR);
+        const logDir = join9(this.opts.root, LOG_DIR);
         ensureDir(logDir);
-        const logFile = join8(logDir, `engine-${this.opts.taskId}.log`);
+        const logFile = join9(logDir, `engine-${this.opts.taskId}.log`);
         const fd = openSync(logFile, "a");
         const modelsConfig = this.modelsConfigPath();
         const args = ["-u", "main.py", "--port", String(eng.port)];
@@ -5722,7 +7305,7 @@ ${tailFile(logFile, 8)}`
         if (pid !== null) {
           const stopped = await stopPid(pid, log);
           cleanup.stop = stopped ? "ok" : "failed";
-          if (stopped) rmSync7(enginePidFile(this.opts.root), { force: true });
+          if (stopped) rmSync8(enginePidFile(this.opts.root), { force: true });
           else errors.push({ code: "engine_stop_failed", message: `\u5F15\u64CE\u8FDB\u7A0B pid=${pid} \u672A\u80FD\u9000\u51FA` });
         }
         if (inputs.uploaded.length > 0 || inputs.scratch_outputs.length > 0) {
@@ -5759,9 +7342,9 @@ ${tailFile(logFile, 8)}`
       comfyDir() {
         const configured = this.opts.machine.engine.mode === "local" ? this.opts.machine.engine.comfyui_dir : void 0;
         if (configured !== void 0 && configured !== "") {
-          return configured.startsWith("/") ? configured : join8(this.opts.root, configured);
+          return configured.startsWith("/") ? configured : join9(this.opts.root, configured);
         }
-        return join8(this.opts.root, "engine", "ComfyUI");
+        return join9(this.opts.root, "engine", "ComfyUI");
       }
       /**
        * venv 目录：machine.json 显式路径优先，否则约定 engine/.venv。
@@ -5769,9 +7352,9 @@ ${tailFile(logFile, 8)}`
       venvDir() {
         const configured = this.opts.machine.engine.mode === "local" ? this.opts.machine.engine.venv_dir : void 0;
         if (configured !== void 0 && configured !== "") {
-          return configured.startsWith("/") ? configured : join8(this.opts.root, configured);
+          return configured.startsWith("/") ? configured : join9(this.opts.root, configured);
         }
-        return join8(this.opts.root, "engine", ".venv");
+        return join9(this.opts.root, "engine", ".venv");
       }
       /**
        * extra_model_paths 配置路径（machine.models_config 优先）。
@@ -5780,8 +7363,8 @@ ${tailFile(logFile, 8)}`
         if (this.opts.machine.engine.mode !== "local") return null;
         const explicit = this.opts.machine.engine.models_config;
         if (explicit !== void 0 && explicit !== null && explicit !== "") return explicit;
-        const auto = join8(this.opts.root, EXTRA_MODELS_FILE);
-        return existsSync11(auto) ? auto : null;
+        const auto = join9(this.opts.root, EXTRA_MODELS_FILE);
+        return existsSync12(auto) ? auto : null;
       }
       /**
        * 清理本次 run 的 scratch 文件（local 拥有引擎文件系统）。
@@ -5791,10 +7374,10 @@ ${tailFile(logFile, 8)}`
         try {
           const comfyDir = this.comfyDir();
           for (const name of inputs.uploaded) {
-            rmSync7(join8(comfyDir, "input", name), { force: true });
+            rmSync8(join9(comfyDir, "input", name), { force: true });
           }
           for (const out of inputs.scratch_outputs) {
-            rmSync7(join8(comfyDir, "output", out.subfolder, out.filename), { force: true });
+            rmSync8(join9(comfyDir, "output", out.subfolder, out.filename), { force: true });
           }
           return "ok";
         } catch {
@@ -5806,11 +7389,11 @@ ${tailFile(logFile, 8)}`
 });
 
 // src/core/machine/lock.mts
-import { closeSync as closeSync2, existsSync as existsSync12, openSync as openSync2, readFileSync as readFileSync10, rmSync as rmSync8, unlinkSync as unlinkSync2, writeFileSync as writeFileSync5 } from "fs";
+import { closeSync as closeSync2, existsSync as existsSync13, openSync as openSync2, readFileSync as readFileSync11, rmSync as rmSync9, unlinkSync as unlinkSync2, writeFileSync as writeFileSync5 } from "fs";
 import { homedir as homedir3 } from "os";
-import { dirname as dirname6, join as join9 } from "path";
+import { dirname as dirname6, join as join10 } from "path";
 function machineLockPath() {
-  return join9(homedir3(), ".dycli", "machine.lock");
+  return join10(homedir3(), ".dycli", "machine.lock");
 }
 function pidAlive2(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
@@ -5822,10 +7405,10 @@ function pidAlive2(pid) {
   }
 }
 function inspectMachineLock(path = machineLockPath()) {
-  if (!existsSync12(path)) return { status: "absent", path };
+  if (!existsSync13(path)) return { status: "absent", path };
   let raw;
   try {
-    raw = JSON.parse(readFileSync10(path, "utf8"));
+    raw = JSON.parse(readFileSync11(path, "utf8"));
   } catch (e) {
     return {
       status: "corrupt",
@@ -5941,7 +7524,7 @@ function attachMachineLock(opts) {
 }
 async function recoverStaleLock(record, path = machineLockPath()) {
   try {
-    if (record.kind === "generation" && existsSync12(join9(record.project, "project.json"))) {
+    if (record.kind === "generation" && existsSync13(join10(record.project, "project.json"))) {
       const store = await Promise.resolve().then(() => (init_store(), store_exports));
       const task = store.readTask(record.project, record.task_id);
       if (task !== null && (task.status === "queued" || task.status === "running")) {
@@ -5959,7 +7542,7 @@ async function recoverStaleLock(record, path = machineLockPath()) {
   } catch {
   }
   try {
-    if (record.mode === "local" && existsSync12(join9(record.project, "project.json"))) {
+    if (record.mode === "local" && existsSync13(join10(record.project, "project.json"))) {
       const local = await Promise.resolve().then(() => (init_local_session(), local_session_exports));
       await local.stopResidualEngine(record.project, () => {
       });
@@ -5972,7 +7555,7 @@ async function recoverStaleLock(record, path = machineLockPath()) {
     });
   } catch {
   }
-  rmSync8(path, { force: true });
+  rmSync9(path, { force: true });
 }
 function handleFor(path, initial) {
   let record = initial;
@@ -6013,10 +7596,10 @@ var init_lock = __esm({
 });
 
 // src/commands/init.mts
-import { basename as basename2, isAbsolute as isAbsolute3, join as join10, resolve as resolve3 } from "path";
-import { existsSync as existsSync13, statSync as statSync3 } from "fs";
+import { basename as basename2, isAbsolute as isAbsolute3, join as join11, resolve as resolve3 } from "path";
+import { existsSync as existsSync14, statSync as statSync3 } from "fs";
 function parseArgs(args) {
-  const flags = { noSkill: false };
+  const flags = { noSkill: false, toolchain: {} };
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a === void 0) break;
@@ -6052,10 +7635,9 @@ function parseArgs(args) {
       i += skip;
       continue;
     }
-    if (name === "--mirror") {
-      const { value, skip } = takeValue(args, i, inline, "--mirror");
-      flags.mirror = value;
-      i += skip;
+    const toolchainFlag = applyToolchainFlag(flags.toolchain, name, args, i, inline);
+    if (toolchainFlag.handled) {
+      i += toolchainFlag.skip;
       continue;
     }
     if (name.startsWith("-")) usageError(`\u672A\u77E5\u53C2\u6570 ${name}`);
@@ -6066,17 +7648,20 @@ function parseArgs(args) {
   }
   if (flags.mode === "local") {
     if (flags.url !== void 0) usageError("local \u6A21\u5F0F\u4E0D\u63A5\u53D7 --url\uFF08\u8FDC\u7AEF\u8FDE\u63A5\u8BF7\u7528 --mode=remote\uFF09");
+    resolveToolchainOptions(flags.toolchain);
   } else {
     if (flags.url === void 0 || flags.url === "") usageError("remote \u6A21\u5F0F\u5FC5\u987B\u63D0\u4F9B --url <http(s)://...>");
     if (flags.modelpath !== void 0) usageError("remote \u6A21\u5F0F\u4E0D\u63A5\u53D7 --modelpath\uFF08\u6A21\u578B\u7531\u8FDC\u7AEF\u7BA1\u7406\uFF09");
     if (flags.version !== void 0) usageError("remote \u6A21\u5F0F\u4E0D\u63A5\u53D7 --version\uFF08\u8FDC\u7AEF\u5F15\u64CE\u7248\u672C\u7531\u5916\u90E8\u7BA1\u7406\uFF09");
-    if (flags.mirror !== void 0) usageError("remote \u6A21\u5F0F\u4E0D\u63A5\u53D7 --mirror\uFF08\u4E0D\u90E8\u7F72\u5F15\u64CE\uFF09");
+    if (hasToolchainOptions(flags.toolchain)) {
+      usageError("remote \u6A21\u5F0F\u4E0D\u63A5\u53D7\u4F9D\u8D56\u5B89\u88C5\u53C2\u6570\uFF08\u4E0D\u90E8\u7F72\u5F15\u64CE\uFF09");
+    }
   }
   return flags;
 }
 function resolveModelPath(raw) {
   const abs = isAbsolute3(raw) ? raw : resolve3(process.cwd(), raw);
-  if (!existsSync13(abs) || !statSync3(abs).isDirectory()) {
+  if (!existsSync14(abs) || !statSync3(abs).isDirectory()) {
     throw new DaoyanCliError({
       code: "config_invalid",
       message: `--modelpath \u5FC5\u987B\u662F\u5DF2\u5B58\u5728\u7684\u76EE\u5F55\uFF08\u6536\u5230 ${raw}\uFF09`
@@ -6113,6 +7698,7 @@ async function runInit(ctx2, args) {
   let installed = false;
   let comfyVersion = null;
   let port = null;
+  let toolchain = null;
   try {
     if (flags.mode === "local") {
       lock = await acquireMachineLock({
@@ -6134,7 +7720,7 @@ async function runInit(ctx2, args) {
         writeJsonAtomic2(resolve3(root, "project.json"), project);
       }
       const prevComfyAbs = prevLocal?.comfyui_dir !== void 0 ? isAbsolute3(prevLocal.comfyui_dir) ? prevLocal.comfyui_dir : resolve3(root, prevLocal.comfyui_dir) : null;
-      const reuseCustomEngine = flags.version === void 0 && prevLocal?.comfyui_dir !== void 0 && prevLocal.comfyui_dir !== "engine/ComfyUI" && prevComfyAbs !== null && existsSync13(join10(prevComfyAbs, "main.py"));
+      const reuseCustomEngine = flags.version === void 0 && prevLocal?.comfyui_dir !== void 0 && prevLocal.comfyui_dir !== "engine/ComfyUI" && prevComfyAbs !== null && existsSync14(join11(prevComfyAbs, "main.py"));
       if (reuseCustomEngine) {
         say(`\u590D\u7528 engine use \u9009\u5B9A\u7684\u5F15\u64CE\u76EE\u5F55\uFF1A${prevLocal?.comfyui_dir}`);
         comfyVersion = prevLocal?.comfyui_version ?? version;
@@ -6144,11 +7730,12 @@ async function runInit(ctx2, args) {
           root,
           project,
           version,
-          ...flags.mirror !== void 0 ? { mirror: flags.mirror } : {},
+          toolchain: flags.toolchain,
           log: say
         });
         installed = deployed.installed;
         comfyVersion = version;
+        toolchain = deployed.toolchain;
       }
       port = await allocatePort(prevLocal?.port);
       const modelsConfig = writeExtraModelPaths(root, modelpath);
@@ -6200,6 +7787,7 @@ async function runInit(ctx2, args) {
     project_created: projectCreated,
     engine_installed: installed,
     comfyui_version: comfyVersion,
+    toolchain,
     port,
     url: flags.mode === "remote" ? flags.url ?? null : null,
     modelpath: flags.mode === "local" ? flags.modelpath ?? null : null,
@@ -6231,6 +7819,7 @@ var init_init = __esm({
     init_fs();
     init_config();
     init_init_flow();
+    init_options();
     init_lock();
     init_version();
     init_skill();
@@ -6370,18 +7959,18 @@ var init_graph = __esm({
 });
 
 // src/core/workflow/load.mts
-import { existsSync as existsSync14, readFileSync as readFileSync11 } from "fs";
-import { dirname as dirname7, join as join11 } from "path";
+import { existsSync as existsSync15, readFileSync as readFileSync12 } from "fs";
+import { dirname as dirname7, join as join12 } from "path";
 function workflowError(message, details) {
   throw new DaoyanCliError({ code: "workflow_invalid", message, details });
 }
 function loadGraphFile(abs, rel) {
-  if (!existsSync14(abs)) {
+  if (!existsSync15(abs)) {
     workflowError(`workflow \u6587\u4EF6\u4E0D\u5B58\u5728\uFF1A${rel}`, { path: rel });
   }
   let raw;
   try {
-    raw = JSON.parse(readFileSync11(abs, "utf8"));
+    raw = JSON.parse(readFileSync12(abs, "utf8"));
   } catch (e) {
     workflowError(`${rel} \u4E0D\u662F\u5408\u6CD5 JSON\uFF1A${e instanceof Error ? e.message : String(e)}`, { path: rel });
   }
@@ -6403,10 +7992,10 @@ function bindingsPathOf(workflowAbs) {
 }
 function loadBindings(workflowAbs) {
   const file = bindingsPathOf(workflowAbs);
-  if (!existsSync14(file)) return null;
+  if (!existsSync15(file)) return null;
   let raw;
   try {
-    raw = JSON.parse(readFileSync11(file, "utf8"));
+    raw = JSON.parse(readFileSync12(file, "utf8"));
   } catch (e) {
     throw new DaoyanCliError({
       code: "workflow_invalid",
@@ -6600,8 +8189,8 @@ var init_load = __esm({
 });
 
 // src/commands/validate.mts
-import { existsSync as existsSync15, readFileSync as readFileSync12, readdirSync as readdirSync3 } from "fs";
-import { isAbsolute as isAbsolute4, join as join12 } from "path";
+import { existsSync as existsSync16, readFileSync as readFileSync13, readdirSync as readdirSync4 } from "fs";
+import { isAbsolute as isAbsolute4, join as join13 } from "path";
 function fromGraphIssue(prefix, i) {
   return {
     path: `${prefix}:${i.path}`,
@@ -6612,8 +8201,8 @@ function fromGraphIssue(prefix, i) {
   };
 }
 function validateWorkflows(root, machine, issues) {
-  const dir = join12(root, WORKFLOWS_DIR);
-  if (!existsSync15(dir)) {
+  const dir = join13(root, WORKFLOWS_DIR);
+  if (!existsSync16(dir)) {
     issues.push({
       path: WORKFLOWS_DIR,
       code: "workflows_dir_missing",
@@ -6623,7 +8212,7 @@ function validateWorkflows(root, machine, issues) {
     });
     return;
   }
-  const files = readdirSync3(dir).filter((f) => f.endsWith(".json") && !f.endsWith(BINDINGS_SUFFIX));
+  const files = readdirSync4(dir).filter((f) => f.endsWith(".json") && !f.endsWith(BINDINGS_SUFFIX));
   if (files.length === 0) {
     issues.push({
       path: WORKFLOWS_DIR,
@@ -6636,10 +8225,10 @@ function validateWorkflows(root, machine, issues) {
   const catalog = readCatalog(root);
   for (const f of files) {
     const rel = `${WORKFLOWS_DIR}/${f}`;
-    const abs = join12(dir, f);
+    const abs = join13(dir, f);
     let raw;
     try {
-      raw = JSON.parse(readFileSync12(abs, "utf8"));
+      raw = JSON.parse(readFileSync13(abs, "utf8"));
     } catch (e) {
       issues.push({
         path: rel,
@@ -6787,7 +8376,7 @@ function validateShots(root, shots, issues) {
     const ref = s.workflow ?? shots.workflow ?? null;
     if (ref !== null) {
       const wf = resolveWorkflowRef(root, ref);
-      if (!existsSync15(wf.abs)) {
+      if (!existsSync16(wf.abs)) {
         issues.push({
           path: tag,
           code: "shot_workflow_missing",
@@ -6795,7 +8384,7 @@ function validateShots(root, shots, issues) {
           message: `workflow \u6587\u4EF6\u4E0D\u5B58\u5728\uFF1A${wf.rel}`,
           hint: "\u5148\u521B\u5EFA/\u5BFC\u5165\u8BE5 workflow\u3002"
         });
-      } else if (!existsSync15(bindingsPathOf(wf.abs))) {
+      } else if (!existsSync16(bindingsPathOf(wf.abs))) {
         issues.push({
           path: tag,
           code: "shot_bindings_missing",
@@ -6820,7 +8409,7 @@ function validateShots(root, shots, issues) {
           message: `\u951A\u70B9 key "${ff}" \u4E0D\u5728 meta.anchors`,
           hint: "\u5728 meta.anchors \u767B\u8BB0\u6216\u6539\u7528\u5B58\u5728\u7684 key\u3002"
         });
-      } else if (!existsSync15(join12(root, rel))) {
+      } else if (!existsSync16(join13(root, rel))) {
         issues.push({
           path: tag,
           code: "anchor_file_missing",
@@ -6884,8 +8473,8 @@ function validateMachine(root, machine, issues) {
     return;
   }
   if (machine.engine.mode !== "local") return;
-  const comfyDir = machine.engine.comfyui_dir !== void 0 ? isAbsolute4(machine.engine.comfyui_dir) ? machine.engine.comfyui_dir : join12(root, machine.engine.comfyui_dir) : join12(root, "engine", "ComfyUI");
-  if (!existsSync15(join12(comfyDir, "main.py"))) {
+  const comfyDir = machine.engine.comfyui_dir !== void 0 ? isAbsolute4(machine.engine.comfyui_dir) ? machine.engine.comfyui_dir : join13(root, machine.engine.comfyui_dir) : join13(root, "engine", "ComfyUI");
+  if (!existsSync16(join13(comfyDir, "main.py"))) {
     issues.push({
       path: ".dycli/machine.json",
       code: "engine_not_installed",
@@ -6894,7 +8483,7 @@ function validateMachine(root, machine, issues) {
       hint: "\u8FD0\u884C daoyan init --mode=local \u90E8\u7F72\u5F15\u64CE\u3002"
     });
   }
-  if (machine.engine.modelpath !== void 0 && !existsSync15(machine.engine.modelpath)) {
+  if (machine.engine.modelpath !== void 0 && !existsSync16(machine.engine.modelpath)) {
     issues.push({
       path: ".dycli/machine.json",
       code: "modelpath_missing",
@@ -6903,7 +8492,7 @@ function validateMachine(root, machine, issues) {
       hint: "\u91CD\u65B0 init --modelpath\uFF0C\u6216\u6302\u8F7D\u8BE5\u76EE\u5F55\u3002"
     });
   }
-  if (machine.engine.models_config !== null && machine.engine.models_config !== void 0 && !existsSync15(machine.engine.models_config)) {
+  if (machine.engine.models_config !== null && machine.engine.models_config !== void 0 && !existsSync16(machine.engine.models_config)) {
     issues.push({
       path: ".dycli/machine.json",
       code: "models_config_missing",
@@ -6920,7 +8509,7 @@ async function runValidate(ctx2) {
   const issues = [];
   if (project.default_workflow !== void 0) {
     const wf = resolveWorkflowRef(root, project.default_workflow);
-    if (!existsSync15(wf.abs)) {
+    if (!existsSync16(wf.abs)) {
       issues.push({
         path: "project.default_workflow",
         code: "default_workflow_missing",
@@ -7056,48 +8645,48 @@ var init_ffmpeg = __esm({
 });
 
 // src/core/run/store.mts
-import { copyFileSync, existsSync as existsSync16, readdirSync as readdirSync4, readFileSync as readFileSync13, renameSync as renameSync3, writeFileSync as writeFileSync6 } from "fs";
-import { basename as basename3, join as join13 } from "path";
+import { copyFileSync, existsSync as existsSync17, readdirSync as readdirSync5, readFileSync as readFileSync14, renameSync as renameSync3, writeFileSync as writeFileSync6 } from "fs";
+import { basename as basename3, join as join14 } from "path";
 function newRunId(machineId) {
   return makeId(machineId);
 }
 function runDir(root, runId) {
-  return join13(root, RUNS_DIR, runId);
+  return join14(root, RUNS_DIR, runId);
 }
 function createRunDir(root, runId) {
   const dir = runDir(root, runId);
-  ensureDir(join13(dir, INPUTS_DIR));
-  ensureDir(join13(dir, "outputs"));
+  ensureDir(join14(dir, INPUTS_DIR));
+  ensureDir(join14(dir, "outputs"));
   return dir;
 }
 function writeWorkflowSnapshot(root, runId, graph) {
-  writeJsonAtomic(join13(runDir(root, runId), RUN_WORKFLOW_FILE), graph);
+  writeJsonAtomic(join14(runDir(root, runId), RUN_WORKFLOW_FILE), graph);
 }
 function writeInputsSnapshot(root, runId, inputs, files) {
-  writeJsonAtomic(join13(runDir(root, runId), RUN_INPUTS_FILE), { inputs, files });
+  writeJsonAtomic(join14(runDir(root, runId), RUN_INPUTS_FILE), { inputs, files });
 }
 function copyRunInput(root, runId, source, desiredName) {
-  if (!existsSync16(source)) {
+  if (!existsSync17(source)) {
     throw new DaoyanCliError({ code: "config_invalid", message: `\u8F93\u5165\u6587\u4EF6\u4E0D\u5B58\u5728\uFF1A${source}` });
   }
   const name = basename3(desiredName ?? source).replace(/[^A-Za-z0-9._-]/g, "_");
-  const dir = join13(runDir(root, runId), INPUTS_DIR);
+  const dir = join14(runDir(root, runId), INPUTS_DIR);
   ensureDir(dir);
-  const dest = join13(dir, name);
+  const dest = join14(dir, name);
   copyFileSync(source, dest);
-  const bytes = new Uint8Array(readFileSync13(dest));
+  const bytes = new Uint8Array(readFileSync14(dest));
   return { name, sha256: sha256(bytes), bytes: bytes.byteLength };
 }
 function writeRunOutput(root, runId, filename, bytes) {
   const safe = basename3(filename).replace(/[^A-Za-z0-9._-]/g, "_") || "output.bin";
-  const dir = join13(runDir(root, runId), "outputs");
+  const dir = join14(runDir(root, runId), "outputs");
   ensureDir(dir);
   let name = safe;
-  for (let i = 1; existsSync16(join13(dir, name)); i++) {
+  for (let i = 1; existsSync17(join14(dir, name)); i++) {
     const dot = safe.lastIndexOf(".");
     name = dot > 0 ? `${safe.slice(0, dot)}_${i}${safe.slice(dot)}` : `${safe}_${i}`;
   }
-  writeFileAtomicBytes(join13(dir, name), bytes);
+  writeFileAtomicBytes(join14(dir, name), bytes);
   return { name, path: `outputs/${name}`, sha256: sha256(bytes), bytes: bytes.byteLength };
 }
 function writeFileAtomicBytes(file, bytes) {
@@ -7106,10 +8695,10 @@ function writeFileAtomicBytes(file, bytes) {
   renameSync3(tmp, file);
 }
 function writeRun(root, record) {
-  writeJsonAtomic(join13(runDir(root, record.run_id), RUN_FILE), record);
+  writeJsonAtomic(join14(runDir(root, record.run_id), RUN_FILE), record);
 }
 function readRun(root, runId) {
-  return readJsonIfExists(join13(root, RUNS_DIR, runId, RUN_FILE));
+  return readJsonIfExists(join14(root, RUNS_DIR, runId, RUN_FILE));
 }
 function requireRun(root, runId) {
   const rec = readRun(root, runId);
@@ -7119,10 +8708,10 @@ function requireRun(root, runId) {
   return rec;
 }
 function listRuns(root) {
-  const dir = join13(root, RUNS_DIR);
-  if (!existsSync16(dir)) return [];
+  const dir = join14(root, RUNS_DIR);
+  if (!existsSync17(dir)) return [];
   const out = [];
-  for (const ent of readdirSync4(dir, { withFileTypes: true })) {
+  for (const ent of readdirSync5(dir, { withFileTypes: true })) {
     if (!ent.isDirectory()) continue;
     const rec = readRun(root, ent.name);
     if (rec !== null) out.push(rec);
@@ -7137,7 +8726,7 @@ function latestRunByLabel(root, label) {
   return listRuns(root).filter((r) => r.label === label)[0] ?? null;
 }
 function runOutputAbs(root, record, output) {
-  return join13(runDir(root, record.run_id), output.path);
+  return join14(runDir(root, record.run_id), output.path);
 }
 var init_store2 = __esm({
   "src/core/run/store.mts"() {
@@ -7149,8 +8738,8 @@ var init_store2 = __esm({
 });
 
 // src/core/task/plans.mts
-import { existsSync as existsSync17, mkdirSync as mkdirSync3, statSync as statSync4 } from "fs";
-import { basename as basename4, join as join14 } from "path";
+import { existsSync as existsSync18, mkdirSync as mkdirSync3, statSync as statSync4 } from "fs";
+import { basename as basename4, join as join15 } from "path";
 function splitTarget(target) {
   const dot = target.indexOf(".");
   return { node: target.slice(0, dot), input: target.slice(dot + 1) };
@@ -7274,7 +8863,7 @@ function pickRelaySource(root, upstreamId) {
     });
   }
   const abs = runOutputAbs(root, rec, chosen);
-  if (!existsSync17(abs)) {
+  if (!existsSync18(abs)) {
     throw new DaoyanCliError({
       code: "relay_upstream_missing",
       message: `\u63A5\u529B\u4E0A\u6E38\u4EA7\u7269\u4E0D\u5728\u5DE5\u4F5C\u533A\uFF08\u53EF\u80FD\u672A git lfs pull\uFF09\uFF1A${rec.run_id}/${chosen.path}`,
@@ -7302,8 +8891,8 @@ function firstFrameUpload(opts) {
         message: `\u955C ${opts.shot.id} \u7684\u951A\u70B9 key "${ff}" \u4E0D\u5728 shots.json meta.anchors`
       });
     }
-    const src = join14(opts.root, rel);
-    if (!existsSync17(src)) {
+    const src = join15(opts.root, rel);
+    if (!existsSync18(src)) {
       throw new DaoyanCliError({
         code: "anchor_not_found",
         message: `\u951A\u70B9\u56FE\u7247\u4E0D\u5B58\u5728\uFF1A${rel}`,
@@ -7329,11 +8918,11 @@ function firstFrameUpload(opts) {
     });
   }
   const sourceClip = pickRelaySource(opts.root, upstream.id);
-  const relayDir = join14(opts.root, RELAY_DIR);
+  const relayDir = join15(opts.root, RELAY_DIR);
   mkdirSync3(relayDir, { recursive: true });
-  const cache = join14(relayDir, `relay_${upstream.id}_to_${opts.shot.id}.png`);
+  const cache = join15(relayDir, `relay_${upstream.id}_to_${opts.shot.id}.png`);
   let needExtract = true;
-  if (existsSync17(cache)) {
+  if (existsSync18(cache)) {
     try {
       needExtract = statSync4(cache).mtimeMs < statSync4(sourceClip).mtimeMs;
     } catch {
@@ -7504,17 +9093,17 @@ var init_signals = __esm({
 });
 
 // src/core/task/events.mts
-import { existsSync as existsSync18, readFileSync as readFileSync14 } from "fs";
-import { join as join15 } from "path";
+import { existsSync as existsSync19, readFileSync as readFileSync15 } from "fs";
+import { join as join16 } from "path";
 import { appendFileSync as appendFileSync2 } from "fs";
 function eventsPath(taskDir2) {
-  return join15(taskDir2, EVENTS_FILE);
+  return join16(taskDir2, EVENTS_FILE);
 }
 function readEvents(taskDir2, fromSeq = 0) {
   const file = eventsPath(taskDir2);
-  if (!existsSync18(file)) return [];
+  if (!existsSync19(file)) return [];
   const out = [];
-  for (const line of readFileSync14(file, "utf8").split("\n")) {
+  for (const line of readFileSync15(file, "utf8").split("\n")) {
     if (line.trim() === "") continue;
     try {
       const ev = JSON.parse(line);
@@ -7741,8 +9330,8 @@ var init_preflight = __esm({
 });
 
 // src/core/run/executor.mts
-import { existsSync as existsSync19, readFileSync as readFileSync15, statSync as statSync5, openSync as openSync3, readSync as readSync2, closeSync as closeSync3 } from "fs";
-import { basename as basename5, join as join16 } from "path";
+import { existsSync as existsSync20, readFileSync as readFileSync16, statSync as statSync5, openSync as openSync3, readSync as readSync2, closeSync as closeSync3 } from "fs";
+import { basename as basename5, join as join17 } from "path";
 function collectOutputItems(outputs) {
   const out = [];
   for (const nodeOutputs of Object.values(outputs)) {
@@ -7764,7 +9353,7 @@ function collectOutputItems(outputs) {
   return out;
 }
 function readTailText(file, lines) {
-  if (!existsSync19(file)) return "";
+  if (!existsSync20(file)) return "";
   let size = 0;
   try {
     size = statSync5(file).size;
@@ -7785,7 +9374,7 @@ function readTailText(file, lines) {
 function detectOom(entry, root, taskId) {
   const statusText = JSON.stringify(entry.status?.messages ?? []);
   if (/out of memory|OutOfMemory|CUDA error|allocation on device|\bOOM\b/i.test(statusText)) return true;
-  const logText = readTailText(join16(root, LOG_DIR, `engine-${taskId}.log`), 30);
+  const logText = readTailText(join17(root, LOG_DIR, `engine-${taskId}.log`), 30);
   return /out of memory|OutOfMemory|CUDA error: out of memory|allocation on device|\bOOM\b/i.test(logText);
 }
 function sanitizeMessage(message, root) {
@@ -7853,7 +9442,7 @@ async function executeRun(opts) {
     }
     for (const up of opts.plan.uploads) {
       opts.event("upload_started", { run_id: opts.runId, logical: up.logical });
-      const bytes = new Uint8Array(readFileSync15(up.source));
+      const bytes = new Uint8Array(readFileSync16(up.source));
       files.push(copyRunInput(opts.root, opts.runId, up.source, up.desiredName));
       const engineName = `dycli_${opts.runId}_${basename5(up.desiredName).replace(/[^A-Za-z0-9._-]/g, "_")}`;
       const name = await opts.session.client.uploadImage(engineName, bytes, true);
@@ -8061,10 +9650,10 @@ async function executeRun(opts) {
 function patchRunCleanup(opts) {
   let first = true;
   for (const runId of opts.runIds) {
-    const file = join16(opts.root, "runs", runId, "run.json");
-    if (!existsSync19(file)) continue;
+    const file = join17(opts.root, "runs", runId, "run.json");
+    if (!existsSync20(file)) continue;
     try {
-      const rec = JSON.parse(readFileSync15(file, "utf8"));
+      const rec = JSON.parse(readFileSync16(file, "utf8"));
       rec.engine.cleanup = opts.cleanup;
       if (opts.gpu !== void 0) {
         const gpu = { ...opts.gpu, restored: opts.restored };
@@ -8104,8 +9693,8 @@ var init_executor = __esm({
 });
 
 // src/core/task/worker.mts
-import { existsSync as existsSync20, readdirSync as readdirSync5 } from "fs";
-import { basename as basename6, dirname as dirname8, join as join17, resolve as resolve4 } from "path";
+import { existsSync as existsSync21, readdirSync as readdirSync6 } from "fs";
+import { basename as basename6, dirname as dirname8, join as join18, resolve as resolve4 } from "path";
 function isFatalRunError(code) {
   return code === "engine_oom" || code === "engine_crashed" || code === "engine_unreachable" || code === "engine_busy" || code === "engine_start_failed" || code === "engine_stop_failed" || code === "gpu_lease_corrupt" || code === "machine_busy" || code === "machine_lock_corrupt" || code === "worker_start_failed";
 }
@@ -8488,7 +10077,7 @@ async function runWorker(opts) {
   }
 }
 function workerLogPath(root, taskId) {
-  return join17(root, LOG_DIR, `worker-${taskId}.log`);
+  return join18(root, LOG_DIR, `worker-${taskId}.log`);
 }
 var DEFAULT_TIMEOUT_MS;
 var init_worker = __esm({
@@ -8513,9 +10102,9 @@ var init_worker = __esm({
 });
 
 // src/core/task/create.mts
-import { closeSync as closeSync4, openSync as openSync4, readFileSync as readFileSync16 } from "fs";
+import { closeSync as closeSync4, openSync as openSync4, readFileSync as readFileSync17 } from "fs";
 import { spawn as spawn6 } from "child_process";
-import { join as join18 } from "path";
+import { join as join19 } from "path";
 function sleepMs(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
@@ -8565,7 +10154,7 @@ async function createAndStartTask(opts) {
       });
     }
     const logFile = workerLogPath(opts.root, taskId);
-    ensureDir(join18(opts.root, LOG_DIR));
+    ensureDir(join19(opts.root, LOG_DIR));
     const fd = openSync4(logFile, "a");
     const child = spawn6(process.execPath, [entry, "__worker"], {
       cwd: opts.root,
@@ -8621,7 +10210,7 @@ function taskRuns(root, task) {
   const out = [];
   for (const id of task.runs) {
     try {
-      const raw = JSON.parse(readFileSync16(join18(root, "runs", id, RUN_FILE), "utf8"));
+      const raw = JSON.parse(readFileSync17(join19(root, "runs", id, RUN_FILE), "utf8"));
       out.push(raw);
     } catch {
     }
@@ -8752,18 +10341,18 @@ var init_create = __esm({
 });
 
 // src/core/run/summary.mts
-import { existsSync as existsSync21 } from "fs";
-import { join as join19 } from "path";
+import { existsSync as existsSync22 } from "fs";
+import { join as join20 } from "path";
 function outputSummaries(root, rec) {
   return rec.outputs.map((o) => {
-    const abs = join19(runDir(root, rec.run_id), o.path);
+    const abs = join20(runDir(root, rec.run_id), o.path);
     return {
       name: o.name,
       path: `runs/${rec.run_id}/${o.path}`,
       abs_path: abs,
       sha256: o.sha256,
       bytes: o.bytes,
-      present: existsSync21(abs)
+      present: existsSync22(abs)
     };
   });
 }
@@ -9181,8 +10770,8 @@ var init_shot = __esm({
 });
 
 // src/commands/wrap.mts
-import { existsSync as existsSync22, mkdirSync as mkdirSync4, writeFileSync as writeFileSync7 } from "fs";
-import { join as join20 } from "path";
+import { existsSync as existsSync23, mkdirSync as mkdirSync4, writeFileSync as writeFileSync7 } from "fs";
+import { join as join21 } from "path";
 function pickVideoAt(root, rec) {
   const chosen = rec.outputs.find((o) => /\.(mp4|webm|mkv|mov|gif)$/i.test(o.name)) ?? rec.outputs[0];
   if (chosen === void 0) return null;
@@ -9225,7 +10814,7 @@ async function runWrap(ctx2, args) {
       continue;
     }
     const pick = pickVideoAt(root, rec);
-    if (pick === null || !existsSync22(pick.abs)) {
+    if (pick === null || !existsSync23(pick.abs)) {
       missing.push(shot.id);
       continue;
     }
@@ -9238,14 +10827,14 @@ async function runWrap(ctx2, args) {
       details: { clips, missing }
     });
   }
-  const finalDir = join20(root, FINAL_DIR);
+  const finalDir = join21(root, FINAL_DIR);
   mkdirSync4(finalDir, { recursive: true });
   const ts2 = (/* @__PURE__ */ new Date()).toISOString().replace(/[-:]/g, "").replace(/\.(\d{3})Z$/, "$1");
   const outName = `cut-${ts2}.mp4`;
-  const outPath = join20(finalDir, outName);
+  const outPath = join21(finalDir, outName);
   const manifestName = `cut-${ts2}.json`;
-  const manifestPath = join20(finalDir, manifestName);
-  const listFile = join20(root, CONCAT_LIST_FILE);
+  const manifestPath = join21(finalDir, manifestName);
+  const listFile = join21(root, CONCAT_LIST_FILE);
   writeFileSync7(listFile, clips.map((c) => `file '${c.abs.replace(/'/g, "'\\''")}'`).join("\n") + "\n");
   say(`\u5408\u7247 ${clips.length} \u6BB5 \u2192 final/${outName}\uFF08libx264 / crf18 / faststart\uFF09...`);
   const r = await execCapture("ffmpeg", [
@@ -9318,8 +10907,8 @@ var init_wrap = __esm({
 });
 
 // src/commands/logs.mts
-import { closeSync as closeSync5, existsSync as existsSync23, openSync as openSync5, readSync as readSync3, readdirSync as readdirSync6, statSync as statSync6 } from "fs";
-import { join as join21 } from "path";
+import { closeSync as closeSync5, existsSync as existsSync24, openSync as openSync5, readSync as readSync3, readdirSync as readdirSync7, statSync as statSync6 } from "fs";
+import { join as join22 } from "path";
 function parseArgs2(args) {
   const out = { follow: false, n: 100, src: "all" };
   for (let i = 0; i < args.length; i++) {
@@ -9383,7 +10972,7 @@ function cleanLines(raw) {
   return out;
 }
 function readTail(file, n) {
-  if (!existsSync23(file)) return [];
+  if (!existsSync24(file)) return [];
   let size = 0;
   try {
     size = statSync6(file).size;
@@ -9402,13 +10991,13 @@ function readTail(file, n) {
   return cleanLines(buf.toString("utf8").replace(/\ufffd/g, "")).slice(-n);
 }
 function fileSources(root, src) {
-  const dir = join21(root, LOG_DIR);
-  const engines = existsSync23(dir) ? readdirSync6(dir).filter((f) => /^engine-.*\.log$/.test(f)).sort().reverse() : [];
-  const workers = existsSync23(dir) ? readdirSync6(dir).filter((f) => /^worker-.*\.log$/.test(f)).sort().reverse() : [];
+  const dir = join22(root, LOG_DIR);
+  const engines = existsSync24(dir) ? readdirSync7(dir).filter((f) => /^engine-.*\.log$/.test(f)).sort().reverse() : [];
+  const workers = existsSync24(dir) ? readdirSync7(dir).filter((f) => /^worker-.*\.log$/.test(f)).sort().reverse() : [];
   const all = [
-    ...workers[0] !== void 0 ? [{ name: "worker", file: join21(dir, workers[0]) }] : [],
-    ...engines[0] !== void 0 ? [{ name: "engine", file: join21(dir, engines[0]) }] : [],
-    { name: "daoyan-cli", file: join21(dir, "daoyan-cli.log") }
+    ...workers[0] !== void 0 ? [{ name: "worker", file: join22(dir, workers[0]) }] : [],
+    ...engines[0] !== void 0 ? [{ name: "engine", file: join22(dir, engines[0]) }] : [],
+    { name: "daoyan-cli", file: join22(dir, "daoyan-cli.log") }
   ];
   if (src === "all") return all;
   return all.filter((s) => s.name === src);
@@ -9500,7 +11089,7 @@ async function runLogs(ctx2, args) {
     return taskEvents(ctx2, root, taskId, flags);
   }
   const sources = fileSources(root, flags.src);
-  const existing = sources.filter((s) => existsSync23(s.file));
+  const existing = sources.filter((s) => existsSync24(s.file));
   if (existing.length === 0) {
     if (ctx2.json) {
       emitData({ sources: {}, note: "\u6682\u65E0\u65E5\u5FD7\u6587\u4EF6\uFF1B\u8FD0\u884C\u4EFB\u52A1\u540E\u53EF\u7528 logs --task <id>" });
@@ -9534,7 +11123,7 @@ async function runLogs(ctx2, args) {
     while (!stop) {
       await new Promise((r) => setTimeout(r, 500));
       for (const s of existing) {
-        if (!existsSync23(s.file)) continue;
+        if (!existsSync24(s.file)) continue;
         let size = 0;
         try {
           size = statSync6(s.file).size;
@@ -9588,8 +11177,8 @@ var init_logs = __esm({
 });
 
 // src/commands/status.mts
-import { existsSync as existsSync24 } from "fs";
-import { join as join22 } from "path";
+import { existsSync as existsSync25 } from "fs";
+import { join as join23 } from "path";
 function parseArgs3(args) {
   const out = { wait: false };
   for (let i = 0; i < args.length; i++) {
@@ -9655,7 +11244,7 @@ function shotProgress(root, shots) {
   if (shots === null) return [];
   return shots.shots.map((s) => {
     const rec = latestSucceededRun(root, `shot:${s.id}`);
-    const present = rec !== null && rec.outputs.some((o) => existsSync24(join22(root, RUNS_DIR, rec.run_id, o.path)));
+    const present = rec !== null && rec.outputs.some((o) => existsSync25(join23(root, RUNS_DIR, rec.run_id, o.path)));
     return {
       id: s.id,
       slug: s.slug ?? null,
@@ -9895,8 +11484,8 @@ var init_status = __esm({
 });
 
 // src/commands/engine.mts
-import { existsSync as existsSync25, readdirSync as readdirSync7 } from "fs";
-import { isAbsolute as isAbsolute5, join as join23, relative, resolve as resolve5 } from "path";
+import { existsSync as existsSync26, readdirSync as readdirSync8 } from "fs";
+import { isAbsolute as isAbsolute5, join as join24, relative, resolve as resolve5 } from "path";
 async function comfyTags(limit) {
   try {
     const res = await fetch(COMFY_TAGS_API, {
@@ -9911,21 +11500,21 @@ async function comfyTags(limit) {
   }
 }
 function localVersions(root) {
-  const dir = join23(root, "engine", "versions");
+  const dir = join24(root, "engine", "versions");
   try {
-    return readdirSync7(dir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort();
+    return readdirSync8(dir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort();
   } catch {
     return [];
   }
 }
 function currentDirs(root, engine) {
   const anchor = (p, fallback) => {
-    if (p === void 0 || p === "") return join23(root, fallback);
-    return isAbsolute5(p) ? p : join23(root, p);
+    if (p === void 0 || p === "") return join24(root, fallback);
+    return isAbsolute5(p) ? p : join24(root, p);
   };
   return {
-    comfyDir: anchor(engine.comfyui_dir, join23("engine", "ComfyUI")),
-    venvDir: anchor(engine.venv_dir, join23("engine", ".venv"))
+    comfyDir: anchor(engine.comfyui_dir, join24("engine", "ComfyUI")),
+    venvDir: anchor(engine.venv_dir, join24("engine", ".venv"))
   };
 }
 function portablePath(root, abs) {
@@ -9956,7 +11545,7 @@ async function runEngine(ctx2, args) {
           mode: "local",
           comfyui_dir: portablePath(found.root, dirs.comfyDir),
           venv_dir: portablePath(found.root, dirs.venvDir),
-          installed: existsSync25(join23(dirs.comfyDir, "main.py")),
+          installed: existsSync26(join24(dirs.comfyDir, "main.py")),
           version: machine2.engine.comfyui_version ?? found.config.comfyui?.version ?? null
         };
       } else if (machine2 !== null && machine2.engine.mode === "remote") {
@@ -9994,15 +11583,14 @@ async function runEngine(ctx2, args) {
   }
   if (sub === "install") {
     let tag;
-    let mirror;
+    const toolchain = {};
     for (let i = 0; i < rest.length; i++) {
       const a = rest[i];
       if (a === void 0) break;
       const { name, inline } = splitInlineFlag(a);
-      if (name === "--mirror") {
-        const v = takeValue(rest, i, inline, "--mirror");
-        mirror = v.value;
-        i += v.skip;
+      const toolchainFlag = applyToolchainFlag(toolchain, name, rest, i, inline);
+      if (toolchainFlag.handled) {
+        i += toolchainFlag.skip;
         continue;
       }
       if (name.startsWith("-")) usageError(`\u672A\u77E5\u53C2\u6570 ${name}`);
@@ -10010,8 +11598,11 @@ async function runEngine(ctx2, args) {
       tag = a;
     }
     if (tag === void 0 || tag === "") {
-      usageError("\u7528\u6CD5\uFF1Adaoyan engine install <\u7248\u672C tag> [--mirror <url>]");
+      usageError(
+        "\u7528\u6CD5\uFF1Adaoyan engine install <\u7248\u672C tag> [--mirror <url>] [--fallback-mirror <url|none>] [--torch-index <url>] [--torch-cuda <cuXXX>] [--torch-cpu] [--no-cache]"
+      );
     }
+    resolveToolchainOptions(toolchain);
     const lock = await acquireMachineLock({
       taskId: `metadata-engine-install-${process.pid}`,
       project: root,
@@ -10020,24 +11611,21 @@ async function runEngine(ctx2, args) {
       kind: "metadata"
     });
     try {
-      const base = join23(root, "engine", "versions", tag);
-      if (existsSync25(join23(base, "ComfyUI", "main.py")) && existsSync25(join23(base, ".venv", "bin", "python"))) {
-        say(`\u7248\u672C ${tag} \u5DF2\u5B89\u88C5\uFF1A${portablePath(root, base)}`);
-      } else {
-        say(`\u5B89\u88C5 ComfyUI ${tag} \u2192 engine/versions/${tag} ...`);
-        await installEngineAt({
-          root,
-          baseDir: base,
-          version: tag,
-          project,
-          log: say,
-          ...mirror !== void 0 ? { mirror } : {}
-        });
-      }
+      const base = join24(root, "engine", "versions", tag);
+      say(`\u5B89\u88C5/\u6821\u9A8C ComfyUI ${tag} \u2192 engine/versions/${tag} ...`);
+      const result = await installEngineAt({
+        root,
+        baseDir: base,
+        version: tag,
+        project,
+        toolchain,
+        log: say
+      });
       if (ctx2.json) {
         emitData({
           installed: tag,
           dir: portablePath(root, base),
+          toolchain: result.toolchain,
           next_actions: [`engine use ${tag}`]
         });
         return 0;
@@ -10063,29 +11651,29 @@ async function runEngine(ctx2, args) {
       let comfyDir;
       let venvDir;
       let version;
-      if (existsSync25(join23(asPath, "main.py"))) {
+      if (existsSync26(join24(asPath, "main.py"))) {
         comfyDir = asPath;
-        venvDir = join23(asPath, ".venv");
-        if (!existsSync25(join23(venvDir, "bin", "python"))) {
+        venvDir = join24(asPath, ".venv");
+        if (!await venvReady(venvDir)) {
           throw new DaoyanCliError({
             code: "config_invalid",
-            message: `\u8DEF\u5F84\u4E0B\u7F3A\u5C11 venv\uFF1A${join23(venvDir, "bin", "python")}`
+            message: `\u8DEF\u5F84\u4E0B\u7684 venv \u4E0D\u53EF\u7528\uFF08\u9700\u8981 python + pip\uFF09\uFF1A${venvDir}`
           });
         }
       } else {
-        const base = join23(root, "engine", "versions", target);
-        comfyDir = join23(base, "ComfyUI");
-        venvDir = join23(base, ".venv");
-        if (!existsSync25(join23(comfyDir, "main.py"))) {
+        const base = join24(root, "engine", "versions", target);
+        comfyDir = join24(base, "ComfyUI");
+        venvDir = join24(base, ".venv");
+        if (!existsSync26(join24(comfyDir, "main.py"))) {
           throw new DaoyanCliError({
             code: "provision_failed",
             message: `\u672A\u627E\u5230\u7248\u672C ${target}\uFF08${portablePath(root, comfyDir)}\uFF09\u3002\u5148\u5B89\u88C5\uFF1Adaoyan engine install ${target}`
           });
         }
-        if (!existsSync25(join23(venvDir, "bin", "python"))) {
+        if (!await venvReady(venvDir)) {
           throw new DaoyanCliError({
             code: "provision_failed",
-            message: `\u7248\u672C ${target} \u7F3A\u5C11 venv\uFF1A${portablePath(root, venvDir)}`
+            message: `\u7248\u672C ${target} \u7684 venv \u4E0D\u53EF\u7528\uFF08\u9700\u8981 python + pip\uFF09\uFF1A${portablePath(root, venvDir)}\u3002\u91CD\u65B0\u5B89\u88C5\uFF1Adaoyan engine install ${target}`
           });
         }
         version = target;
@@ -10127,6 +11715,7 @@ var init_engine = __esm({
     init_args();
     init_config();
     init_init_flow();
+    init_options();
     init_lock();
   }
 });
@@ -10390,11 +11979,11 @@ var init_ops = __esm({
 });
 
 // src/commands/workflow.mts
-import { existsSync as existsSync26, readFileSync as readFileSync17, readdirSync as readdirSync8 } from "fs";
-import { basename as basename7, join as join24, resolve as resolve6 } from "path";
+import { existsSync as existsSync27, readFileSync as readFileSync18, readdirSync as readdirSync9 } from "fs";
+import { basename as basename7, join as join25, resolve as resolve6 } from "path";
 function readStdin() {
   try {
-    return readFileSync17(0, "utf8");
+    return readFileSync18(0, "utf8");
   } catch (e) {
     throw new DaoyanCliError({
       code: "usage",
@@ -10462,7 +12051,7 @@ async function ensureCatalog(opts) {
   }
 }
 function readOpsFile(path) {
-  const text = path === "-" ? readStdin() : readFileSync17(path, "utf8");
+  const text = path === "-" ? readStdin() : readFileSync18(path, "utf8");
   try {
     return parseOpsPayload(JSON.parse(text));
   } catch (e) {
@@ -10475,9 +12064,9 @@ function readOpsFile(path) {
   }
 }
 function isEmptyPlaceholder(abs) {
-  if (!existsSync26(abs)) return false;
+  if (!existsSync27(abs)) return false;
   try {
-    const parsed = parseGraph(JSON.parse(readFileSync17(abs, "utf8")));
+    const parsed = parseGraph(JSON.parse(readFileSync18(abs, "utf8")));
     return !hasGraphErrors(parsed.issues) && Object.keys(parsed.graph).length === 0;
   } catch {
     return false;
@@ -10499,10 +12088,10 @@ async function runWorkflow(ctx2, args) {
     const { root } = requireProject(ctx2);
     const target = resolveWorkflowRef(root, name);
     const replaced = isEmptyPlaceholder(target.abs);
-    if (existsSync26(target.abs) && !replaced) {
+    if (existsSync27(target.abs) && !replaced) {
       throw new DaoyanCliError({ code: "usage", message: `workflow ${name} \u5DF2\u5B58\u5728\uFF1A${target.rel}`, exit: 2 });
     }
-    ensureDir(join24(root, WORKFLOWS_DIR));
+    ensureDir(join25(root, WORKFLOWS_DIR));
     saveGraphFile(target.abs, {});
     if (ctx2.json)
       emitData({ name, path: target.rel, replaced_placeholder: replaced, graph_sha256: graphSha256({}) });
@@ -10525,7 +12114,7 @@ async function runWorkflow(ctx2, args) {
     const { root } = requireProject(ctx2);
     const target = resolveWorkflowRef(root, name);
     const replaced = isEmptyPlaceholder(target.abs);
-    if (existsSync26(target.abs) && !replaced) {
+    if (existsSync27(target.abs) && !replaced) {
       throw new DaoyanCliError({ code: "usage", message: `workflow ${name} \u5DF2\u5B58\u5728`, exit: 2 });
     }
     const loaded = loadGraphFile(resolve6(process.cwd(), source), basename7(source));
@@ -10536,11 +12125,11 @@ async function runWorkflow(ctx2, args) {
   }
   if (sub === "list") {
     const { root } = requireProject(ctx2);
-    const dir = join24(root, WORKFLOWS_DIR);
-    const items = existsSync26(dir) ? readdirSync8(dir).filter((f) => f.endsWith(".json") && !f.endsWith(BINDINGS_SUFFIX)).sort().map((f) => {
-      const abs = join24(dir, f);
+    const dir = join25(root, WORKFLOWS_DIR);
+    const items = existsSync27(dir) ? readdirSync9(dir).filter((f) => f.endsWith(".json") && !f.endsWith(BINDINGS_SUFFIX)).sort().map((f) => {
+      const abs = join25(dir, f);
       try {
-        const parsed = parseGraph(JSON.parse(readFileSync17(abs, "utf8")));
+        const parsed = parseGraph(JSON.parse(readFileSync18(abs, "utf8")));
         const stats = graphStats(parsed.graph);
         return {
           name: f.slice(0, -".json".length),
@@ -10601,7 +12190,7 @@ async function runWorkflow(ctx2, args) {
       nodes: stats.nodes,
       links: stats.links,
       graph_sha256: loaded.sha256,
-      bindings: existsSync26(bindingsPathOf(ref.abs)) ? bindingsPathOf(ref.abs).slice(root.length + 1) : null,
+      bindings: existsSync27(bindingsPathOf(ref.abs)) ? bindingsPathOf(ref.abs).slice(root.length + 1) : null,
       ...full ? { graph: loaded.graph } : { node_list: nodeSummaries(loaded.graph) }
     };
     if (ctx2.json) {
@@ -10764,7 +12353,7 @@ async function runWorkflow(ctx2, args) {
     const ref = resolveWorkflowRef(root, name);
     let raw;
     try {
-      raw = JSON.parse(readFileSync17(ref.abs, "utf8"));
+      raw = JSON.parse(readFileSync18(ref.abs, "utf8"));
     } catch (e) {
       throw new DaoyanCliError({
         code: "workflow_invalid",
@@ -10933,7 +12522,7 @@ var init_registry = __esm({
         name: "init",
         group: "project",
         summary: "\u5728\u5F53\u524D\u76EE\u5F55\u7ACB\u9879\uFF1Alocal \u90E8\u7F72\u9879\u76EE\u4E13\u5C5E ComfyUI\uFF0Cremote \u7ED1\u5B9A\u5916\u90E8\u670D\u52A1",
-        usage: "daoyan init --mode=local [--modelpath <\u8DEF\u5F84>] [--version <tag>] [--mirror <\u955C\u50CF>] [--no-skill]\ndaoyan init --mode=remote --url <url> [--no-skill]",
+        usage: "daoyan init --mode=local [--modelpath <\u8DEF\u5F84>] [--version <tag>] [--mirror <\u955C\u50CF>] [--fallback-mirror <\u955C\u50CF|none>] [--torch-index <url>] [--torch-cuda <cuXXX>] [--torch-cpu] [--no-cache] [--no-skill]\ndaoyan init --mode=remote --url <url> [--no-skill]",
         flags: [
           {
             name: "--mode",
@@ -10948,7 +12537,34 @@ var init_registry = __esm({
           {
             name: "--mirror",
             type: "url",
-            description: "local\uFF1Apip \u6E90\uFF08\u9ED8\u8BA4\u963F\u91CC\u4E91 PyPI\uFF1B\u53EF\u4F20 https://pypi.org/simple/ \u8986\u76D6\uFF09"
+            description: "local\uFF1Apip \u4E3B\u6E90\uFF08\u9ED8\u8BA4\u963F\u91CC\u4E91 PyPI\uFF09"
+          },
+          {
+            name: "--fallback-mirror",
+            type: "url|none",
+            description: "local\uFF1Apip fallback\uFF08\u9ED8\u8BA4\u5B98\u65B9 PyPI\uFF1Bnone \u5173\u95ED\uFF09"
+          },
+          {
+            name: "--torch-index",
+            type: "url",
+            description: "local\uFF1APyTorch wheel index \u6839\uFF08\u9ED8\u8BA4 https://download.pytorch.org/whl\uFF09"
+          },
+          {
+            name: "--torch-cuda",
+            type: "tag",
+            description: "local\uFF1A\u5F3A\u5236 cuXXX\uFF0C\u8DF3\u8FC7\u9A71\u52A8\u63A2\u6D4B"
+          },
+          {
+            name: "--torch-cpu",
+            type: "boolean",
+            default: false,
+            description: "local\uFF1A\u663E\u5F0F\u5B89\u88C5 CPU \u7248 torch"
+          },
+          {
+            name: "--no-cache",
+            type: "boolean",
+            default: false,
+            description: "local\uFF1Apip \u7981\u7528 cache"
           },
           {
             name: "--no-skill",
@@ -10959,6 +12575,8 @@ var init_registry = __esm({
         ],
         examples: [
           "daoyan init --mode=local --modelpath /data/models",
+          "daoyan init --mode=local --torch-cpu",
+          "daoyan init --mode=local --torch-cuda cu124 --torch-index https://mirror.example.com/pytorch/whl",
           "daoyan init --mode=remote --url http://gpu-box:8188"
         ],
         implemented: true,
@@ -10967,6 +12585,7 @@ var init_registry = __esm({
           mode: "local|remote",
           project_created: "boolean",
           engine_installed: "boolean",
+          toolchain: "object|null",
           port: "number|null",
           skill: "object|null"
         },
@@ -11247,16 +12866,49 @@ var init_registry = __esm({
         name: "engine install",
         group: "engine",
         summary: "\u5B89\u88C5\u6307\u5B9A ComfyUI \u7248\u672C\u5230 engine/versions/<tag>",
-        usage: "daoyan engine install <\u7248\u672C tag> [--mirror <url>] [--json]",
+        usage: "daoyan engine install <\u7248\u672C tag> [--mirror <url>] [--fallback-mirror <url|none>] [--torch-index <url>] [--torch-cuda <cuXXX>] [--torch-cpu] [--no-cache] [--json]",
         args: [{ name: "tag", type: "string", required: true, description: "ComfyUI tag" }],
         flags: [
           {
             name: "--mirror",
             type: "url",
-            description: "pip \u6E90\uFF08\u9ED8\u8BA4\u963F\u91CC\u4E91 PyPI\uFF1B\u53EF\u4F20 https://pypi.org/simple/ \u8986\u76D6\uFF09"
+            description: "pip \u4E3B\u6E90\uFF08\u9ED8\u8BA4\u963F\u91CC\u4E91 PyPI\uFF09"
+          },
+          {
+            name: "--fallback-mirror",
+            type: "url|none",
+            description: "pip fallback\uFF08\u9ED8\u8BA4\u5B98\u65B9 PyPI\uFF1Bnone \u5173\u95ED\uFF09"
+          },
+          {
+            name: "--torch-index",
+            type: "url",
+            description: "PyTorch wheel index \u6839\uFF08\u9ED8\u8BA4\u5B98\u65B9 index\uFF09"
+          },
+          {
+            name: "--torch-cuda",
+            type: "tag",
+            description: "\u5F3A\u5236 cuXXX\uFF0C\u8DF3\u8FC7\u9A71\u52A8\u63A2\u6D4B"
+          },
+          {
+            name: "--torch-cpu",
+            type: "boolean",
+            default: false,
+            description: "\u663E\u5F0F\u5B89\u88C5 CPU \u7248 torch"
+          },
+          {
+            name: "--no-cache",
+            type: "boolean",
+            default: false,
+            description: "pip \u7981\u7528 cache"
           }
         ],
         implemented: true,
+        jsonShape: {
+          installed: "string",
+          dir: "string",
+          toolchain: "object",
+          next_actions: "string[]"
+        },
         run: (ctx2, args) => runEngine(ctx2, ["install", ...args])
       },
       {
@@ -11282,21 +12934,27 @@ var init_registry = __esm({
       {
         name: "update",
         group: "meta",
-        summary: "\u81EA\u5347\u7EA7\uFF08\u9ED8\u8BA4 GitHub\uFF1B\u652F\u6301\u81EA\u5B9A\u4E49 manifest / tgz / \u4EE3\u7406\uFF09",
-        usage: "daoyan update [--check] [--manifest <url|\u8DEF\u5F84>] [--from <\u8DEF\u5F84|URL>] [--sha256 <hex>] [--proxy <url>]",
+        summary: "\u81EA\u5347\u7EA7\uFF08\u9ED8\u8BA4 GitHub Release latest.json\uFF1B\u76F4\u8FDE\u5931\u8D25\u81EA\u52A8\u5C1D\u8BD5\u5185\u7F6E\u52A0\u901F\u6E90\uFF09",
+        usage: "daoyan update [--check] [--manifest <url|\u8DEF\u5F84>] [--from <\u8DEF\u5F84|URL>] [--sha256 <hex>] [--proxy <url>] [--github-proxy <url[,url]|none>]",
         flags: [
           { name: "--check", type: "boolean", description: "\u53EA\u68C0\u6D4B\u4E0D\u5B89\u88C5" },
           { name: "--manifest", type: "string", description: "\u81EA\u5B9A\u4E49 latest.json\uFF08URL \u6216\u672C\u5730\u8DEF\u5F84\uFF09" },
           { name: "--from", type: "string", description: "\u76F4\u63A5\u5B89\u88C5\u6307\u5B9A tgz\uFF08\u672C\u5730\u8DEF\u5F84\u6216 http(s) URL\uFF09" },
           { name: "--sha256", type: "string", description: "--from \u7684 SHA-256 \u6821\u9A8C\u503C\uFF08\u8FDC\u7A0B\u5FC5\u586B\uFF09" },
-          { name: "--proxy", type: "string", description: "\u672C\u6B21\u66F4\u65B0\u4F7F\u7528\u7684 http/https/socks5 \u4EE3\u7406" }
+          { name: "--proxy", type: "string", description: "\u672C\u6B21\u66F4\u65B0\u4F7F\u7528\u7684 http/https/socks5 \u4EE3\u7406" },
+          {
+            name: "--github-proxy",
+            type: "url[,url]|none",
+            description: "GitHub \u52A0\u901F\u6E90\uFF08\u9ED8\u8BA4\u4E3A\u5185\u7F6E\u5217\u8868\uFF1Bnone \u5173\u95ED\uFF1B\u4EC5\u5728\u76F4\u8FDE\u5931\u8D25\u65F6\u4F7F\u7528\uFF09"
+          }
         ],
         examples: [
           "daoyan update --check",
           "daoyan update source https://mirror.example.com/daoyan/latest.json",
           "daoyan update --manifest ./latest.json",
           "daoyan update --from ./daoyan-cli-0.0.4.tgz",
-          "daoyan update proxy http://127.0.0.1:7890"
+          "daoyan update proxy http://127.0.0.1:7890",
+          "daoyan update --github-proxy none"
         ],
         implemented: true,
         jsonShape: {
@@ -11305,6 +12963,7 @@ var init_registry = __esm({
           updateAvailable: "boolean",
           source: "github|manifest|from",
           manifest: "string|null",
+          via_proxy: "string|null",
           note: "string|null"
         },
         run: (ctx2, args) => runUpdate(ctx2, args)
@@ -11345,7 +13004,7 @@ var init_registry = __esm({
             description: "latest.json \u7684 http(s) URL \u6216\u672C\u5730\u8DEF\u5F84\uFF1B\u7701\u7565\u65F6\u663E\u793A\u5F53\u524D\u503C"
           }
         ],
-        flags: [{ name: "--unset", type: "boolean", description: "\u6062\u590D\u9ED8\u8BA4 GitHub \u6E90" }],
+        flags: [{ name: "--unset", type: "boolean", description: "\u6062\u590D\u9ED8\u8BA4 Release \u6E05\u5355\u6E90" }],
         examples: [
           "daoyan update source https://mirror.example.com/daoyan/latest.json",
           "daoyan update source /data/mirror/daoyan/latest.json",

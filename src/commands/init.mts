@@ -28,7 +28,14 @@ import {
     latestComfyTag,
     scaffoldProject,
     writeExtraModelPaths,
+    type ToolchainSummary,
 } from "../core/provision/init-flow.mts";
+import {
+    applyToolchainFlag,
+    hasToolchainOptions,
+    resolveToolchainOptions,
+    type ToolchainOptions,
+} from "../core/provision/options.mts";
 import { acquireMachineLock, type AcquiredLock } from "../core/machine/lock.mts";
 import { VERSION } from "../shared/version.mts";
 import { writeSkill } from "../core/agent/skill.mts";
@@ -54,9 +61,9 @@ interface InitFlags {
      */
     version?: string;
     /**
-     * local：pip 镜像。
+     * local：pip / torch 工具链参数。
      */
-    mirror?: string;
+    toolchain: ToolchainOptions;
     /**
      * --no-skill：不生成项目内 Skill / AGENTS.md。
      */
@@ -68,7 +75,7 @@ interface InitFlags {
  */
 function parseArgs(args: string[]): InitFlags {
     // 解析结果
-    const flags: InitFlags = { noSkill: false };
+    const flags: InitFlags = { noSkill: false, toolchain: {} };
     for (let i = 0; i < args.length; i++) {
         // 当前参数
         const a = args[i];
@@ -107,10 +114,10 @@ function parseArgs(args: string[]): InitFlags {
             i += skip;
             continue;
         }
-        if (name === "--mirror") {
-            const { value, skip } = takeValue(args, i, inline, "--mirror");
-            flags.mirror = value;
-            i += skip;
+        // 工具链参数（--mirror / --fallback-mirror / --torch-index / --torch-cuda / --torch-cpu / --no-cache）
+        const toolchainFlag = applyToolchainFlag(flags.toolchain, name, args, i, inline);
+        if (toolchainFlag.handled) {
+            i += toolchainFlag.skip;
             continue;
         }
         if (name.startsWith("-")) usageError(`未知参数 ${name}`);
@@ -123,11 +130,15 @@ function parseArgs(args: string[]): InitFlags {
     // 参数与模式匹配
     if (flags.mode === "local") {
         if (flags.url !== undefined) usageError("local 模式不接受 --url（远端连接请用 --mode=remote）");
+        // 在创建任何项目文件前校验依赖参数（非法 URL / tag 立即失败）
+        resolveToolchainOptions(flags.toolchain);
     } else {
         if (flags.url === undefined || flags.url === "") usageError("remote 模式必须提供 --url <http(s)://...>");
         if (flags.modelpath !== undefined) usageError("remote 模式不接受 --modelpath（模型由远端管理）");
         if (flags.version !== undefined) usageError("remote 模式不接受 --version（远端引擎版本由外部管理）");
-        if (flags.mirror !== undefined) usageError("remote 模式不接受 --mirror（不部署引擎）");
+        if (hasToolchainOptions(flags.toolchain)) {
+            usageError("remote 模式不接受依赖安装参数（不部署引擎）");
+        }
     }
     return flags;
 }
@@ -193,6 +204,8 @@ export async function runInit(ctx: CliContext, args: string[]): Promise<void> {
     let comfyVersion: string | null = null;
     // 本机端口（remote 为 null）
     let port: number | null = null;
+    // 工具链摘要（remote / 复用自定义引擎时为 null）
+    let toolchain: ToolchainSummary | null = null;
 
     try {
         if (flags.mode === "local") {
@@ -242,11 +255,12 @@ export async function runInit(ctx: CliContext, args: string[]): Promise<void> {
                     root,
                     project,
                     version,
-                    ...(flags.mirror !== undefined ? { mirror: flags.mirror } : {}),
+                    toolchain: flags.toolchain,
                     log: say,
                 });
                 installed = deployed.installed;
                 comfyVersion = version;
+                toolchain = deployed.toolchain;
             }
             // 端口
             port = await allocatePort(prevLocal?.port);
@@ -311,6 +325,7 @@ export async function runInit(ctx: CliContext, args: string[]): Promise<void> {
         project_created: projectCreated,
         engine_installed: installed,
         comfyui_version: comfyVersion,
+        toolchain,
         port,
         url: flags.mode === "remote" ? (flags.url ?? null) : null,
         modelpath: flags.mode === "local" ? (flags.modelpath ?? null) : null,

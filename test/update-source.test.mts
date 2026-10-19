@@ -2,12 +2,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+    DEFAULT_GITHUB_PROXIES,
+    DEFAULT_UPDATE_MANIFEST,
+    githubMirrorUrl,
+    isGithubUrl,
     normalizeProxy,
+    parseGithubProxyList,
     parseUpdateFlags,
     parseUpdateManifest,
     redactProxy,
+    resolveGithubProxies,
     resolveTgz,
     resolveUpdateSource,
+    sameUpdateManifest,
 } from "../src/commands/update.mts";
 
 // 固定 SHA
@@ -97,10 +104,13 @@ test("flags：解析、内联值、冲突校验", () => {
         "--manifest=https://mirror.example.com/latest.json",
         "--proxy",
         "http://127.0.0.1:7890",
+        "--github-proxy",
+        "https://gh-proxy.com",
     ]);
     assert.equal(flags.check, true);
     assert.equal(flags.manifest, "https://mirror.example.com/latest.json");
     assert.equal(flags.proxy, "http://127.0.0.1:7890");
+    assert.equal(flags.githubProxy, "https://gh-proxy.com");
 
     assert.equal(
         errorCode(() => parseUpdateFlags(["--from", "a.tgz", "--manifest", "b"])),
@@ -120,7 +130,7 @@ test("flags：解析、内联值、冲突校验", () => {
     );
 });
 
-test("源优先级：CLI > 环境变量 > 配置 > GitHub，代理同样按优先级", () => {
+test("源优先级：CLI > 环境变量 > 配置 > 默认 Release 清单，代理同样按优先级", () => {
     const config = { manifest: "/data/mirror/latest.json", proxy: "http://config-proxy:7890" };
 
     const cli = resolveUpdateSource(
@@ -132,6 +142,7 @@ test("源优先级：CLI > 环境变量 > 配置 > GitHub，代理同样按优�
     if (cli.kind === "manifest") {
         assert.equal(cli.manifest, "https://cli.example.com/latest.json");
         assert.equal(cli.proxy, "http://config-proxy:7890");
+        assert.equal(cli.fallbackToGithub, undefined);
     }
 
     const env = resolveUpdateSource(
@@ -165,9 +176,70 @@ test("源优先级：CLI > 环境变量 > 配置 > GitHub，代理同样按优�
 
     const cfg = resolveUpdateSource({ check: false }, {}, config);
     assert.equal(cfg.kind, "manifest");
-    if (cfg.kind === "manifest") assert.equal(cfg.manifest, config.manifest);
+    if (cfg.kind === "manifest") {
+        assert.equal(cfg.manifest, config.manifest);
+        assert.equal(cfg.fallbackToGithub, undefined);
+    }
 
-    const github = resolveUpdateSource({ check: false }, { HTTPS_PROXY: "http://env-proxy:7890" }, {});
-    assert.equal(github.kind, "github");
-    assert.equal(github.proxy, "http://env-proxy:7890");
+    // 无 CLI / 环境变量 / 配置时：默认 Release 清单，并允许回退 git
+    const fallback = resolveUpdateSource({ check: false }, { HTTPS_PROXY: "http://env-proxy:7890" }, {});
+    assert.equal(fallback.kind, "manifest");
+    if (fallback.kind === "manifest") {
+        assert.equal(fallback.manifest, DEFAULT_UPDATE_MANIFEST);
+        assert.equal(fallback.fallbackToGithub, true);
+        assert.equal(fallback.proxy, "http://env-proxy:7890");
+    }
+});
+
+test("GitHub 加速源：默认列表、none 关闭、自定义与 HTTP 代理", () => {
+    // 无显式配置：启用内置列表
+    assert.deepEqual(resolveGithubProxies({ check: false }, {}, undefined), [...DEFAULT_GITHUB_PROXIES]);
+    // 配置 HTTP 代理：默认不叠加第三方加速源
+    assert.deepEqual(resolveGithubProxies({ check: false }, {}, "http://127.0.0.1:7890"), []);
+    // none 关闭（CLI / 环境变量）
+    assert.deepEqual(resolveGithubProxies({ check: false, githubProxy: "none" }, {}, undefined), []);
+    assert.deepEqual(resolveGithubProxies({ check: false }, { DYCLI_UPDATE_GITHUB_PROXY: "none" }, undefined), []);
+    // 自定义列表：逗号分隔、去重、去末尾斜杠；显式值可与 HTTP 代理共存
+    assert.deepEqual(
+        resolveGithubProxies(
+            { check: false, githubProxy: "https://a.example/ , https://b.example,https://a.example" },
+            {},
+            "http://127.0.0.1:7890",
+        ),
+        ["https://a.example", "https://b.example"],
+    );
+    // 环境变量
+    assert.deepEqual(
+        resolveGithubProxies({ check: false }, { DYCLI_UPDATE_GITHUB_PROXY: "https://env.example/" }, undefined),
+        ["https://env.example"],
+    );
+    // 非法值
+    assert.equal(
+        errorCode(() => parseGithubProxyList("ftp://x")),
+        "usage",
+    );
+    assert.equal(
+        errorCode(() => parseGithubProxyList(" , ")),
+        "usage",
+    );
+});
+
+test("加速源 URL 与清单一致性", () => {
+    assert.equal(
+        githubMirrorUrl("https://gh-proxy.com/", "https://github.com/a/b"),
+        "https://gh-proxy.com/https://github.com/a/b",
+    );
+    assert.equal(isGithubUrl("https://github.com/a/b"), true);
+    assert.equal(isGithubUrl("https://api.github.com/a/b"), false);
+    assert.equal(isGithubUrl("https://gh-proxy.com/https://github.com/a/b"), false);
+    assert.equal(isGithubUrl("not-a-url"), false);
+    // 相同版本：忽略 v 前缀与 sha 大小写
+    const a = parseUpdateManifest({ version: "0.0.6", tgz: "a.tgz", sha256: SHA });
+    const b = parseUpdateManifest({ version: "v0.0.6", tgz: "a.tgz", sha256: SHA.toUpperCase() });
+    assert.equal(sameUpdateManifest(a, b), true);
+    // 版本或 tgz 不同
+    assert.equal(sameUpdateManifest(a, { ...a, version: "0.0.7" }), false);
+    assert.equal(sameUpdateManifest(a, { ...a, tgz: "b.tgz" }), false);
+    // sha 不同
+    assert.equal(sameUpdateManifest(a, { ...a, sha256: "b".repeat(64) }), false);
 });

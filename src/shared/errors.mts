@@ -98,7 +98,7 @@ export const ERROR_META: Record<ErrCode, ErrorMeta> = {
     update_failed: { retryable: true, hint: "检查网络与 npm 权限后重试。" },
     provision_failed: {
         retryable: true,
-        hint: "检查网络、磁盘与 Python 环境；pip 默认阿里云 PyPI，可用 --mirror 覆盖。",
+        hint: "按 details.stage（ensurepip/venv/torch/requirements/pip_check/smoke）定位；不要手工猜 torch 版本，用 --torch-index / --torch-cuda / --torch-cpu。",
     },
     artifact_download_failed: {
         retryable: true,

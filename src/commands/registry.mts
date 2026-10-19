@@ -153,7 +153,8 @@ export const COMMANDS: CommandMeta[] = [
         group: "project",
         summary: "在当前目录立项：local 部署项目专属 ComfyUI，remote 绑定外部服务",
         usage:
-            "daoyan init --mode=local [--modelpath <路径>] [--version <tag>] [--mirror <镜像>] [--no-skill]\n" +
+            "daoyan init --mode=local [--modelpath <路径>] [--version <tag>] [--mirror <镜像>] " +
+            "[--fallback-mirror <镜像|none>] [--torch-index <url>] [--torch-cuda <cuXXX>] [--torch-cpu] [--no-cache] [--no-skill]\n" +
             "daoyan init --mode=remote --url <url> [--no-skill]",
         flags: [
             {
@@ -169,7 +170,34 @@ export const COMMANDS: CommandMeta[] = [
             {
                 name: "--mirror",
                 type: "url",
-                description: "local：pip 源（默认阿里云 PyPI；可传 https://pypi.org/simple/ 覆盖）",
+                description: "local：pip 主源（默认阿里云 PyPI）",
+            },
+            {
+                name: "--fallback-mirror",
+                type: "url|none",
+                description: "local：pip fallback（默认官方 PyPI；none 关闭）",
+            },
+            {
+                name: "--torch-index",
+                type: "url",
+                description: "local：PyTorch wheel index 根（默认 https://download.pytorch.org/whl）",
+            },
+            {
+                name: "--torch-cuda",
+                type: "tag",
+                description: "local：强制 cuXXX，跳过驱动探测",
+            },
+            {
+                name: "--torch-cpu",
+                type: "boolean",
+                default: false,
+                description: "local：显式安装 CPU 版 torch",
+            },
+            {
+                name: "--no-cache",
+                type: "boolean",
+                default: false,
+                description: "local：pip 禁用 cache",
             },
             {
                 name: "--no-skill",
@@ -180,6 +208,8 @@ export const COMMANDS: CommandMeta[] = [
         ],
         examples: [
             "daoyan init --mode=local --modelpath /data/models",
+            "daoyan init --mode=local --torch-cpu",
+            "daoyan init --mode=local --torch-cuda cu124 --torch-index https://mirror.example.com/pytorch/whl",
             "daoyan init --mode=remote --url http://gpu-box:8188",
         ],
         implemented: true,
@@ -188,6 +218,7 @@ export const COMMANDS: CommandMeta[] = [
             mode: "local|remote",
             project_created: "boolean",
             engine_installed: "boolean",
+            toolchain: "object|null",
             port: "number|null",
             skill: "object|null",
         },
@@ -480,16 +511,51 @@ export const COMMANDS: CommandMeta[] = [
         name: "engine install",
         group: "engine",
         summary: "安装指定 ComfyUI 版本到 engine/versions/<tag>",
-        usage: "daoyan engine install <版本 tag> [--mirror <url>] [--json]",
+        usage:
+            "daoyan engine install <版本 tag> [--mirror <url>] [--fallback-mirror <url|none>] " +
+            "[--torch-index <url>] [--torch-cuda <cuXXX>] [--torch-cpu] [--no-cache] [--json]",
         args: [{ name: "tag", type: "string", required: true, description: "ComfyUI tag" }],
         flags: [
             {
                 name: "--mirror",
                 type: "url",
-                description: "pip 源（默认阿里云 PyPI；可传 https://pypi.org/simple/ 覆盖）",
+                description: "pip 主源（默认阿里云 PyPI）",
+            },
+            {
+                name: "--fallback-mirror",
+                type: "url|none",
+                description: "pip fallback（默认官方 PyPI；none 关闭）",
+            },
+            {
+                name: "--torch-index",
+                type: "url",
+                description: "PyTorch wheel index 根（默认官方 index）",
+            },
+            {
+                name: "--torch-cuda",
+                type: "tag",
+                description: "强制 cuXXX，跳过驱动探测",
+            },
+            {
+                name: "--torch-cpu",
+                type: "boolean",
+                default: false,
+                description: "显式安装 CPU 版 torch",
+            },
+            {
+                name: "--no-cache",
+                type: "boolean",
+                default: false,
+                description: "pip 禁用 cache",
             },
         ],
         implemented: true,
+        jsonShape: {
+            installed: "string",
+            dir: "string",
+            toolchain: "object",
+            next_actions: "string[]",
+        },
         run: (ctx, args) => runEngine(ctx, ["install", ...args]),
     },
     {
@@ -516,14 +582,21 @@ export const COMMANDS: CommandMeta[] = [
     {
         name: "update",
         group: "meta",
-        summary: "自升级（默认 GitHub；支持自定义 manifest / tgz / 代理）",
-        usage: "daoyan update [--check] [--manifest <url|路径>] [--from <路径|URL>] [--sha256 <hex>] [--proxy <url>]",
+        summary: "自升级（默认 GitHub Release latest.json；直连失败自动尝试内置加速源）",
+        usage:
+            "daoyan update [--check] [--manifest <url|路径>] [--from <路径|URL>] [--sha256 <hex>] " +
+            "[--proxy <url>] [--github-proxy <url[,url]|none>]",
         flags: [
             { name: "--check", type: "boolean", description: "只检测不安装" },
             { name: "--manifest", type: "string", description: "自定义 latest.json（URL 或本地路径）" },
             { name: "--from", type: "string", description: "直接安装指定 tgz（本地路径或 http(s) URL）" },
             { name: "--sha256", type: "string", description: "--from 的 SHA-256 校验值（远程必填）" },
             { name: "--proxy", type: "string", description: "本次更新使用的 http/https/socks5 代理" },
+            {
+                name: "--github-proxy",
+                type: "url[,url]|none",
+                description: "GitHub 加速源（默认为内置列表；none 关闭；仅在直连失败时使用）",
+            },
         ],
         examples: [
             "daoyan update --check",
@@ -531,6 +604,7 @@ export const COMMANDS: CommandMeta[] = [
             "daoyan update --manifest ./latest.json",
             "daoyan update --from ./daoyan-cli-0.0.4.tgz",
             "daoyan update proxy http://127.0.0.1:7890",
+            "daoyan update --github-proxy none",
         ],
         implemented: true,
         jsonShape: {
@@ -539,6 +613,7 @@ export const COMMANDS: CommandMeta[] = [
             updateAvailable: "boolean",
             source: "github|manifest|from",
             manifest: "string|null",
+            via_proxy: "string|null",
             note: "string|null",
         },
         run: (ctx, args) => runUpdate(ctx, args),
@@ -579,7 +654,7 @@ export const COMMANDS: CommandMeta[] = [
                 description: "latest.json 的 http(s) URL 或本地路径；省略时显示当前值",
             },
         ],
-        flags: [{ name: "--unset", type: "boolean", description: "恢复默认 GitHub 源" }],
+        flags: [{ name: "--unset", type: "boolean", description: "恢复默认 Release 清单源" }],
         examples: [
             "daoyan update source https://mirror.example.com/daoyan/latest.json",
             "daoyan update source /data/mirror/daoyan/latest.json",

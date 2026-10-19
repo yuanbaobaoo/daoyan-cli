@@ -66,4 +66,5 @@ jobs:
             daoyan-cli-*.tgz
             latest.json
             SHA256SUMS
+            install.sh
           generate_release_notes: true

@@ -1,24 +1,31 @@
 #!/usr/bin/env bash
-# daoyan-cli 一键安装脚本 —— 默认从 GitHub 安装，也支持自建镜像 / 离线 tgz / 代理。
+# daoyan-cli 一键安装脚本 —— 默认从 GitHub Release 的 latest.json 安装，也支持镜像 / 离线 tgz / 代理。
 #
 # 用法：
-#   curl -fsSL https://raw.githubusercontent.com/yuanbaobaoo/daoyan-cli/master/install.sh | bash
+#   curl -fsSL https://github.com/yuanbaobaoo/daoyan-cli/releases/latest/download/install.sh | bash
 #
 # 可选环境变量：
-#   DAYOAN_REF=v0.0.4                  git tag / 分支 / commit（默认 master）
+#   DAYOAN_REF=v0.0.6                  git tag / 分支 / commit（默认 master，仅在回退 git 时使用）
 #   DAYOAN_REPO=<git url>              自建 git 镜像（默认 GitHub）
-#   DAYOAN_MANIFEST_URL=<url|路径>     从 latest.json 安装（优先于 git）
+#   DAYOAN_MANIFEST_URL=<url|路径>     更新清单（默认 Release latest.json；显式设为空则走 git）
 #   DAYOAN_TGZ_URL=<url|路径>          直接安装指定 tgz（优先于 manifest）
 #   DAYOAN_SHA256=<hex>                校验 tgz（远程 tgz 必填；manifest 内已有 sha256）
 #   DAYOAN_PROXY=<url>                 下载/安装代理（http/https/socks5）
 #
-# 原理：dist 产物随仓库分发，安装即用，无需在用户机上构建。
-# 要求：node >= 22、npm；git 仅在使用默认 git 源时需要。
+# 原理：dist 产物随 npm tarball 分发，安装即用，无需在用户机上构建。
+# 要求：node >= 22、npm；git 仅在默认清单不可达、回退 git 源时需要。
 set -euo pipefail
 
 REPO="${DAYOAN_REPO:-https://github.com/yuanbaobaoo/daoyan-cli.git}"
 REF="${DAYOAN_REF:-master}"
-MANIFEST_URL="${DAYOAN_MANIFEST_URL:-}"
+DEFAULT_MANIFEST_URL="https://github.com/yuanbaobaoo/daoyan-cli/releases/latest/download/latest.json"
+if [ -n "${DAYOAN_MANIFEST_URL+x}" ]; then
+  MANIFEST_URL="$DAYOAN_MANIFEST_URL"
+  MANIFEST_DEFAULT=0
+else
+  MANIFEST_URL="$DEFAULT_MANIFEST_URL"
+  MANIFEST_DEFAULT=1
+fi
 TGZ_URL="${DAYOAN_TGZ_URL:-}"
 EXPECTED_SHA="${DAYOAN_SHA256:-}"
 PROXY="${DAYOAN_PROXY:-}"
@@ -62,6 +69,29 @@ command -v npm >/dev/null 2>&1 || die "未找到 npm（它随 Node 一同安装�
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 
+# 预读 manifest（默认 Release 清单不可达时回退 git；显式指定的清单失败则直接报错）
+manifest=""
+if [ -z "$TGZ_URL" ] && [ -n "$MANIFEST_URL" ]; then
+  case "$MANIFEST_URL" in
+    http://*|https://*)
+      command -v curl >/dev/null 2>&1 || die "下载 manifest 需要 curl"
+      if manifest="$(curl -fsSL --max-time 30 "$MANIFEST_URL")"; then
+        :
+      elif [ "$MANIFEST_DEFAULT" -eq 1 ]; then
+        say "    WARN: 默认 Release 清单不可达，回退 git 安装（可设置 DAYOAN_MANIFEST_URL 指定镜像）"
+        MANIFEST_URL=""
+        manifest=""
+      else
+        die "下载 manifest 失败：检查网络、代理与 URL"
+      fi
+      ;;
+    *)
+      [ -f "$MANIFEST_URL" ] || die "manifest 不存在：$MANIFEST_URL"
+      manifest="$(cat "$MANIFEST_URL")"
+      ;;
+  esac
+fi
+
 # 下载/复制 tgz 并校验，最终设置 tgz_path
 tgz_path=""
 if [ -n "$TGZ_URL" ]; then
@@ -88,18 +118,6 @@ if [ -n "$TGZ_URL" ]; then
   verify_sha "$tgz_path" "$EXPECTED_SHA"
 elif [ -n "$MANIFEST_URL" ]; then
   say "==> 安装 daoyan-cli（来自 latest.json）"
-  # 读取 manifest（URL 或本地文件）
-  case "$MANIFEST_URL" in
-    http://*|https://*)
-      command -v curl >/dev/null 2>&1 || die "下载 manifest 需要 curl"
-      manifest="$(curl -fsSL --max-time 30 "$MANIFEST_URL")" \
-        || die "下载 manifest 失败：检查网络、代理与 URL"
-      ;;
-    *)
-      [ -f "$MANIFEST_URL" ] || die "manifest 不存在：$MANIFEST_URL"
-      manifest="$(cat "$MANIFEST_URL")"
-      ;;
-  esac
   # 用 Node 解析 version / tgz / sha256
   parsed="$(printf '%s' "$manifest" | node -e '
 let s = "";

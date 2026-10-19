@@ -78,6 +78,61 @@ export function execCapture(cmd: string, args: readonly string[], opts: ExecOpti
 }
 
 /**
+ * 流式执行：输出实时转发到当前终端，同时保留尾部文本用于错误详情。
+ * 适用于 pip install 这类需要进度、失败时又需要 last_error 的长任务。
+ */
+export function execStream(
+    cmd: string,
+    args: readonly string[],
+    opts: ExecOptions & { tailBytes?: number } = {},
+): Promise<ExecResult> {
+    return new Promise((resolvePromise, rejectPromise) => {
+        // 尾部保留上限（字符数）
+        const limit = opts.tailBytes ?? 8_000;
+        // 子进程句柄（stdout/stderr 走管道，边转发边保留尾部）
+        const child = spawn(cmd, args, {
+            cwd: opts.cwd,
+            env: opts.env !== undefined ? { ...process.env, ...opts.env } : undefined,
+            stdio: ["ignore", "pipe", "pipe"],
+        });
+        // stdout 尾部
+        let outTail = "";
+        // stderr 尾部
+        let errTail = "";
+        // 超时定时器（到点 SIGKILL；未配置时为 undefined）
+        const timer =
+            opts.timeoutMs !== undefined ? setTimeout(() => child.kill("SIGKILL"), opts.timeoutMs) : undefined;
+        child.stdout.on("data", (d: Buffer) => {
+            process.stdout.write(d);
+            outTail = appendTail(outTail, d.toString(), limit);
+        });
+        child.stderr.on("data", (d: Buffer) => {
+            process.stderr.write(d);
+            errTail = appendTail(errTail, d.toString(), limit);
+        });
+        child.on("error", (e) => {
+            if (timer !== undefined) clearTimeout(timer);
+            rejectPromise(
+                new DaoyanCliError({ code: "external_tool_missing", message: `无法启动 ${cmd}：${e.message}` }),
+            );
+        });
+        child.on("close", (code) => {
+            if (timer !== undefined) clearTimeout(timer);
+            resolvePromise({ code: code ?? -1, stdout: outTail, stderr: errTail });
+        });
+    });
+}
+
+/**
+ * 追加文本并只保留末尾 limit 个字符。
+ */
+function appendTail(current: string, chunk: string, limit: number): string {
+    // 拼接后的文本
+    const next = current + chunk;
+    return next.length > limit ? next.slice(-limit) : next;
+}
+
+/**
  * 运行并直连终端（npm install 等长输出场景）。
  */
 export function execInherit(

@@ -1,7 +1,8 @@
 # 发版规则（daoyan-cli）
 
-> 本项目以 **GitHub 为唯一分发通道**：用户经 `install.sh` / `npm i -g git+…` 从 GitHub 安装，
-> `daoyan update` 检测 GitHub tags 自升级。**不发布到 npm registry**；npm 仅作为安装器使用。
+> 本项目以 **GitHub 为唯一分发通道**：用户经 Release 的 `install.sh` / `latest.json` 安装，
+> `daoyan update` 默认读取 Release 的 `latest.json` 自升级（不可达时回退 GitHub tags）。
+> **不发布到 npm registry**；npm 仅作为安装器使用。
 > 本文是发版的唯一操作依据，AI 代理发版前必须逐条核对。
 
 ## 1. 版本号管理（双处同步，缺一不可）
@@ -51,7 +52,7 @@ git push origin master vX.Y.Z
 2. **dist 一致性校验**（与源码 diff，不一致失败）
 3. `npm pack` 打包 tgz
 4. 生成 `latest.json` 与 `SHA256SUMS`
-5. 创建 GitHub Release（自动生成 release notes，附 tgz + `latest.json` + `SHA256SUMS`）
+5. 创建 GitHub Release（自动生成 release notes，附 tgz + `latest.json` + `SHA256SUMS` + `install.sh`）
 
 不再执行 `npm publish`；npm registry 不是发布通道。
 
@@ -71,12 +72,12 @@ daoyan update                  # 升级后 --version 应等于新版本
 
 ## 6. 自定义更新源与代理
 
-`update` 默认仍走 GitHub；用户可持久化或一次性换源（用户级配置 `~/.dycli/update.json`，0600）：
+`update` 默认读取 Release 的 `latest.json`；用户可持久化或一次性换源（用户级配置 `~/.dycli/update.json`，0600）：
 
 ```bash
 daoyan update source https://mirror.example.com/daoyan/latest.json
 daoyan update source ./latest.json          # 本地镜像目录
-daoyan update source --unset                # 恢复 GitHub
+daoyan update source --unset                # 恢复默认 Release 清单
 daoyan update proxy http://127.0.0.1:7890  # http/https/socks5/socks5h
 daoyan update proxy --unset
 ```
@@ -88,10 +89,13 @@ daoyan update --check --manifest <url|路径>
 daoyan update --manifest <url|路径>
 daoyan update --from <tgz路径|URL> --sha256 <hex>
 daoyan update --proxy <url>
+daoyan update --github-proxy <url[,url]|none>
 ```
 
-优先级：CLI > `DYCLI_UPDATE_*` 环境变量 > `~/.dycli/update.json` > GitHub。
-环境变量：`DYCLI_UPDATE_MANIFEST` / `DYCLI_UPDATE_FROM` / `DYCLI_UPDATE_SHA256` / `DYCLI_UPDATE_PROXY`。
+直连 GitHub 失败时，`update` 默认尝试内置加速源（`https://gh-proxy.com`、`https://gh.llkk.cc`），仅作用于 `github.com` URL；清单需多个加速源一致，tgz 始终校验 SHA-256。已配置 HTTP 代理时不默认叠加加速源；`--github-proxy none` / `DYCLI_UPDATE_GITHUB_PROXY=none` 关闭。
+
+优先级：CLI > `DYCLI_UPDATE_*` 环境变量 > `~/.dycli/update.json` > 默认 Release `latest.json`（不可达时回退 GitHub tags）。
+环境变量：`DYCLI_UPDATE_MANIFEST` / `DYCLI_UPDATE_FROM` / `DYCLI_UPDATE_SHA256` / `DYCLI_UPDATE_PROXY` / `DYCLI_UPDATE_GITHUB_PROXY`。
 未配置 dycli 代理时也兼容标准 `HTTPS_PROXY` / `ALL_PROXY`。
 
 `latest.json`：

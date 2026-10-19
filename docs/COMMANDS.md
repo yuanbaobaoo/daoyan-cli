@@ -48,13 +48,17 @@ daoyan run cancel <task_id> --json
 ### init
 
 ```bash
-daoyan init --mode=local [--modelpath <路径>] [--version <tag>] [--mirror <镜像>] [--no-skill]
+daoyan init --mode=local [--modelpath <路径>] [--version <tag>] [--mirror <镜像>] \
+    [--fallback-mirror <镜像|none>] [--torch-index <url>] [--torch-cuda <cuXXX>] [--torch-cpu] [--no-cache] [--no-skill]
 daoyan init --mode=remote --url <url> [--no-skill]
 ```
 
 - `--mode` 必填；在当前目录工作，不接收项目名；
 - local 部署 `engine/`（venv + ComfyUI + custom nodes）并生成 `extra_model_paths.yaml`；只部署不启动；
-- pip 依赖默认使用阿里云 PyPI（`https://mirrors.aliyun.com/pypi/simple/`）；可用 `--mirror https://pypi.org/simple/` 或其他镜像覆盖；
+- init 自动探测 NVIDIA 驱动 / CUDA 上限 / compute capability，安装匹配的 torch（如 cu130），再装 requirements；不要手工安装 torch；
+- pip 依赖默认使用阿里云 PyPI（`https://mirrors.aliyun.com/pypi/simple/`），失败自动回退官方 PyPI；`--mirror` / `--fallback-mirror` 可覆盖（`none` 关闭 fallback）；
+- `--torch-index` 指定 PyTorch wheel index；`--torch-cuda` 强制 tag；`--torch-cpu` 显式 CPU 模式；
+- 成功安装后写 `engine/.venv/.dycli-toolchain.json`；复用时要求 marker、`pip check` 与 CUDA 自检全部通过，否则重新安装；
 - 已有 `project.json`：不覆盖共享文件，只更新本机 `.dycli/machine.json`；
 - 默认生成 `.agents/skills/daoyan/` 与 `AGENTS.md` 管理块；
 - local 的部署期间持有 machine lock。
@@ -168,29 +172,36 @@ daoyan logs [-f] [-n N] [--src daoyan-cli|engine|worker|all]
 
 ```bash
 daoyan engine ls
-daoyan engine install <tag> [--mirror <url>]
+daoyan engine install <tag> [--mirror <url>] [--fallback-mirror <url|none>] \
+    [--torch-index <url>] [--torch-cuda <cuXXX>] [--torch-cpu] [--no-cache]
 daoyan engine use <tag|路径>
 ```
 
 - local 专属；`install` 安装到 `engine/versions/<tag>/`，`use` 更新本机 machine 配置；
-- `install` 的 pip 源默认阿里云 PyPI，`--mirror https://pypi.org/simple/` 可覆盖；
+- `install` 与 init 共用工具链逻辑：先按驱动安装 torch，再装 requirements；默认阿里云 PyPI，失败回退官方；
+- `install` 复用时同样要求 marker + `pip check` + 自检通过；
 - 两个命令都持 machine lock，忙时 `machine_busy`。
 
 ## 元
 
 ```bash
 daoyan help [命令] [--json]
-daoyan update [--check] [--manifest <url|路径>] [--from <路径|URL>] [--sha256 <hex>] [--proxy <url>]
+daoyan update [--check] [--manifest <url|路径>] [--from <路径|URL>] [--sha256 <hex>] \
+    [--proxy <url>] [--github-proxy <url[,url]|none>]
 daoyan update source [<latest.json|url>|--unset]
 daoyan update proxy [<url>|--unset]
 ```
 
-- 默认源：GitHub tags + `npm pack git+…`；
-- 自定义源：`latest.json` + 预构建 tgz，校验 SHA-256 后安装；
-- GitHub 用户也可用 `--manifest https://github.com/<owner>/<repo>/releases/latest/download/latest.json`，避免 GitHub API 限流；
+- 默认源：GitHub Release `latest.json`（`https://github.com/yuanbaobaoo/daoyan-cli/releases/latest/download/latest.json`）+ 预构建 tgz，校验 SHA-256 后安装；
+- **直连 GitHub 失败时自动尝试内置加速源**（`https://gh-proxy.com`、`https://gh.llkk.cc`），只对 `github.com` URL 生效；成功后会提示 `via_proxy`；
+- 清单直连失败时会从多个加速源读取，并要求 `version/tgz/sha256` 完全一致才继续；tgz 无论来自直连还是加速源都必须通过 SHA-256；
+- 已配置 HTTP 代理（`--proxy` / `DYCLI_UPDATE_PROXY` / 标准代理环境变量）时，默认不再叠加第三方加速源；
+- `--github-proxy <url[,url]>` 指定加速源；`--github-proxy none` 或 `DYCLI_UPDATE_GITHUB_PROXY=none` 关闭；
+- 默认清单不可达时回退 GitHub tags + `npm pack git+…`（旧版本兼容路径）；npm 若从 HTTPS 静默回退 SSH，错误中会提示改用 manifest；
+- 自定义源：`latest.json` + 预构建 tgz；显式配置的清单不可达时不会回退 GitHub（避免绕过用户选择）；
 - `update source` / `update proxy` 持久化到 `~/.dycli/update.json`（0600）；
-- 一次性覆盖：`--manifest`、`--from`、`--sha256`、`--proxy`；
-- 环境变量：`DYCLI_UPDATE_MANIFEST` / `DYCLI_UPDATE_FROM` / `DYCLI_UPDATE_SHA256` / `DYCLI_UPDATE_PROXY`；
+- 一次性覆盖：`--manifest`、`--from`、`--sha256`、`--proxy`、`--github-proxy`；
+- 环境变量：`DYCLI_UPDATE_MANIFEST` / `DYCLI_UPDATE_FROM` / `DYCLI_UPDATE_SHA256` / `DYCLI_UPDATE_PROXY` / `DYCLI_UPDATE_GITHUB_PROXY`；
 - 未配置 dycli 代理时也兼容标准 `HTTPS_PROXY` / `ALL_PROXY`；
 - 远程 `--from` 必须提供 `--sha256`；远程 manifest 的 tgz 必须有 `sha256`；
 - 自定义 manifest 不可达时不会回退 GitHub（避免绕过用户选择）：`--check` 返回 `note`，安装时报 `update_failed`；

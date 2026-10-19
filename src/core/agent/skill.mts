@@ -7,14 +7,14 @@ import { DaoyanCliError } from "../../shared/errors.mts";
 import { nowIso, sha256, writeFileAtomic } from "../../shared/fs.mts";
 import { AGENTS_FILE, SKILL_DIR } from "../project/types.mts";
 import {
-  BINDINGS_SCHEMA,
-  GRAPH_OPS_SCHEMA,
-  MACHINE_SCHEMA,
-  PROJECT_SCHEMA,
-  RUN_SCHEMA,
-  TASK_SCHEMA,
-  WORKFLOW_SCHEMA,
-  errorCatalog,
+    BINDINGS_SCHEMA,
+    GRAPH_OPS_SCHEMA,
+    MACHINE_SCHEMA,
+    PROJECT_SCHEMA,
+    RUN_SCHEMA,
+    TASK_SCHEMA,
+    WORKFLOW_SCHEMA,
+    errorCatalog,
 } from "./contract.mts";
 import { upsertAgentsBlock } from "./agents-md.mts";
 
@@ -22,312 +22,311 @@ import { upsertAgentsBlock } from "./agents-md.mts";
  * Skill 里的单个参数说明。
  */
 export interface SkillArg {
-  /**
-   * 参数名。
-   */
-  name: string;
-  /**
-   * 类型说明。
-   */
-  type: string;
-  /**
-   * 是否必填。
-   */
-  required?: boolean;
-  /**
-   * 是否可变长（如镜号列表）。
-   */
-  variadic?: boolean;
-  /**
-   * 说明。
-   */
-  description: string;
+    /**
+     * 参数名。
+     */
+    name: string;
+    /**
+     * 类型说明。
+     */
+    type: string;
+    /**
+     * 是否必填。
+     */
+    required?: boolean;
+    /**
+     * 是否可变长（如镜号列表）。
+     */
+    variadic?: boolean;
+    /**
+     * 说明。
+     */
+    description: string;
 }
 
 /**
  * Skill 里的单个 flag 说明。
  */
 export interface SkillFlag {
-  /**
-   * flag 名（含 --）。
-   */
-  name: string;
-  /**
-   * 取值类型。
-   */
-  type: string;
-  /**
-   * 是否必填。
-   */
-  required?: boolean;
-  /**
-   * 枚举值。
-   */
-  enum?: string[];
-  /**
-   * 默认值。
-   */
-  default?: unknown;
-  /**
-   * 说明。
-   */
-  description: string;
+    /**
+     * flag 名（含 --）。
+     */
+    name: string;
+    /**
+     * 取值类型。
+     */
+    type: string;
+    /**
+     * 是否必填。
+     */
+    required?: boolean;
+    /**
+     * 枚举值。
+     */
+    enum?: string[];
+    /**
+     * 默认值。
+     */
+    default?: unknown;
+    /**
+     * 说明。
+     */
+    description: string;
 }
 
 /**
  * Skill 生成所需的命令文档（CommandMeta 的结构子集）。
  */
 export interface SkillCommand {
-  /**
-   * 命令名（含子命令）。
-   */
-  name: string;
-  /**
-   * 分组。
-   */
-  group: string;
-  /**
-   * 一句话说明。
-   */
-  summary: string;
-  /**
-   * 用法字符串。
-   */
-  usage: string;
-  /**
-   * 位置参数。
-   */
-  args?: SkillArg[];
-  /**
-   * flags。
-   */
-  flags?: SkillFlag[];
-  /**
-   * 示例。
-   */
-  examples?: string[];
-  /**
-   * 是否实现。
-   */
-  implemented?: boolean;
+    /**
+     * 命令名（含子命令）。
+     */
+    name: string;
+    /**
+     * 分组。
+     */
+    group: string;
+    /**
+     * 一句话说明。
+     */
+    summary: string;
+    /**
+     * 用法字符串。
+     */
+    usage: string;
+    /**
+     * 位置参数。
+     */
+    args?: SkillArg[];
+    /**
+     * flags。
+     */
+    flags?: SkillFlag[];
+    /**
+     * 示例。
+     */
+    examples?: string[];
+    /**
+     * 是否实现。
+     */
+    implemented?: boolean;
 }
 
 /**
  * Skill 版本文件结构。
  */
 export interface SkillVersionFile {
-  /**
-   * 生成器版本（CLI 版本）。
-   */
-  generated_by: string;
-  /**
-   * 生成时间。
-   */
-  generated_at: string;
-  /**
-   * 文档哈希。
-   */
-  hash: string;
-  /**
-   * 生成的文件数。
-   */
-  files: number;
+    /**
+     * 生成器版本（CLI 版本）。
+     */
+    generated_by: string;
+    /**
+     * 生成时间。
+     */
+    generated_at: string;
+    /**
+     * 文档哈希。
+     */
+    hash: string;
+    /**
+     * 生成的文件数。
+     */
+    files: number;
 }
 
 /**
  * Skill 状态（status --json）。
  */
 export interface SkillState {
-  /**
-   * Skill 目录是否存在。
-   */
-  present: boolean;
-  /**
-   * Skill 目录相对路径。
-   */
-  path: string;
-  /**
-   * 已生成版本（可空）。
-   */
-  version: string | null;
-  /**
-   * 生成时间（可空）。
-   */
-  generated_at: string | null;
-  /**
-   * 与当前 CLI 的 registry 是否不一致。
-   */
-  stale: boolean;
-  /**
-   * 缺失文件。
-   */
-  missing_files: string[];
-  /**
-   * 缺失 AGENTS.md 管理块。
-   */
-  agents_block: boolean;
-  /**
-   * 期望的文档哈希（仅 stale 诊断时给出）。
-   */
-  expected_hash?: string;
+    /**
+     * Skill 目录是否存在。
+     */
+    present: boolean;
+    /**
+     * Skill 目录相对路径。
+     */
+    path: string;
+    /**
+     * 已生成版本（可空）。
+     */
+    version: string | null;
+    /**
+     * 生成时间（可空）。
+     */
+    generated_at: string | null;
+    /**
+     * 与当前 CLI 的 registry 是否不一致。
+     */
+    stale: boolean;
+    /**
+     * 缺失文件。
+     */
+    missing_files: string[];
+    /**
+     * 缺失 AGENTS.md 管理块。
+     */
+    agents_block: boolean;
+    /**
+     * 期望的文档哈希（仅 stale 诊断时给出）。
+     */
+    expected_hash?: string;
 }
 
 /**
  * 生成渲染文本（Markdown 列表）。
  */
 function renderArgs(args: SkillArg[] | undefined): string {
-  if (args === undefined || args.length === 0) return "（无）";
-  return args
-    .map(
-      (a) =>
-        `- \`${a.name}\`（${a.type}${a.required === true ? "，必填" : ""}${
-          a.variadic === true ? "，可多个" : ""
-        }）：${a.description}`,
-    )
-    .join("\n");
+    if (args === undefined || args.length === 0) return "（无）";
+    return args
+        .map(
+            (a) =>
+                `- \`${a.name}\`（${a.type}${a.required === true ? "，必填" : ""}${
+                    a.variadic === true ? "，可多个" : ""
+                }）：${a.description}`,
+        )
+        .join("\n");
 }
 
 /**
  * 渲染 flags 表格。
  */
 function renderFlags(flags: SkillFlag[] | undefined): string {
-  if (flags === undefined || flags.length === 0) return "（无）";
-  return flags
-    .map((f) => {
-      // 取值约束
-      const bits: string[] = [f.type];
-      if (f.required === true) bits.push("必填");
-      if (f.enum !== undefined) bits.push(`枚举 ${f.enum.join("|")}`);
-      if (f.default !== undefined) bits.push(`默认 ${JSON.stringify(f.default)}`);
-      return `- \`${f.name}\`（${bits.join("，")}）：${f.description}`;
-    })
-    .join("\n");
+    if (flags === undefined || flags.length === 0) return "（无）";
+    return flags
+        .map((f) => {
+            // 取值约束
+            const bits: string[] = [f.type];
+            if (f.required === true) bits.push("必填");
+            if (f.enum !== undefined) bits.push(`枚举 ${f.enum.join("|")}`);
+            if (f.default !== undefined) bits.push(`默认 ${JSON.stringify(f.default)}`);
+            return `- \`${f.name}\`（${bits.join("，")}）：${f.description}`;
+        })
+        .join("\n");
 }
 
 /**
  * 生成 SKILL.md。
  */
 function skillMd(version: string, commands: readonly SkillCommand[]): string {
-  // 命令索引行
-  const index = commands
-    .filter((c) => c.implemented !== false)
-    .map((c) => `- \`${c.usage}\` — ${c.summary}`)
-    .join("\n");
-  return [
-    "---",
-    "name: daoyan",
-    "description: Agent 驱动的 ComfyUI 节点编辑器与执行运行时。需要创建/修改 ComfyUI 工作流、查询节点、执行图片/视频生成、分镜（shot/batch/wrap）、查看生成任务状态时使用。所有操作通过 daoyan/dycli 命令完成，不要直接调用 ComfyUI HTTP。",
-    "---",
-    "",
-    "# daoyan（dycli）",
-    "",
-    `> 生成版本：v${version}。本文件由 \`daoyan skill update\` 维护；命令细节以 \`daoyan help --json\` 为最终权威。`,
-    "",
-    "## 定位",
-    "",
-    "dycli 是**程序化 ComfyUI 节点编辑器兼执行运行时**：",
-    "",
-    "- 查询节点目录、增删节点、连接端口、设置参数、校验工作流；",
-    "- `run` / `shot` / `batch` 执行生成，管理引擎生命周期与产物；",
-    "- 工作流、任务、运行记录都在项目内，可直接进 Git。",
-    "",
-    "## 铁律",
-    "",
-    "1. **不要直接调用 ComfyUI HTTP，也不要手工启动/停止引擎**；local 引擎由 task worker 按需拉起与停止。",
-    "2. **不要编辑** `engine/`、`logs/`、`.dycli/`；本机配置由 `daoyan init` 管理。",
-    "3. **机器决策一律加 `--json`**；非 TTY 默认就是 JSON。",
-    "4. **同一设备同一时刻只允许一个 generation task**；拿到 `machine_busy` 时查看 owner，等待或 `run cancel`，不要并发重试。",
-    "5. **`run` 默认异步**：返回 `task_id` 不代表成功；用 `status --task <id> --wait` 或轮询 `status --task <id>`。",
-    "6. 不确定参数时先运行 `daoyan help --json`，不要猜测。",
-    "",
-    "## 快速开始",
-    "",
-    "```bash",
-    "# 新项目（当前目录）",
-    "daoyan init --mode=local --modelpath /data/models",
-    "# 或连接已有 ComfyUI",
-    "daoyan init --mode=remote --url http://gpu-box:8188",
-    "",
-    "# 查节点",
-    "daoyan workflow nodes --filter KSampler --json",
-    "daoyan workflow node KSampler --json",
-    "```",
-    "",
-    "> local init 安装依赖时默认使用阿里云 PyPI（`https://mirrors.aliyun.com/pypi/simple/`）；网络/镜像不适用时用 `--mirror https://pypi.org/simple/` 覆盖。",
-    "",
-    "## 核心闭环",
-    "",
-    "```text",
-    "workflow nodes → workflow apply / set → workflow validate → run → status --task --wait → runs/<id>/outputs",
-    "```",
-    "",
-    "```bash",
-    "daoyan workflow new t2v",
-    "daoyan workflow import ./from-comfyui.json --name t2v",
-    "daoyan workflow apply t2v --ops ./ops.json --json",
-    "daoyan workflow validate t2v --json",
-    "daoyan run t2v --set seed=42 --label shot:01 --request-id shot-01 --json",
-    "daoyan status --task <task_id> --wait --json",
-    "```",
-    "",
-    "## 异步协议（摘要）",
-    "",
-    "- 创建 task：`run/shot/retake/batch` 默认异步，返回 `task_id`、`status`、`events_path`、`next_actions`；",
-    "- 等待：`status --task <id> --wait`；SIGINT 只停止等待，不取消 worker；",
-    "- 取消：`run cancel <id>`；",
-    "- 幂等：`--request-id <id>`，重试返回同一个 task；",
-    "- 事件：`logs --task <id> -f --json`。",
-    "",
-    "## 生命周期",
-    "",
-    "- local：任务开始拉起项目内 ComfyUI，任务结束（成功/失败/OOM/取消）`/free` + 停止；",
-    "- remote：只走 HTTP，不碰远端进程；任务结束按 `free_after_task` 策略 `/free`；",
-    "- GPU 接管：`project.json` 的 `gpu.takeover=true` 时自动卸载/驱逐内置目标，任务后恢复；默认关闭。",
-    "",
-    "## 版本与 Git",
-    "",
-    "- 工作流真源：`workflows/*.json`；每次 run 快照到 `runs/<run_id>/`，不可变；",
-    "- 二进制产物走 Git LFS；记录不含绝对路径；",
-    "- 不提供自定义 revision/tag：用 Git。",
-    "",
-    "## 错误恢复",
-    "",
-    "- `machine_busy`：等待 owner 或取消；不要并发。",
-    "- `engine_oom`：降低分辨率/帧数/步数，或开启 `gpu.takeover`。",
-    "- `model_not_found` / `node_missing`：检查 `modelpath` / custom nodes，修正后重试。",
-    "- `workflow_invalid`：`workflow validate <name> --json` 按 `issues[]` 修正。",
-    "- `engine_unreachable`：remote 模式不会代为启动；检查 URL/网络。",
-    "- `provision_failed` 且日志含 `ensurepip is not available` / `Failing command: .../.venv/bin/python3`：Ubuntu/Debian 缺少 `python3.X-venv`；安装对应包、删除半成品 `engine/.venv` 后重跑 `daoyan init`。完整步骤见 `reference/lifecycle.md`。",
-    "",
-    "完整错误码见 `reference/errors.md`。",
-    "",
-    "## 命令索引",
-    "",
-    index,
-    "",
-    "## 参考",
-    "",
-    "- `reference/commands.md`：全部命令、参数、flag、JSON",
-    "- `reference/config.md`：project.json / machine.json / task / run 记录",
-    "- `reference/workflow.md`：图模型、graph ops、bindings、节点目录",
-    "- `reference/lifecycle.md`：local/remote、机器锁、GPU 接管、cleanup",
-    "- `reference/errors.md`：错误码与恢复矩阵",
-    "- `reference/protocol.md`：Agent 异步协议（start/poll/wait/cancel/retry）",
-    "- `reference/recipes.md`：shot / batch / wrap / 首帧与接力",
-    "",
-  ].join("\n");
+    // 命令索引行
+    const index = commands
+        .filter((c) => c.implemented !== false)
+        .map((c) => `- \`${c.usage}\` — ${c.summary}`)
+        .join("\n");
+    return [
+        "---",
+        "name: daoyan",
+        "description: Agent 驱动的 ComfyUI 节点编辑器与执行运行时。需要创建/修改 ComfyUI 工作流、查询节点、执行图片/视频生成、分镜（shot/batch/wrap）、查看生成任务状态时使用。所有操作通过 daoyan/dycli 命令完成，不要直接调用 ComfyUI HTTP。",
+        "---",
+        "",
+        "# daoyan（dycli）",
+        "",
+        `> 生成版本：v${version}。本文件由 \`daoyan skill update\` 维护；命令细节以 \`daoyan help --json\` 为最终权威。`,
+        "",
+        "## 定位",
+        "",
+        "dycli 是**程序化 ComfyUI 节点编辑器兼执行运行时**：",
+        "",
+        "- 查询节点目录、增删节点、连接端口、设置参数、校验工作流；",
+        "- `run` / `shot` / `batch` 执行生成，管理引擎生命周期与产物；",
+        "- 工作流、任务、运行记录都在项目内，可直接进 Git。",
+        "",
+        "## 铁律",
+        "",
+        "1. **不要直接调用 ComfyUI HTTP，也不要手工启动/停止引擎**；local 引擎由 task worker 按需拉起与停止。",
+        "2. **不要编辑** `engine/`、`logs/`、`.dycli/`；本机配置由 `daoyan init` 管理。",
+        "3. **机器决策一律加 `--json`**；非 TTY 默认就是 JSON。",
+        "4. **同一设备同一时刻只允许一个 generation task**；拿到 `machine_busy` 时查看 owner，等待或 `run cancel`，不要并发重试。",
+        "5. **`run` 默认异步**：返回 `task_id` 不代表成功；用 `status --task <id> --wait` 或轮询 `status --task <id>`。",
+        "6. 不确定参数时先运行 `daoyan help --json`，不要猜测。",
+        "",
+        "## 快速开始",
+        "",
+        "```bash",
+        "# 新项目（当前目录）",
+        "daoyan init --mode=local --modelpath /data/models",
+        "# 或连接已有 ComfyUI",
+        "daoyan init --mode=remote --url http://gpu-box:8188",
+        "",
+        "# 查节点",
+        "daoyan workflow nodes --filter KSampler --json",
+        "daoyan workflow node KSampler --json",
+        "```",
+        "",
+        "> local init 安装依赖时默认使用阿里云 PyPI（`https://mirrors.aliyun.com/pypi/simple/`）；网络/镜像不适用时用 `--mirror https://pypi.org/simple/` 覆盖。",
+        "",
+        "## 核心闭环",
+        "",
+        "```text",
+        "workflow nodes → workflow apply / set → workflow validate → run → status --task --wait → runs/<id>/outputs",
+        "```",
+        "",
+        "```bash",
+        "daoyan workflow new t2v",
+        "daoyan workflow import ./from-comfyui.json --name t2v",
+        "daoyan workflow apply t2v --ops ./ops.json --json",
+        "daoyan workflow validate t2v --json",
+        "daoyan run t2v --set seed=42 --label shot:01 --request-id shot-01 --json",
+        "daoyan status --task <task_id> --wait --json",
+        "```",
+        "",
+        "## 异步协议（摘要）",
+        "",
+        "- 创建 task：`run/shot/retake/batch` 默认异步，返回 `task_id`、`status`、`events_path`、`next_actions`；",
+        "- 等待：`status --task <id> --wait`；SIGINT 只停止等待，不取消 worker；",
+        "- 取消：`run cancel <id>`；",
+        "- 幂等：`--request-id <id>`，重试返回同一个 task；",
+        "- 事件：`logs --task <id> -f --json`。",
+        "",
+        "## 生命周期",
+        "",
+        "- local：任务开始拉起项目内 ComfyUI，任务结束（成功/失败/OOM/取消）`/free` + 停止；",
+        "- remote：只走 HTTP，不碰远端进程；任务结束按 `free_after_task` 策略 `/free`；",
+        "- GPU 接管：`project.json` 的 `gpu.takeover=true` 时自动卸载/驱逐内置目标，任务后恢复；默认关闭。",
+        "",
+        "## 版本与 Git",
+        "",
+        "- 工作流真源：`workflows/*.json`；每次 run 快照到 `runs/<run_id>/`，不可变；",
+        "- 二进制产物走 Git LFS；记录不含绝对路径；",
+        "- 不提供自定义 revision/tag：用 Git。",
+        "",
+        "## 错误恢复",
+        "",
+        "- `machine_busy`：等待 owner 或取消；不要并发。",
+        "- `engine_oom`：降低分辨率/帧数/步数，或开启 `gpu.takeover`。",
+        "- `model_not_found` / `node_missing`：检查 `modelpath` / custom nodes，修正后重试。",
+        "- `workflow_invalid`：`workflow validate <name> --json` 按 `issues[]` 修正。",
+        "- `engine_unreachable`：remote 模式不会代为启动；检查 URL/网络。",
+        "- `provision_failed` 且日志含 `ensurepip is not available` / `Failing command: .../.venv/bin/python3`：Ubuntu/Debian 缺少 `python3.X-venv`；安装对应包、删除半成品 `engine/.venv` 后重跑 `daoyan init`。完整步骤见 `reference/lifecycle.md`。",
+        "",
+        "完整错误码见 `reference/errors.md`。",
+        "",
+        "## 命令索引",
+        "",
+        index,
+        "",
+        "## 参考",
+        "",
+        "- `reference/commands.md`：全部命令、参数、flag、JSON",
+        "- `reference/config.md`：project.json / machine.json / task / run 记录",
+        "- `reference/workflow.md`：图模型、graph ops、bindings、节点目录",
+        "- `reference/lifecycle.md`：local/remote、机器锁、GPU 接管、cleanup",
+        "- `reference/errors.md`：错误码与恢复矩阵",
+        "- `reference/protocol.md`：Agent 异步协议（start/poll/wait/cancel/retry）",
+        "- `reference/recipes.md`：shot / batch / wrap / 首帧与接力",
+        "",
+    ].join("\n");
 }
 
-
 function commandsMd(commands: readonly SkillCommand[]): string {
-  // 逐命令详情
-  const blocks = commands.map((c) => {
-    // 示例行
-    const examples =
-      c.examples !== undefined && c.examples.length > 0
-        ? `\n示例：\n${c.examples.map((e) => `\`\`\`bash\n${e}\n\`\`\``).join("\n")}`
-        : "";
-    return `## ${c.name}
+    // 逐命令详情
+    const blocks = commands.map((c) => {
+        // 示例行
+        const examples =
+            c.examples !== undefined && c.examples.length > 0
+                ? `\n示例：\n${c.examples.map((e) => `\`\`\`bash\n${e}\n\`\`\``).join("\n")}`
+                : "";
+        return `## ${c.name}
 
 ${c.summary}
 
@@ -342,8 +341,8 @@ Flags：
 ${renderFlags(c.flags)}
 ${examples}
 `;
-  });
-  return `# 命令参考
+    });
+    return `# 命令参考
 
 > 生成文件。权威定义：\`daoyan help --json\`。
 
@@ -355,7 +354,7 @@ ${blocks.join("\n---\n\n")}
  * 生成 reference/config.md。
  */
 function configMd(): string {
-  return `# 配置与记录
+    return `# 配置与记录
 
 ## project.json（共享，进 Git）
 
@@ -464,7 +463,7 @@ ${JSON.stringify(RUN_SCHEMA, null, 2)}
  * 生成 reference/workflow.md。
  */
 function workflowMd(): string {
-  return `# 工作流编辑
+    return `# 工作流编辑
 
 ## 图模型
 
@@ -569,7 +568,7 @@ ${JSON.stringify(BINDINGS_SCHEMA, null, 2)}
  * 生成 reference/lifecycle.md。
  */
 function lifecycleMd(): string {
-  return `# 引擎生命周期
+    return `# 引擎生命周期
 
 ## local
 
@@ -693,16 +692,16 @@ ERROR[provision_failed] python3 -m venv 失败（退出码 1）。Ubuntu 需 pyt
  * 生成 reference/errors.md。
  */
 function errorsMd(): string {
-  // 错误目录行
-  const rows = errorCatalog()
-    .map(
-      (e) =>
-        `| \`${String(e.code)}\` | ${e.retryable === true ? "可重试" : "不可重试"} | ${String(
-          e.retry_after_ms ?? "-",
-        )} | ${String(e.hint)} |`,
-    )
-    .join("\n");
-  return `# 错误码
+    // 错误目录行
+    const rows = errorCatalog()
+        .map(
+            (e) =>
+                `| \`${String(e.code)}\` | ${e.retryable === true ? "可重试" : "不可重试"} | ${String(
+                    e.retry_after_ms ?? "-",
+                )} | ${String(e.hint)} |`,
+        )
+        .join("\n");
+    return `# 错误码
 
 错误信封：
 
@@ -747,7 +746,7 @@ ${rows}
  * 生成 reference/protocol.md。
  */
 function protocolMd(): string {
-  return `# Agent 异步协议
+    return `# Agent 异步协议
 
 ## 启动
 
@@ -828,7 +827,7 @@ daoyan logs --run <run_id> --json
  * 生成 reference/recipes.md。
  */
 function recipesMd(): string {
-  return `# Recipe：shot / batch / wrap
+    return `# Recipe：shot / batch / wrap
 
 ## 前置
 
@@ -894,139 +893,137 @@ Git 管理工作流历史；run 快照不可变，重拍不覆盖。
  * 生成所有 Skill 文件（不含 VERSION）。
  */
 export function generateSkillFiles(version: string, commands: readonly SkillCommand[]): Map<string, string> {
-  // 生成文件表
-  const files = new Map<string, string>();
-  files.set("SKILL.md", skillMd(version, commands));
-  files.set("reference/commands.md", commandsMd(commands));
-  files.set("reference/config.md", configMd());
-  files.set("reference/workflow.md", workflowMd());
-  files.set("reference/lifecycle.md", lifecycleMd());
-  files.set("reference/errors.md", errorsMd());
-  files.set("reference/protocol.md", protocolMd());
-  files.set("reference/recipes.md", recipesMd());
-  return files;
+    // 生成文件表
+    const files = new Map<string, string>();
+    files.set("SKILL.md", skillMd(version, commands));
+    files.set("reference/commands.md", commandsMd(commands));
+    files.set("reference/config.md", configMd());
+    files.set("reference/workflow.md", workflowMd());
+    files.set("reference/lifecycle.md", lifecycleMd());
+    files.set("reference/errors.md", errorsMd());
+    files.set("reference/protocol.md", protocolMd());
+    files.set("reference/recipes.md", recipesMd());
+    return files;
 }
 
 /**
  * 计算生成文档的稳定哈希。
  */
 export function skillHash(files: Map<string, string>): string {
-  // 按路径排序后拼接
-  const parts = [...files.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([p, c]) => `${p}\n${c}`);
-  return sha256(parts.join("\n\u0000\n"));
+    // 按路径排序后拼接
+    const parts = [...files.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([p, c]) => `${p}\n${c}`);
+    return sha256(parts.join("\n\u0000\n"));
 }
 
 /**
  * Skill 目录绝对路径。
  */
 export function skillDir(root: string): string {
-  return join(root, SKILL_DIR);
+    return join(root, SKILL_DIR);
 }
 
 /**
  * 写入 Skill 与 AGENTS.md 管理块。
  */
 export function writeSkill(
-  root: string,
-  version: string,
-  commands: readonly SkillCommand[],
+    root: string,
+    version: string,
+    commands: readonly SkillCommand[],
 ): { dir: string; hash: string; files: number } {
-  // 生成文件
-  const files = generateSkillFiles(version, commands);
-  // 文档哈希
-  const hash = skillHash(files);
-  // 目录
-  const dir = skillDir(root);
-  try {
-    for (const [rel, content] of files) {
-      writeFileAtomic(join(dir, rel), content);
+    // 生成文件
+    const files = generateSkillFiles(version, commands);
+    // 文档哈希
+    const hash = skillHash(files);
+    // 目录
+    const dir = skillDir(root);
+    try {
+        for (const [rel, content] of files) {
+            writeFileAtomic(join(dir, rel), content);
+        }
+        // 清理旧 reference 文件（只限本工具生成的 .md）
+        const refDir = join(dir, "reference");
+        if (existsSync(refDir)) {
+            for (const name of readdirSync(refDir)) {
+                if (!name.endsWith(".md")) continue;
+                if (!files.has(`reference/${name}`)) rmSync(join(refDir, name), { force: true });
+            }
+        }
+        // VERSION
+        const versionFile: SkillVersionFile = {
+            generated_by: `daoyan v${version}`,
+            generated_at: nowIso(),
+            hash,
+            files: files.size,
+        };
+        writeFileAtomic(join(dir, "VERSION"), JSON.stringify(versionFile, null, 2) + "\n");
+        // AGENTS.md 管理块
+        upsertAgentsBlock(join(root, AGENTS_FILE));
+    } catch (e) {
+        if (e instanceof DaoyanCliError) throw e;
+        throw new DaoyanCliError({
+            code: "skill_write_failed",
+            message: `生成项目内 Skill 失败：${e instanceof Error ? e.message : String(e)}`,
+        });
     }
-    // 清理旧 reference 文件（只限本工具生成的 .md）
-    const refDir = join(dir, "reference");
-    if (existsSync(refDir)) {
-      for (const name of readdirSync(refDir)) {
-        if (!name.endsWith(".md")) continue;
-        if (!files.has(`reference/${name}`)) rmSync(join(refDir, name), { force: true });
-      }
-    }
-    // VERSION
-    const versionFile: SkillVersionFile = {
-      generated_by: `daoyan v${version}`,
-      generated_at: nowIso(),
-      hash,
-      files: files.size,
-    };
-    writeFileAtomic(join(dir, "VERSION"), JSON.stringify(versionFile, null, 2) + "\n");
-    // AGENTS.md 管理块
-    upsertAgentsBlock(join(root, AGENTS_FILE));
-  } catch (e) {
-    if (e instanceof DaoyanCliError) throw e;
-    throw new DaoyanCliError({
-      code: "skill_write_failed",
-      message: `生成项目内 Skill 失败：${e instanceof Error ? e.message : String(e)}`,
-    });
-  }
-  return { dir, hash, files: files.size };
+    return { dir, hash, files: files.size };
 }
 
 /**
  * 读取 Skill 状态并判断是否 stale。
  */
 export function skillState(root: string, version: string, commands: readonly SkillCommand[]): SkillState {
-  // 目录
-  const dir = skillDir(root);
-  // 期望文档
-  const expected = generateSkillFiles(version, commands);
-  // 期望哈希
-  const expectedHash = skillHash(expected);
-  // VERSION 文件
-  const versionFile = join(dir, "VERSION");
-  // 缺失文件
-  const missing: string[] = [];
-  for (const rel of expected.keys()) {
-    if (!existsSync(join(dir, rel))) missing.push(rel);
-  }
-  if (!existsSync(versionFile)) missing.push("VERSION");
-  // AGENTS.md 管理块
-  const agentsFile = join(root, AGENTS_FILE);
-  const agentsOk =
-    existsSync(agentsFile) &&
-    readFileSync(agentsFile, "utf8").includes("<!-- daoyan:skill:start -->");
-  if (!existsSync(join(dir, "SKILL.md"))) {
+    // 目录
+    const dir = skillDir(root);
+    // 期望文档
+    const expected = generateSkillFiles(version, commands);
+    // 期望哈希
+    const expectedHash = skillHash(expected);
+    // VERSION 文件
+    const versionFile = join(dir, "VERSION");
+    // 缺失文件
+    const missing: string[] = [];
+    for (const rel of expected.keys()) {
+        if (!existsSync(join(dir, rel))) missing.push(rel);
+    }
+    if (!existsSync(versionFile)) missing.push("VERSION");
+    // AGENTS.md 管理块
+    const agentsFile = join(root, AGENTS_FILE);
+    const agentsOk = existsSync(agentsFile) && readFileSync(agentsFile, "utf8").includes("<!-- daoyan:skill:start -->");
+    if (!existsSync(join(dir, "SKILL.md"))) {
+        return {
+            present: false,
+            path: SKILL_DIR,
+            version: null,
+            generated_at: null,
+            stale: true,
+            missing_files: missing,
+            agents_block: agentsOk,
+            expected_hash: expectedHash,
+        };
+    }
+    // 读取版本
+    let generatedAt: string | null = null;
+    let generatedBy: string | null = null;
+    let hash: string | null = null;
+    try {
+        // VERSION 内容
+        const raw = JSON.parse(readFileSync(versionFile, "utf8")) as Partial<SkillVersionFile>;
+        generatedAt = raw.generated_at ?? null;
+        generatedBy = raw.generated_by ?? null;
+        hash = raw.hash ?? null;
+    } catch {
+        // 版本文件损坏按 stale
+    }
+    // 期望的版本串
+    const expectedBy = `daoyan v${version}`;
     return {
-      present: false,
-      path: SKILL_DIR,
-      version: null,
-      generated_at: null,
-      stale: true,
-      missing_files: missing,
-      agents_block: agentsOk,
-      expected_hash: expectedHash,
+        present: true,
+        path: SKILL_DIR,
+        version: generatedBy,
+        generated_at: generatedAt,
+        stale: hash !== expectedHash || generatedBy !== expectedBy || missing.length > 0 || !agentsOk,
+        missing_files: missing,
+        agents_block: agentsOk,
+        expected_hash: expectedHash,
     };
-  }
-  // 读取版本
-  let generatedAt: string | null = null;
-  let generatedBy: string | null = null;
-  let hash: string | null = null;
-  try {
-    // VERSION 内容
-    const raw = JSON.parse(readFileSync(versionFile, "utf8")) as Partial<SkillVersionFile>;
-    generatedAt = raw.generated_at ?? null;
-    generatedBy = raw.generated_by ?? null;
-    hash = raw.hash ?? null;
-  } catch {
-    // 版本文件损坏按 stale
-  }
-  // 期望的版本串
-  const expectedBy = `daoyan v${version}`;
-  return {
-    present: true,
-    path: SKILL_DIR,
-    version: generatedBy,
-    generated_at: generatedAt,
-    stale: hash !== expectedHash || generatedBy !== expectedBy || missing.length > 0 || !agentsOk,
-    missing_files: missing,
-    agents_block: agentsOk,
-    expected_hash: expectedHash,
-  };
 }

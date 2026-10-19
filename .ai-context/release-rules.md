@@ -47,7 +47,7 @@ git push origin master vX.Y.Z
 
 推送 `v*` tag 后 GitHub Actions 自动执行：
 
-1. `npm ci` → `npm run typecheck` → `npm run build`
+1. `npm ci` → `npm run format:check` → `npm run typecheck` → `npm run build`
 2. **dist 一致性校验**（与源码 diff，不一致失败）
 3. `npm pack` 打包 tgz
 4. 生成 `latest.json` 与 `SHA256SUMS`

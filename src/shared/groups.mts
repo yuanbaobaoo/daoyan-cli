@@ -5,10 +5,10 @@ export type CommandGroup = "project" | "workflow" | "production" | "engine" | "o
 
 // 分组 → 中文标签（help 输出用）
 export const GROUP_LABEL: Record<CommandGroup, string> = {
-  project: "项目",
-  workflow: "工作流",
-  production: "生产",
-  engine: "引擎",
-  ops: "运维",
-  meta: "元",
+    project: "项目",
+    workflow: "工作流",
+    production: "生产",
+    engine: "引擎",
+    ops: "运维",
+    meta: "元",
 };

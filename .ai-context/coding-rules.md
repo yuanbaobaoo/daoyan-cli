@@ -2,8 +2,8 @@
 
 > 供本仓库的 AI 代理与协作者遵守。
 >
-> **本项目适配说明**：daoyan-cli 现有代码为 **2 空格缩进**，遵循仓库现状（缩进规则见下方豁免）；
-> 其余规则全部适用。Vue 相关部分当前项目无前端，供未来参考。
+> **本项目适配说明**：daoyan-cli 的 TS / JS / MTS 统一 **4 空格缩进**（强制；由 `.prettierrc.json`
+> 与 `npm run format:check` 保证）。其余规则全部适用；Vue 相关部分当前项目无前端，供未来参考。
 
 ## 0. 通用约定
 
@@ -11,10 +11,12 @@
 - 最外层独立函数用 `function` 声明，禁止 `const fn = () => {}`；函数内部回调一律用箭头函数（forEach / map / filter / .catch / setTimeout / 生命周期钩子）
 - Promise 一律 `async/await` + `try/catch`，禁止 `.then/.catch` 链
 
-## 1. 缩进（原规范为 4 空格强制）
+## 1. 缩进（4 空格，强制）
 
-- **原规范**：Vue / CSS / TS / JS 统一 4 空格，禁止 2 空格或 Tab；编辑器与格式化工具 `tabWidth: 4`
-- **本项目**：现有代码全部为 2 空格——**维持 2 空格**，保持仓库内一致；新文件不得混用 Tab
+- TS / JS / MTS / Vue / CSS 统一 **4 空格**，禁止 2 空格或 Tab；
+- 编辑器与格式化工具统一 `tabWidth: 4`，仓库配置见 `.prettierrc.json`；
+- 提交前必须运行 `npm run format:check`；自动修复运行 `npm run format`；
+- 生成文件（`dist/`、`package-lock.json`）按工具输出保留；模板字符串/文档示例内部的内容不按代码缩进处理。
 
 ## 2. 注释风格
 
@@ -111,3 +113,4 @@ watch(
 
 - 优先最小改动；不影响已有功能；不修改无关文件；修改前说明影响范围
 - 使用已有工具类/公共库，禁止重复造轮子；保持与当前模块风格一致
+- 提交前至少运行：`npm run format:check`、`npm run typecheck`、`npm test`

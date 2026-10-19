@@ -263,9 +263,7 @@ function emitError(err) {
   if (err.runId !== void 0) error.run_id = err.runId;
   if (err.nextActions !== void 0) error.next_actions = err.nextActions;
   if (err.details !== void 0) error.details = err.details;
-  process.stdout.write(
-    JSON.stringify({ ok: false, schema_version: SCHEMA_VERSION, error }) + "\n"
-  );
+  process.stdout.write(JSON.stringify({ ok: false, schema_version: SCHEMA_VERSION, error }) + "\n");
 }
 var SCHEMA_VERSION;
 var init_json = __esm({
@@ -296,14 +294,7 @@ __export(fs_exports, {
   writeJsonAtomic: () => writeJsonAtomic
 });
 import { createHash, randomBytes } from "crypto";
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  writeFileSync
-} from "fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "fs";
 import { dirname, sep } from "path";
 function writeFileAtomic(file, content) {
   mkdirSync(dirname(file), { recursive: true });
@@ -860,17 +851,7 @@ var init_contract = __esm({
       $schema: "https://json-schema.org/draft/2020-12/schema",
       title: "tasks/<task_id>/task.json",
       type: "object",
-      required: [
-        "task_id",
-        "kind",
-        "machine_id",
-        "status",
-        "mode",
-        "runs",
-        "created_at",
-        "next_actions",
-        "options"
-      ],
+      required: ["task_id", "kind", "machine_id", "status", "mode", "runs", "created_at", "next_actions", "options"],
       properties: {
         task_id: { type: "string" },
         kind: { enum: ["run", "shot", "retake", "batch", "metadata"] },
@@ -1887,7 +1868,9 @@ function printCommandHelp(meta) {
   if (meta.args !== void 0 && meta.args.length > 0) {
     lines.push("", "\u53C2\u6570:");
     for (const a of meta.args) {
-      lines.push(`  ${a.name} (${a.type}${a.required === true ? "\uFF0C\u5FC5\u586B" : ""}${a.variadic === true ? "\uFF0C\u53EF\u591A\u4E2A" : ""}) \u2014 ${a.description}`);
+      lines.push(
+        `  ${a.name} (${a.type}${a.required === true ? "\uFF0C\u5FC5\u586B" : ""}${a.variadic === true ? "\uFF0C\u53EF\u591A\u4E2A" : ""}) \u2014 ${a.description}`
+      );
     }
   }
   if (meta.flags !== void 0 && meta.flags.length > 0) {
@@ -2430,7 +2413,9 @@ function spawnCapture(cmd, args, opts = {}) {
     });
     child.on(
       "error",
-      (e) => rejectPromise(new DaoyanCliError({ code: "external_tool_missing", message: `\u65E0\u6CD5\u542F\u52A8 ${cmd}\uFF1A${e.message}` }))
+      (e) => rejectPromise(
+        new DaoyanCliError({ code: "external_tool_missing", message: `\u65E0\u6CD5\u542F\u52A8 ${cmd}\uFF1A${e.message}` })
+      )
     );
     child.on("close", (code) => resolvePromise({ code: code ?? -1, stdout: out }));
   });
@@ -2525,14 +2510,7 @@ function resolveUpdateSource(flags, env, config) {
 }
 async function installTgz(tgzPath) {
   const npm = process.platform === "win32" ? "npm.cmd" : "npm";
-  const r = await spawnCapture(npm, [
-    "install",
-    "-g",
-    "--ignore-scripts",
-    "--no-audit",
-    "--no-fund",
-    tgzPath
-  ]);
+  const r = await spawnCapture(npm, ["install", "-g", "--ignore-scripts", "--no-audit", "--no-fund", tgzPath]);
   if (r.code !== 0) {
     throw new DaoyanCliError({
       code: "update_failed",
@@ -2672,13 +2650,7 @@ async function updateFromTgz(ctx2, source) {
   say(`\u4ECE ${remote ? redactUrl(location) : location} \u5B89\u88C5...`);
   const tmp = mkdtempSync(join3(tmpdir(), "daoyan-cli-update-"));
   try {
-    const tgzPath = await materializeTgz(
-      { location, remote },
-      source.sha256,
-      source.proxy,
-      VERSION,
-      tmp
-    );
+    const tgzPath = await materializeTgz({ location, remote }, source.sha256, source.proxy, VERSION, tmp);
     await installTgz(tgzPath);
     say("\u5B89\u88C5\u5B8C\u6210\u3002\u9A8C\u8BC1\uFF1Adaoyan --version");
     if (ctx2.json) {
@@ -2960,16 +2932,7 @@ function scaffoldProject(root, name) {
   if (!existsSync6(ignore)) {
     writeFileAtomic(
       ignore,
-      [
-        "engine/",
-        "logs/",
-        ".dycli/",
-        "relay_frames/",
-        "concat_list.txt",
-        "*.log",
-        ".DS_Store",
-        ""
-      ].join("\n")
+      ["engine/", "logs/", ".dycli/", "relay_frames/", "concat_list.txt", "*.log", ".DS_Store", ""].join("\n")
     );
     created.push(".gitignore");
   }
@@ -3552,11 +3515,7 @@ var init_client = __esm({
         const form = new FormData();
         form.append("image", new Blob([new Uint8Array(bytes)]), filename);
         form.append("overwrite", String(overwrite));
-        const res = await fetchWithTimeout(
-          this.url("/upload/image"),
-          { method: "POST", body: form },
-          6e4
-        );
+        const res = await fetchWithTimeout(this.url("/upload/image"), { method: "POST", body: form }, 6e4);
         if (!res.ok) {
           throw new Error(`POST /upload/image -> HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
         }
@@ -3965,9 +3924,7 @@ function availableContainerdSockets() {
   return CONTAINERD_SOCKETS.filter((p) => existsSync10(p));
 }
 function isEndpointError(stderr) {
-  return /connect|connection|no such file|refused|socket|failed to connect|code = Unavailable/i.test(
-    stderr
-  );
+  return /connect|connection|no such file|refused|socket|failed to connect|code = Unavailable/i.test(stderr);
 }
 var CRI_ENDPOINTS, CONTAINERD_SOCKETS, CONTAINERD_NAMESPACES, crictlChecked;
 var init_cri = __esm({
@@ -4161,10 +4118,7 @@ function parseCrictlInspect(raw) {
   const pidRaw = status.pid;
   const hostPid = typeof pidRaw === "number" && Number.isInteger(pidRaw) && pidRaw > 0 ? pidRaw : null;
   const infoConfig = asObject(asObject(o?.info)?.config);
-  const command = [
-    ...commandArray(infoConfig?.command),
-    ...commandArray(infoConfig?.args)
-  ].filter((x) => x !== "");
+  const command = [...commandArray(infoConfig?.command), ...commandArray(infoConfig?.args)].filter((x) => x !== "");
   return { runtime: "crictl", id: idRaw.toLowerCase(), name, image, command, running, hostPid };
 }
 function matchContainerTarget(text) {
@@ -4223,11 +4177,7 @@ async function inspectContainer(id, hint, crictlEndpoint) {
     if (!order.includes(r)) order.push(r);
   }
   for (const runtime of order) {
-    const info = await inspectWith(
-      runtime,
-      id,
-      runtime === "crictl" ? crictlEndpoint : void 0
-    );
+    const info = await inspectWith(runtime, id, runtime === "crictl" ? crictlEndpoint : void 0);
     if (info === null) continue;
     if (info.id !== id.toLowerCase()) continue;
     if (info.hostPid !== null) {
@@ -4324,9 +4274,7 @@ async function findContainerServices(opts) {
       };
     }
     if (!info.running) continue;
-    const rule = matchContainerTarget(
-      [info.image, info.name, ...info.command, ...procArgs].join(" ")
-    );
+    const rule = matchContainerTarget([info.image, info.name, ...info.command, ...procArgs].join(" "));
     if (rule === void 0) continue;
     if (rule.kind === "process") {
       const message = `\u5BB9\u5668 ${info.name !== "" ? info.name : info.id.slice(0, 12)}\uFF1A${unsupportedProcessMessage(rule)}`;
@@ -4475,11 +4423,9 @@ async function crictlExec(channel, args, timeoutMs) {
   if (!await crictlAvailable()) return null;
   let last = null;
   for (const ep of crictlEndpointCandidates(channel.crictl_endpoint)) {
-    const r = await tryExecCapture(
-      "crictl",
-      crictlArgs(ep, ["exec", channel.container_id, ...args]),
-      { timeoutMs }
-    );
+    const r = await tryExecCapture("crictl", crictlArgs(ep, ["exec", channel.container_id, ...args]), {
+      timeoutMs
+    });
     if (r === null) continue;
     if (r.code === 0) return r;
     if (!isEndpointError(r.stderr)) return r;
@@ -4500,15 +4446,7 @@ async function ctrExec(channel, args, timeoutMs) {
       const prefix = ["--namespace", namespace, ...address !== void 0 ? ["--address", address] : []];
       const r = await tryExecCapture(
         "ctr",
-        [
-          ...prefix,
-          "task",
-          "exec",
-          "--exec-id",
-          execId,
-          channel.container_id,
-          ...args
-        ],
+        [...prefix, "task", "exec", "--exec-id", execId, channel.container_id, ...args],
         { timeoutMs }
       );
       if (r === null) continue;
@@ -4523,11 +4461,9 @@ async function nerdctlExec(channel, args, timeoutMs) {
   const namespaces = channel.ctr_namespace !== void 0 ? [channel.ctr_namespace] : CONTAINERD_NAMESPACES;
   let last = null;
   for (const namespace of namespaces) {
-    const r = await tryExecCapture(
-      "nerdctl",
-      ["--namespace", namespace, "exec", channel.container_id, ...args],
-      { timeoutMs }
-    );
+    const r = await tryExecCapture("nerdctl", ["--namespace", namespace, "exec", channel.container_id, ...args], {
+      timeoutMs
+    });
     if (r === null) continue;
     if (r.code === 0) return r;
     if (!isEndpointError(r.stderr)) return r;
@@ -4629,11 +4565,7 @@ async function load(channel, models) {
   const errors = [];
   for (const model of models) {
     if (channel.kind === "exec") {
-      const r = await containerExec(
-        channel,
-        ["ollama", "run", model, "--keepalive", "5m", ""],
-        12e4
-      );
+      const r = await containerExec(channel, ["ollama", "run", model, "--keepalive", "5m", ""], 12e4);
       if (r !== null && r.code === 0) restored.push(model);
       else {
         errors.push(
@@ -4987,9 +4919,7 @@ async function load4(channel, models) {
     if (res2 !== null && res2.status >= 200 && res2.status < 300) return { restored: models, errors: [] };
     return {
       restored: [],
-      errors: [
-        `vllm \u6062\u590D\u5931\u8D25\uFF08${res2 === null ? "\u5BB9\u5668\u5185 Python \u4E0D\u53EF\u7528" : `HTTP ${res2.status}`}\uFF09`
-      ]
+      errors: [`vllm \u6062\u590D\u5931\u8D25\uFF08${res2 === null ? "\u5BB9\u5668\u5185 Python \u4E0D\u53EF\u7528" : `HTTP ${res2.status}`}\uFF09`]
     };
   }
   const res = await channelFetch(channel, {
@@ -5345,10 +5275,7 @@ async function restoreLease(lease, log) {
       continue;
     }
     const primary = entry.channel ?? HOST_CHANNELS[entry.provider];
-    const candidates = [
-      primary,
-      ...Array.isArray(entry.fallbacks) ? entry.fallbacks : []
-    ];
+    const candidates = [primary, ...Array.isArray(entry.fallbacks) ? entry.fallbacks : []];
     let channel = null;
     let current = null;
     for (const c of candidates) {
@@ -5368,17 +5295,12 @@ async function restoreLease(lease, log) {
       restored.push(`${entry.provider}:\u5DF2\u52A0\u8F7D\uFF08\u8DF3\u8FC7\uFF09`);
       continue;
     }
-    optsLog(
-      log,
-      `GPU \u6062\u590D\uFF1A\u91CD\u8F7D ${entry.provider} \u6A21\u578B ${missing.join(", ")}\uFF08${channel.kind} \u901A\u9053\uFF09`
-    );
+    optsLog(log, `GPU \u6062\u590D\uFF1A\u91CD\u8F7D ${entry.provider} \u6A21\u578B ${missing.join(", ")}\uFF08${channel.kind} \u901A\u9053\uFF09`);
     const r2 = await adapter.load(channel, missing);
     for (const m of r2.restored) restored.push(`${entry.provider}:${m}`);
     for (const e of r2.errors) errors.push({ code: "gpu_restore_failed", message: e });
   }
-  const procs = lease.entries.filter(
-    (e) => e.kind === "process"
-  );
+  const procs = lease.entries.filter((e) => e.kind === "process");
   if (procs.length > 0) {
     optsLog(
       log,
@@ -5446,7 +5368,17 @@ __export(local_session_exports, {
   readEnginePid: () => readEnginePid,
   stopResidualEngine: () => stopResidualEngine
 });
-import { closeSync, existsSync as existsSync11, openSync, readFileSync as readFileSync9, readSync, rmSync as rmSync7, statSync as statSync2, unlinkSync, writeFileSync as writeFileSync4 } from "fs";
+import {
+  closeSync,
+  existsSync as existsSync11,
+  openSync,
+  readFileSync as readFileSync9,
+  readSync,
+  rmSync as rmSync7,
+  statSync as statSync2,
+  unlinkSync,
+  writeFileSync as writeFileSync4
+} from "fs";
 import { spawn as spawn4 } from "child_process";
 import { join as join8 } from "path";
 function enginePidFile(root) {
@@ -5693,7 +5625,10 @@ var init_local_session = __esm({
         child.unref();
         if (child.pid === void 0) {
           closeSync(fd);
-          throw new DaoyanCliError({ code: "engine_start_failed", message: `\u65E0\u6CD5 spawn \u5F15\u64CE\uFF1A${spawnError ?? "unknown"}` });
+          throw new DaoyanCliError({
+            code: "engine_start_failed",
+            message: `\u65E0\u6CD5 spawn \u5F15\u64CE\uFF1A${spawnError ?? "unknown"}`
+          });
         }
         this.infoState = { ...this.infoState, pid: child.pid };
         try {
@@ -5777,7 +5712,10 @@ ${tailFile(logFile, 8)}`
             cleanup.free = "ok";
           } catch (e) {
             cleanup.free = "failed";
-            errors.push({ code: "cleanup_failed", message: `free \u5931\u8D25\uFF1A${e instanceof Error ? e.message : String(e)}` });
+            errors.push({
+              code: "cleanup_failed",
+              message: `free \u5931\u8D25\uFF1A${e instanceof Error ? e.message : String(e)}`
+            });
           }
         }
         const pid = this.infoState.pid;
@@ -7108,19 +7046,7 @@ async function countFrames(video) {
 }
 async function extractLastFrame(video, outPng) {
   const n = await countFrames(video);
-  await run([
-    "ffmpeg",
-    "-y",
-    "-v",
-    "error",
-    "-i",
-    video,
-    "-vf",
-    `select=eq(n\\,${n - 1})`,
-    "-frames:v",
-    "1",
-    outPng
-  ]);
+  await run(["ffmpeg", "-y", "-v", "error", "-i", video, "-vf", `select=eq(n\\,${n - 1})`, "-frames:v", "1", outPng]);
 }
 var init_ffmpeg = __esm({
   "src/core/media/ffmpeg.mts"() {
@@ -7201,9 +7127,7 @@ function listRuns(root) {
     const rec = readRun(root, ent.name);
     if (rec !== null) out.push(rec);
   }
-  return out.sort(
-    (a, b) => b.started_at.localeCompare(a.started_at) || b.run_id.localeCompare(a.run_id)
-  );
+  return out.sort((a, b) => b.started_at.localeCompare(a.started_at) || b.run_id.localeCompare(a.run_id));
 }
 function latestSucceededRun(root, label) {
   const hits = listRuns(root).filter((r) => r.label === label && r.status === "succeeded");
@@ -7768,10 +7692,7 @@ async function createEngineSession(opts) {
   }
   if (opts.machine.engine.mode === "remote") {
     const { RemoteSession: RemoteSession2 } = await Promise.resolve().then(() => (init_remote_session(), remote_session_exports));
-    return new RemoteSession2(
-      opts.machine.engine.url,
-      opts.machine.engine.free_after_task ?? "when_idle"
-    );
+    return new RemoteSession2(opts.machine.engine.url, opts.machine.engine.free_after_task ?? "when_idle");
   }
   const { LocalSession: LocalSession2 } = await Promise.resolve().then(() => (init_local_session(), local_session_exports));
   return new LocalSession2(opts);
@@ -8280,7 +8201,9 @@ async function runWorker(opts) {
     }
     const machine = loadMachine(root);
     if (task.mode !== machine.engine.mode && task.options.engine_url === void 0) {
-      warn(`task \u521B\u5EFA\u65F6\u7684 mode=${task.mode} \u4E0E machine.json \u5F53\u524D mode=${machine.engine.mode} \u4E0D\u4E00\u81F4\uFF1B\u4EE5 machine.json \u4E3A\u51C6`);
+      warn(
+        `task \u521B\u5EFA\u65F6\u7684 mode=${task.mode} \u4E0E machine.json \u5F53\u524D mode=${machine.engine.mode} \u4E0D\u4E00\u81F4\uFF1B\u4EE5 machine.json \u4E3A\u51C6`
+      );
     }
     say(`task ${taskId}\uFF08${task.kind}\uFF09\u5F00\u59CB\uFF0Cmode=${machine.engine.mode}`);
     const timeoutMs = task.options.timeout_ms ?? DEFAULT_TIMEOUT_MS;
@@ -8503,7 +8426,9 @@ async function runWorker(opts) {
             errors: rel.errors
           });
         } catch (cleanupError) {
-          warn(`\u53D6\u6D88\u6E05\u7406\u5931\u8D25\uFF1A${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`);
+          warn(
+            `\u53D6\u6D88\u6E05\u7406\u5931\u8D25\uFF1A${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`
+          );
         }
       }
       appendEvent(taskDir2, "finished", { status: "cancelled", completed });
@@ -8667,11 +8592,7 @@ async function createAndStartTask(opts) {
       task: {
         ...baseline,
         worker: { pid: child.pid, started_at: nowIso() },
-        next_actions: [
-          `status --task ${taskId} --wait`,
-          `logs --task ${taskId} -f`,
-          `run cancel ${taskId}`
-        ]
+        next_actions: [`status --task ${taskId} --wait`, `logs --task ${taskId} -f`, `run cancel ${taskId}`]
       },
       deduplicated: false
     };
@@ -9325,10 +9246,7 @@ async function runWrap(ctx2, args) {
   const manifestName = `cut-${ts2}.json`;
   const manifestPath = join20(finalDir, manifestName);
   const listFile = join20(root, CONCAT_LIST_FILE);
-  writeFileSync7(
-    listFile,
-    clips.map((c) => `file '${c.abs.replace(/'/g, "'\\''")}'`).join("\n") + "\n"
-  );
+  writeFileSync7(listFile, clips.map((c) => `file '${c.abs.replace(/'/g, "'\\''")}'`).join("\n") + "\n");
   say(`\u5408\u7247 ${clips.length} \u6BB5 \u2192 final/${outName}\uFF08libx264 / crf18 / faststart\uFF09...`);
   const r = await execCapture("ffmpeg", [
     "-y",
@@ -9751,12 +9669,8 @@ async function snapshot(root, project, machine, shots) {
   const engine = await probeEngine(root, machine);
   const lock = inspectMachineLock();
   const tasks = listTasks(root);
-  const active = tasks.filter(
-    (t) => !isTerminalStatus(t.status) && t.machine_id === machine.machine_id
-  );
-  const synced = tasks.filter(
-    (t) => !isTerminalStatus(t.status) && t.machine_id !== machine.machine_id
-  );
+  const active = tasks.filter((t) => !isTerminalStatus(t.status) && t.machine_id === machine.machine_id);
+  const synced = tasks.filter((t) => !isTerminalStatus(t.status) && t.machine_id !== machine.machine_id);
   const gpu = await gpuSnapshot();
   const lease = inspectLease();
   const { COMMANDS: COMMANDS2 } = await Promise.resolve().then(() => (init_registry(), registry_exports));
@@ -9931,7 +9845,9 @@ async function runStatus(ctx2, args) {
     say(`\u673A\u5668\u9501\uFF1A${lockData.status === "corrupt" ? "\u635F\u574F" : "\u7A7A\u95F2"}`);
   }
   const activeTask = data.active_task;
-  say(activeTask === null ? "\u672C\u673A\u4EFB\u52A1\uFF1A\u7A7A\u95F2" : `\u672C\u673A\u4EFB\u52A1\uFF1A${String(activeTask.command)}\uFF08${String(activeTask.status)}\uFF09`);
+  say(
+    activeTask === null ? "\u672C\u673A\u4EFB\u52A1\uFF1A\u7A7A\u95F2" : `\u672C\u673A\u4EFB\u52A1\uFF1A${String(activeTask.command)}\uFF08${String(activeTask.status)}\uFF09`
+  );
   const synced = data.synced_running_tasks;
   if (synced.length > 0) say(`\u5176\u4ED6\u673A\u5668\u4EFB\u52A1\uFF08Git \u540C\u6B65\uFF09\uFF1A${synced.length} \u4E2A\u8FD0\u884C\u4E2D`);
   const gpu = data.gpu;
@@ -10388,18 +10304,21 @@ function applyOps(graph, ops, catalog = null) {
         nodeOf(work, op.node, index, "node");
         const refs = referencesTo(work, op.node);
         if (refs.length > 0 && op.force !== true) {
-          opError(
-            index,
-            `\u8282\u70B9 ${op.node} \u4ECD\u88AB ${refs.length} \u5904\u5F15\u7528\uFF1B\u8BBE\u7F6E force:true \u540C\u65F6\u5220\u9664\u5173\u8054\u8FDE\u7EBF`,
-            { references: refs }
-          );
+          opError(index, `\u8282\u70B9 ${op.node} \u4ECD\u88AB ${refs.length} \u5904\u5F15\u7528\uFF1B\u8BBE\u7F6E force:true \u540C\u65F6\u5220\u9664\u5173\u8054\u8FDE\u7EBF`, {
+            references: refs
+          });
         }
         if (op.force === true) {
           for (const ref of refs) {
             const holder = work[ref.node];
             const value = holder?.inputs[ref.input];
             if (isLink(value)) {
-              removedLinks.push({ from_node: value[0], output: value[1], to_node: ref.node, input: ref.input });
+              removedLinks.push({
+                from_node: value[0],
+                output: value[1],
+                to_node: ref.node,
+                input: ref.input
+              });
             }
             if (holder !== void 0) {
               delete holder.inputs[ref.input];
@@ -10536,10 +10455,7 @@ async function ensureCatalog(opts) {
       opts.log(`\u8282\u70B9\u76EE\u5F55\u5DF2\u5237\u65B0\uFF1A${catalogSize(catalog)} \u4E2A\u8282\u70B9\uFF08local metadata session\uFF09`);
       return catalog;
     } finally {
-      await session.release(
-        { submitted: false, interrupt: false, uploaded: [], scratch_outputs: [] },
-        opts.log
-      );
+      await session.release({ submitted: false, interrupt: false, uploaded: [], scratch_outputs: [] }, opts.log);
     }
   } finally {
     lock?.release();
@@ -10588,7 +10504,8 @@ async function runWorkflow(ctx2, args) {
     }
     ensureDir(join24(root, WORKFLOWS_DIR));
     saveGraphFile(target.abs, {});
-    if (ctx2.json) emitData({ name, path: target.rel, replaced_placeholder: replaced, graph_sha256: graphSha256({}) });
+    if (ctx2.json)
+      emitData({ name, path: target.rel, replaced_placeholder: replaced, graph_sha256: graphSha256({}) });
     else say(replaced ? `\u5DF2\u91CD\u7F6E\u7A7A\u56FE\uFF1A${target.rel}` : `\u5DF2\u521B\u5EFA ${target.rel}\uFF08\u7A7A\u56FE\uFF09`);
     return;
   }
@@ -10633,7 +10550,13 @@ async function runWorkflow(ctx2, args) {
           valid: !hasGraphErrors(parsed.issues)
         };
       } catch {
-        return { name: f.slice(0, -".json".length), path: `${WORKFLOWS_DIR}/${f}`, nodes: 0, links: 0, valid: false };
+        return {
+          name: f.slice(0, -".json".length),
+          path: `${WORKFLOWS_DIR}/${f}`,
+          nodes: 0,
+          links: 0,
+          valid: false
+        };
       }
     }) : [];
     if (ctx2.json) {
@@ -10665,7 +10588,8 @@ async function runWorkflow(ctx2, args) {
     const stats = graphStats(loaded.graph);
     if (nodeId !== void 0) {
       const node = loaded.graph[nodeId];
-      if (node === void 0) throw new DaoyanCliError({ code: "workflow_invalid", message: `\u8282\u70B9 ${nodeId} \u4E0D\u5B58\u5728` });
+      if (node === void 0)
+        throw new DaoyanCliError({ code: "workflow_invalid", message: `\u8282\u70B9 ${nodeId} \u4E0D\u5B58\u5728` });
       const data2 = { name, node: { id: nodeId, class_type: node.class_type, inputs: node.inputs } };
       if (ctx2.json) emitData(data2);
       else process.stdout.write(JSON.stringify(data2.node, null, 2) + "\n");
@@ -10735,7 +10659,8 @@ async function runWorkflow(ctx2, args) {
       });
       return;
     }
-    for (const n of result.nodes) say(`${String(n.name)}  ${String(n.display_name ?? "")}  ${String(n.category ?? "")}`.trim());
+    for (const n of result.nodes)
+      say(`${String(n.name)}  ${String(n.display_name ?? "")}  ${String(n.category ?? "")}`.trim());
     if (result.next_cursor !== null) say(`\u2026 \u4E0B\u4E00\u9875\uFF1A--cursor ${result.next_cursor}`);
     return;
   }
@@ -10758,7 +10683,9 @@ async function runWorkflow(ctx2, args) {
     }
     say(`${def.class_type}\uFF08${def.display_name}\uFF0C${def.category}\uFF09`);
     for (const i of def.inputs) {
-      say(`  ${i.required ? "*" : "-"} ${i.name}: ${i.types.join("|")}${i.options !== void 0 ? ` [${i.options.slice(0, 6).join(", ")}\u2026]` : ""}`);
+      say(
+        `  ${i.required ? "*" : "-"} ${i.name}: ${i.types.join("|")}${i.options !== void 0 ? ` [${i.options.slice(0, 6).join(", ")}\u2026]` : ""}`
+      );
     }
     say(`\u8F93\u51FA\uFF1A${def.outputs.map((t, idx) => `${idx}:${t}`).join(" ")}`);
     return;
@@ -11008,19 +10935,41 @@ var init_registry = __esm({
         summary: "\u5728\u5F53\u524D\u76EE\u5F55\u7ACB\u9879\uFF1Alocal \u90E8\u7F72\u9879\u76EE\u4E13\u5C5E ComfyUI\uFF0Cremote \u7ED1\u5B9A\u5916\u90E8\u670D\u52A1",
         usage: "daoyan init --mode=local [--modelpath <\u8DEF\u5F84>] [--version <tag>] [--mirror <\u955C\u50CF>] [--no-skill]\ndaoyan init --mode=remote --url <url> [--no-skill]",
         flags: [
-          { name: "--mode", type: "local|remote", required: true, enum: ["local", "remote"], description: "\u6267\u884C\u6A21\u5F0F\uFF08\u5FC5\u586B\uFF0C\u65E0\u9ED8\u8BA4\u503C\uFF09" },
+          {
+            name: "--mode",
+            type: "local|remote",
+            required: true,
+            enum: ["local", "remote"],
+            description: "\u6267\u884C\u6A21\u5F0F\uFF08\u5FC5\u586B\uFF0C\u65E0\u9ED8\u8BA4\u503C\uFF09"
+          },
           { name: "--modelpath", type: "path", description: "local\uFF1A\u5916\u90E8\u6A21\u578B\u6839\u76EE\u5F55\uFF08\u5DF2\u5B58\u5728\uFF09" },
           { name: "--url", type: "url", description: "remote\uFF1A\u5916\u90E8 ComfyUI base URL\uFF08\u5FC5\u586B\uFF09" },
           { name: "--version", type: "tag", description: "local\uFF1AComfyUI \u7248\u672C tag" },
-          { name: "--mirror", type: "url", description: "local\uFF1Apip \u6E90\uFF08\u9ED8\u8BA4\u963F\u91CC\u4E91 PyPI\uFF1B\u53EF\u4F20 https://pypi.org/simple/ \u8986\u76D6\uFF09" },
-          { name: "--no-skill", type: "boolean", default: false, description: "\u4E0D\u751F\u6210 .agents/skills/daoyan \u4E0E AGENTS.md" }
+          {
+            name: "--mirror",
+            type: "url",
+            description: "local\uFF1Apip \u6E90\uFF08\u9ED8\u8BA4\u963F\u91CC\u4E91 PyPI\uFF1B\u53EF\u4F20 https://pypi.org/simple/ \u8986\u76D6\uFF09"
+          },
+          {
+            name: "--no-skill",
+            type: "boolean",
+            default: false,
+            description: "\u4E0D\u751F\u6210 .agents/skills/daoyan \u4E0E AGENTS.md"
+          }
         ],
         examples: [
           "daoyan init --mode=local --modelpath /data/models",
           "daoyan init --mode=remote --url http://gpu-box:8188"
         ],
         implemented: true,
-        jsonShape: { root: "string", mode: "local|remote", project_created: "boolean", engine_installed: "boolean", port: "number|null", skill: "object|null" },
+        jsonShape: {
+          root: "string",
+          mode: "local|remote",
+          project_created: "boolean",
+          engine_installed: "boolean",
+          port: "number|null",
+          skill: "object|null"
+        },
         run: (ctx2, args) => runInit(ctx2, args)
       },
       {
@@ -11056,7 +11005,9 @@ var init_registry = __esm({
         group: "workflow",
         summary: "\u5BFC\u5165 ComfyUI API JSON\uFF08\u4E0D\u91CD\u547D\u540D\u8282\u70B9\uFF09",
         usage: "daoyan workflow import <api.json> --name <name> [--json]",
-        args: [{ name: "api.json", type: "path", required: true, description: "ComfyUI Save (API Format) \u5BFC\u51FA\u7684 JSON" }],
+        args: [
+          { name: "api.json", type: "path", required: true, description: "ComfyUI Save (API Format) \u5BFC\u51FA\u7684 JSON" }
+        ],
         flags: [{ name: "--name", type: "string", required: true, description: "\u5DE5\u4F5C\u6D41\u77ED\u540D" }],
         examples: ["daoyan workflow import ./from-comfyui.json --name t2v --json"],
         implemented: true,
@@ -11119,7 +11070,14 @@ var init_registry = __esm({
         flags: [{ name: "--ops", type: "path|-", required: true, description: "ops JSON \u6587\u4EF6\uFF1B- \u8868\u793A stdin" }],
         examples: ["daoyan workflow apply t2v --ops ./ops.json --json"],
         implemented: true,
-        jsonShape: { applied: "number", assigned_ids: "object[]", changed_nodes: "string[]", removed_links: "object[]", warnings: "object[]", graph_sha256: "string" },
+        jsonShape: {
+          applied: "number",
+          assigned_ids: "object[]",
+          changed_nodes: "string[]",
+          removed_links: "object[]",
+          warnings: "object[]",
+          graph_sha256: "string"
+        },
         run: (ctx2, args) => runWorkflow(ctx2, ["apply", ...args])
       },
       {
@@ -11266,7 +11224,12 @@ var init_registry = __esm({
           { name: "-n", type: "integer", default: 100, description: "\u5C3E\u90E8\u6761\u6570" },
           { name: "--task", type: "string", description: "\u4EFB\u52A1\u4E8B\u4EF6\u6D41" },
           { name: "--run", type: "string", description: "\u5355 run \u4E8B\u4EF6" },
-          { name: "--src", type: "engine|worker|daoyan-cli|all", enum: ["engine", "worker", "daoyan-cli", "all"], description: "\u6587\u4EF6\u65E5\u5FD7\u6570\u636E\u6E90" }
+          {
+            name: "--src",
+            type: "engine|worker|daoyan-cli|all",
+            enum: ["engine", "worker", "daoyan-cli", "all"],
+            description: "\u6587\u4EF6\u65E5\u5FD7\u6570\u636E\u6E90"
+          }
         ],
         implemented: true,
         run: (ctx2, args) => runLogs(ctx2, args)
@@ -11301,7 +11264,9 @@ var init_registry = __esm({
         group: "engine",
         summary: "\u5207\u6362\u672C\u673A\u4F7F\u7528\u7684 ComfyUI \u7248\u672C/\u8DEF\u5F84",
         usage: "daoyan engine use <\u7248\u672C tag|\u8DEF\u5F84> [--json]",
-        args: [{ name: "tag|path", type: "string", required: true, description: "\u5DF2\u5B89\u88C5\u7248\u672C tag \u6216\u5305\u542B main.py \u7684\u76EE\u5F55" }],
+        args: [
+          { name: "tag|path", type: "string", required: true, description: "\u5DF2\u5B89\u88C5\u7248\u672C tag \u6216\u5305\u542B main.py \u7684\u76EE\u5F55" }
+        ],
         implemented: true,
         run: (ctx2, args) => runEngine(ctx2, ["use", ...args])
       },

@@ -14,7 +14,7 @@ var VERSION;
 var init_version = __esm({
   "src/shared/version.mts"() {
     "use strict";
-    VERSION = "0.0.3";
+    VERSION = "0.0.4";
   }
 });
 
@@ -1394,7 +1394,9 @@ task start \u2192 machine lock \u2192 \u56DE\u6536\u6B8B\u7559\u5F15\u64CE \u219
 - \u5E73\u53F0\uFF1ALinux + NVIDIA\uFF1B\u5176\u4ED6\u5E73\u53F0\u7ED9 \`gpu_unsupported\` \u8B66\u544A\uFF0C\u4EFB\u52A1\u7EE7\u7EED\uFF1B
 - \u5185\u7F6E\u6A21\u578B\u670D\u52A1\uFF1Aollama\u3001LM Studio\u3001xinference \u2014\u2014 \u5378\u8F7D\u6A21\u578B\uFF0C\u4FDD\u7559\u8FDB\u7A0B\uFF0C\u4EFB\u52A1\u540E\u91CD\u8F7D\uFF1B
 - \u5185\u7F6E\u8FDB\u7A0B\u670D\u52A1\uFF1AvLLM\u3001TGI\u3001llama.cpp server\u3001SGLang \u2014\u2014 SIGTERM/SIGKILL\uFF0C\u4EFB\u52A1\u540E best-effort \u91CD\u542F\uFF1B
-- \u672A\u77E5\u8FDB\u7A0B\u6C38\u4E0D\u5904\u7406\uFF1B
+- \u5BB9\u5668\uFF1A\u901A\u8FC7 cgroup \u8BC6\u522B Docker / Podman / containerd / k8s \u5185\u7684 ollama/xinference/LM Studio/vLLM\uFF1B\u53EA\u5378\u8F7D\u6A21\u578B\uFF0C\u4E0D\u505C\u6B62\u5BB9\u5668\u6216\u8FDB\u7A0B\uFF1B\u901A\u8FC7\u7AEF\u53E3\u6620\u5C04\u3001nsenter \u6216\u5BB9\u5668\u5185 CLI/Python \u8BBF\u95EE\uFF0C\u4E0D\u9700\u8981 kubectl\uFF1B
+- \u5BB9\u5668\u5185 vLLM \u4EC5\u5728\u542F\u7528 --enable-sleep-mode + VLLM_SERVER_DEV_MODE=1 \u65F6\u81EA\u52A8 sleep\uFF1B\u88F8\u673A vLLM \u4ECD\u8D70\u8FDB\u7A0B\u63A5\u7BA1\uFF1B\u5BB9\u5668\u5185 TGI/llama.cpp/SGLang \u6CA1\u6709\u901A\u7528\u65E0\u505C\u673A\u5378\u8F7D\u80FD\u529B\u65F6\u53EA\u63D0\u793A\uFF0C\u4E0D\u505C\u6B62\u5BB9\u5668\uFF1B
+- \u672A\u77E5\u8FDB\u7A0B/\u5BB9\u5668\u6C38\u4E0D\u5904\u7406\uFF1B
 - \u79DF\u7EA6\uFF1A\`~/.dycli/gpu/lease.json\`\uFF0C\u5F02\u5E38\u9000\u51FA\u540E\u4E0B\u4E00\u6B21 local \u4EFB\u52A1\u5148\u6062\u590D\uFF1B
 - \u6062\u590D\u5931\u8D25\uFF1A\`gpu_restore_failed\`\uFF0C\u79DF\u7EA6\u4FDD\u7559\u91CD\u8BD5\u3002
 
@@ -3060,20 +3062,42 @@ function totalVram(snapshot2) {
     { usedMb: 0, totalMb: 0, freeMb: 0 }
   );
 }
-async function gpuProcessPids() {
+async function gpuComputeApps() {
   if (process.platform !== "linux") return null;
-  const r = await tryExecCapture(
+  let r = await tryExecCapture(
     "nvidia-smi",
-    ["--query-compute-apps=pid", "--format=csv,noheader,nounits"],
+    ["--query-compute-apps=pid,used_memory", "--format=csv,noheader,nounits"],
     { timeoutMs: 1e4 }
   );
-  if (r === null || r.code !== 0) return null;
-  const pids = /* @__PURE__ */ new Set();
-  for (const line of r.stdout.split("\n")) {
-    const pid = Number(line.trim());
-    if (Number.isInteger(pid) && pid > 0) pids.add(pid);
+  let withMemory = true;
+  if (r === null || r.code !== 0) {
+    r = await tryExecCapture("nvidia-smi", ["--query-compute-apps=pid", "--format=csv,noheader,nounits"], {
+      timeoutMs: 1e4
+    });
+    withMemory = false;
   }
-  return pids;
+  if (r === null || r.code !== 0) return null;
+  const byPid = /* @__PURE__ */ new Map();
+  for (const line of r.stdout.split("\n")) {
+    const parts = line.split(",").map((x) => x.trim());
+    if (parts.length < 1) continue;
+    const pid = Number(parts[0]);
+    if (!Number.isInteger(pid) || pid <= 0) continue;
+    const usedRaw = Number(parts[1]);
+    const used = withMemory && Number.isFinite(usedRaw) ? usedRaw : null;
+    if (!byPid.has(pid)) {
+      byPid.set(pid, used);
+      continue;
+    }
+    const prev = byPid.get(pid);
+    byPid.set(pid, prev === null || used === null ? null : (prev ?? 0) + used);
+  }
+  return [...byPid.entries()].map(([pid, usedMb]) => ({ pid, usedMb }));
+}
+async function gpuProcessPids() {
+  const apps = await gpuComputeApps();
+  if (apps === null) return null;
+  return new Set(apps.map((a) => a.pid));
 }
 var init_detect = __esm({
   "src/core/gpu/detect.mts"() {
@@ -3129,7 +3153,7 @@ var init_lease = __esm({
 });
 
 // src/core/gpu/targets.mts
-var GPU_PROVIDER_IDS, GPU_PROCESS_TARGETS, PROTECTED_COMMS;
+var GPU_PROVIDER_IDS, GPU_PROCESS_TARGETS, GPU_CONTAINER_TARGETS, PROTECTED_COMMS;
 var init_targets = __esm({
   "src/core/gpu/targets.mts"() {
     "use strict";
@@ -3139,6 +3163,15 @@ var init_targets = __esm({
       { id: "tgi", pattern: /text-generation-launcher/i },
       { id: "llama.cpp", pattern: /(^|\s|\/)llama-server(\s|$)/i },
       { id: "sglang", pattern: /sglang(\.launch_server)?/i }
+    ];
+    GPU_CONTAINER_TARGETS = [
+      { id: "ollama", kind: "provider", pattern: /\bollama\b/i },
+      { id: "lmstudio", kind: "provider", pattern: /\blm[-_ ]?studio\b/i },
+      { id: "xinference", kind: "provider", pattern: /\bxinference\b/i },
+      { id: "vllm", kind: "provider", pattern: /\bvllm\b/i },
+      { id: "tgi", kind: "process", pattern: /\btext-generation-(?:launcher|inference)\b/i },
+      { id: "llama.cpp", kind: "process", pattern: /\bllama[-_.]?(?:server|cpp)\b/i },
+      { id: "sglang", kind: "process", pattern: /\bsglang\b/i }
     ];
     PROTECTED_COMMS = /* @__PURE__ */ new Set([
       "systemd",
@@ -3155,93 +3188,748 @@ var init_targets = __esm({
       "dock",
       "Finder",
       "containerd",
+      "containerd-shim",
+      "containerd-shim-runc-v2",
       "dockerd",
-      "kubelet"
+      "kubelet",
+      "k3s",
+      "runc",
+      "crun",
+      "conmon",
+      "pause"
     ]);
+  }
+});
+
+// src/core/gpu/cri.mts
+import { existsSync as existsSync9 } from "fs";
+async function crictlAvailable() {
+  if (crictlChecked !== null) return crictlChecked;
+  const r = await tryExecCapture("crictl", ["--version"], { timeoutMs: 5e3 });
+  crictlChecked = r !== null && r.code === 0;
+  return crictlChecked;
+}
+function crictlArgs(endpoint, args) {
+  return endpoint !== void 0 ? ["--runtime-endpoint", endpoint, ...args] : args;
+}
+function availableCriEndpoints() {
+  return CRI_ENDPOINTS.filter((ep) => existsSync9(ep.replace(/^unix:\/\//, "")));
+}
+function crictlEndpointCandidates(recorded) {
+  const out = recorded !== void 0 ? [recorded, void 0] : [void 0];
+  for (const ep of availableCriEndpoints()) {
+    if (!out.includes(ep)) out.push(ep);
+  }
+  return out;
+}
+function availableContainerdSockets() {
+  return CONTAINERD_SOCKETS.filter((p) => existsSync9(p));
+}
+function isEndpointError(stderr) {
+  return /connect|connection|no such file|refused|socket|failed to connect|code = Unavailable/i.test(
+    stderr
+  );
+}
+var CRI_ENDPOINTS, CONTAINERD_SOCKETS, CONTAINERD_NAMESPACES, crictlChecked;
+var init_cri = __esm({
+  "src/core/gpu/cri.mts"() {
+    "use strict";
+    init_exec();
+    CRI_ENDPOINTS = [
+      "unix:///run/containerd/containerd.sock",
+      "unix:///var/run/containerd/containerd.sock",
+      "unix:///run/k3s/containerd/containerd.sock",
+      "unix:///var/run/k3s/containerd/containerd.sock",
+      "unix:///run/crio/crio.sock",
+      "unix:///var/run/crio/crio.sock",
+      "unix:///var/run/cri-dockerd.sock",
+      "unix:///var/snap/microk8s/common/run/containerd.sock"
+    ];
+    CONTAINERD_SOCKETS = [
+      "/run/containerd/containerd.sock",
+      "/var/run/containerd/containerd.sock",
+      "/run/k3s/containerd/containerd.sock",
+      "/var/run/k3s/containerd/containerd.sock",
+      "/var/snap/microk8s/common/run/containerd.sock"
+    ];
+    CONTAINERD_NAMESPACES = ["k8s.io", "default", "moby"];
+    crictlChecked = null;
+  }
+});
+
+// src/core/gpu/containers.mts
+import { readFileSync as readFileSync6 } from "fs";
+function containerIdFromCgroup(cgroup) {
+  const kubernetes = /kubepods(?:[\/.]|$)/i.test(cgroup);
+  const patterns = [
+    { re: /(?:^|[\/-])cri-containerd-([0-9a-f]{64})(?:\.scope)?/i, runtime: "crictl" },
+    { re: /(?:^|[\/-])crio-([0-9a-f]{64})(?:\.scope)?/i, runtime: "crictl" },
+    { re: /(?:^|[\/-])docker-([0-9a-f]{64})(?:\.scope)?/i, runtime: "docker" },
+    { re: /(?:^|[\/])docker\/([0-9a-f]{64})(?:[\/]|$)/i, runtime: "docker" },
+    { re: /(?:^|[\/-])libpod-([0-9a-f]{64})(?:\.scope)?/i, runtime: "podman" },
+    { re: /(?:^|[\/])libpod\/([0-9a-f]{64})(?:[\/]|$)/i, runtime: "podman" },
+    { re: /(?:^|[\/-])containerd-([0-9a-f]{64})(?:\.scope)?/i, runtime: "crictl" },
+    { re: /(?:^|[\/])containerd\/([0-9a-f]{64})(?:[\/]|$)/i, runtime: "crictl" }
+  ];
+  for (const p of patterns) {
+    const m = p.re.exec(cgroup);
+    if (m?.[1] !== void 0) {
+      return { id: m[1].toLowerCase(), runtime: p.runtime, kubernetes };
+    }
+  }
+  if (kubernetes) {
+    const m = /([0-9a-f]{64})(?:\.scope)?(?:[\/]|$)/i.exec(cgroup);
+    if (m?.[1] !== void 0) {
+      return { id: m[1].toLowerCase(), runtime: "crictl", kubernetes };
+    }
+  }
+  return null;
+}
+function readContainerInfo(pid) {
+  if (process.platform !== "linux") return null;
+  try {
+    return containerIdFromCgroup(readFileSync6(`/proc/${pid}/cgroup`, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function asObject(v) {
+  return typeof v === "object" && v !== null && !Array.isArray(v) ? v : null;
+}
+function stringArray(v) {
+  if (!Array.isArray(v)) return [];
+  return v.filter((x) => typeof x === "string");
+}
+function commandArray(v) {
+  if (typeof v === "string") return [v];
+  return stringArray(v);
+}
+function readProcessCmdline(pid) {
+  try {
+    return readFileSync6(`/proc/${pid}/cmdline`, "utf8").split("\0").filter((x) => x !== "");
+  } catch {
+    return [];
+  }
+}
+function readParentPid(pid) {
+  try {
+    const stat = readFileSync6(`/proc/${pid}/stat`, "utf8");
+    const close = stat.lastIndexOf(")");
+    if (close < 0) return null;
+    const rest = stat.slice(close + 2).split(/\s+/);
+    const ppid = Number(rest[1]);
+    return Number.isInteger(ppid) && ppid > 0 ? ppid : null;
+  } catch {
+    return null;
+  }
+}
+function readAncestorCmdlines(pid) {
+  const out = [];
+  let cur = readParentPid(pid);
+  for (let i = 0; i < 64 && cur !== null && cur > 1; i++) {
+    const args = readProcessCmdline(cur);
+    if (args.length > 0) out.push(...args);
+    cur = readParentPid(cur);
+  }
+  return out;
+}
+function parsePortBindings(networkSettings, hostConfig) {
+  const out = [];
+  const ports = asObject(networkSettings?.Ports);
+  if (ports !== null) {
+    for (const [key, value] of Object.entries(ports)) {
+      const m = /^(\d+)\/tcp$/i.exec(key);
+      if (m?.[1] === void 0) continue;
+      const containerPort = Number(m[1]);
+      if (!Number.isInteger(containerPort)) continue;
+      for (const binding of Array.isArray(value) ? value : []) {
+        const o = asObject(binding);
+        const hostPort = Number(o?.HostPort);
+        if (Number.isInteger(hostPort) && hostPort > 0) out.push({ containerPort, hostPort });
+      }
+    }
+  }
+  const bindings = asObject(hostConfig?.PortBindings);
+  if (bindings !== null) {
+    for (const [key, value] of Object.entries(bindings)) {
+      const m = /^(\d+)\/tcp$/i.exec(key);
+      if (m?.[1] === void 0) continue;
+      const containerPort = Number(m[1]);
+      if (!Number.isInteger(containerPort)) continue;
+      for (const binding of Array.isArray(value) ? value : []) {
+        const o = asObject(binding);
+        const hostPort = Number(o?.HostPort);
+        if (Number.isInteger(hostPort) && hostPort > 0) out.push({ containerPort, hostPort });
+      }
+    }
+  }
+  const seen = /* @__PURE__ */ new Set();
+  return out.filter((b) => {
+    const key = `${b.containerPort}:${b.hostPort}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+function parseDockerInspect(raw, runtime) {
+  const first = Array.isArray(raw) ? raw[0] : raw;
+  const o = asObject(first);
+  if (o === null) return null;
+  const idRaw = typeof o.Id === "string" ? o.Id : typeof o.ID === "string" ? o.ID : "";
+  if (!/^[0-9a-f]{64}$/i.test(idRaw)) return null;
+  const state = asObject(o.State);
+  const config = asObject(o.Config);
+  const hostConfig = asObject(o.HostConfig);
+  const networkSettings = asObject(o.NetworkSettings);
+  const name = typeof o.Name === "string" ? o.Name.replace(/^\//, "") : "";
+  const image = typeof config?.Image === "string" ? config.Image : typeof o.Image === "string" ? o.Image : "";
+  const command = [
+    ...commandArray(config?.Entrypoint),
+    ...commandArray(config?.Cmd),
+    typeof o.Path === "string" ? o.Path : "",
+    ...stringArray(o.Args)
+  ].filter((x) => x !== "");
+  const pidRaw = state?.Pid;
+  const hostPid = typeof pidRaw === "number" && Number.isInteger(pidRaw) && pidRaw > 0 ? pidRaw : null;
+  const running = state?.Running === true;
+  const networkModeRaw = hostConfig?.NetworkMode ?? networkSettings?.NetworkMode;
+  const networkMode = typeof networkModeRaw === "string" ? networkModeRaw : void 0;
+  const portBindings = parsePortBindings(networkSettings, hostConfig);
+  return {
+    runtime,
+    id: idRaw.toLowerCase(),
+    name,
+    image,
+    command,
+    running,
+    hostPid,
+    ...portBindings.length > 0 ? { portBindings } : {},
+    ...networkMode !== void 0 ? { networkMode } : {}
+  };
+}
+function parseCrictlInspect(raw) {
+  const o = asObject(raw);
+  const status = asObject(o?.status);
+  if (status === null) return null;
+  const idRaw = typeof status.id === "string" ? status.id : "";
+  if (!/^[0-9a-f]{64}$/i.test(idRaw)) return null;
+  const metadata = asObject(status.metadata);
+  const name = typeof metadata?.name === "string" ? metadata.name : "";
+  const imageObj = asObject(status.image);
+  const image = typeof imageObj?.image === "string" ? imageObj.image : typeof status.imageName === "string" ? status.imageName : typeof status.imageRef === "string" ? status.imageRef : "";
+  const state = typeof status.state === "string" ? status.state : "";
+  const running = state.toLowerCase().includes("running");
+  const pidRaw = status.pid;
+  const hostPid = typeof pidRaw === "number" && Number.isInteger(pidRaw) && pidRaw > 0 ? pidRaw : null;
+  const infoConfig = asObject(asObject(o?.info)?.config);
+  const command = [
+    ...commandArray(infoConfig?.command),
+    ...commandArray(infoConfig?.args)
+  ].filter((x) => x !== "");
+  return { runtime: "crictl", id: idRaw.toLowerCase(), name, image, command, running, hostPid };
+}
+function matchContainerTarget(text) {
+  return GPU_CONTAINER_TARGETS.find((r) => r.pattern.test(text));
+}
+function isProviderTargetId(id) {
+  return id === "ollama" || id === "lmstudio" || id === "xinference" || id === "vllm";
+}
+async function inspectWith(runtime, id, crictlEndpoint) {
+  if (runtime === "crictl") {
+    if (!await crictlAvailable()) return null;
+    for (const ep of crictlEndpointCandidates(crictlEndpoint)) {
+      const r2 = await tryExecCapture("crictl", crictlArgs(ep, ["inspect", id]), {
+        timeoutMs: 1e4
+      });
+      if (r2 === null || r2.code !== 0) continue;
+      try {
+        const info = parseCrictlInspect(JSON.parse(r2.stdout));
+        if (info !== null) {
+          return ep !== void 0 ? { ...info, crictlEndpoint: ep } : info;
+        }
+      } catch {
+      }
+    }
+    return null;
+  }
+  if (runtime === "nerdctl") {
+    for (const ns of [void 0, ...CONTAINERD_NAMESPACES]) {
+      const args = ns !== void 0 ? ["--namespace", ns, "inspect", id] : ["inspect", id];
+      const r2 = await tryExecCapture("nerdctl", args, { timeoutMs: 1e4 });
+      if (r2 === null || r2.code !== 0) continue;
+      try {
+        const info = parseDockerInspect(JSON.parse(r2.stdout), "nerdctl");
+        if (info !== null) {
+          return ns !== void 0 ? { ...info, ctrNamespace: ns } : info;
+        }
+      } catch {
+      }
+    }
+    return null;
+  }
+  if (runtime === "ctr") {
+    return null;
+  }
+  const r = await tryExecCapture(runtime, ["inspect", id], { timeoutMs: 1e4 });
+  if (r === null || r.code !== 0) return null;
+  try {
+    return parseDockerInspect(JSON.parse(r.stdout), runtime);
+  } catch {
+    return null;
+  }
+}
+async function inspectContainer(id, hint, crictlEndpoint) {
+  const order = [hint];
+  for (const r of ["docker", "podman", "crictl", "nerdctl"]) {
+    if (!order.includes(r)) order.push(r);
+  }
+  for (const runtime of order) {
+    const info = await inspectWith(
+      runtime,
+      id,
+      runtime === "crictl" ? crictlEndpoint : void 0
+    );
+    if (info === null) continue;
+    if (info.id !== id.toLowerCase()) continue;
+    if (info.hostPid !== null) {
+      const local = readContainerInfo(info.hostPid);
+      if (local !== null && local.id !== info.id) continue;
+    }
+    return info;
+  }
+  return null;
+}
+function providerPort(provider) {
+  if (provider === "ollama") return 11434;
+  if (provider === "lmstudio") return 1234;
+  if (provider === "vllm") return 8e3;
+  return 9997;
+}
+function mappedHostPort(info, containerPort) {
+  for (const b of info.portBindings ?? []) {
+    if (b.containerPort === containerPort) return b.hostPort;
+  }
+  return void 0;
+}
+function execChannel(runtime, info, kubernetes) {
+  const namespace = info.ctrNamespace ?? (kubernetes ? "k8s.io" : runtime === "docker" ? "moby" : void 0);
+  return {
+    kind: "exec",
+    runtime,
+    container_id: info.id,
+    ...info.name !== "" ? { container_name: info.name } : {},
+    ...info.crictlEndpoint !== void 0 ? { crictl_endpoint: info.crictlEndpoint } : {},
+    ...namespace !== void 0 ? { ctr_namespace: namespace } : {}
+  };
+}
+function channelsForProvider(provider, info, pid, kubernetes) {
+  const port = providerPort(provider);
+  const base = `http://127.0.0.1:${port}`;
+  const host = [];
+  const mapped = mappedHostPort(info, port);
+  if (mapped !== void 0) host.push({ kind: "host", base_url: `http://127.0.0.1:${mapped}` });
+  else if (info.networkMode === "host") host.push({ kind: "host", base_url: base });
+  const netns = [
+    { kind: "netns", pid: info.hostPid ?? pid, base_url: base, container_id: info.id }
+  ];
+  const exec = [];
+  const seenRuntime = /* @__PURE__ */ new Set();
+  const addExec = (runtime) => {
+    if (seenRuntime.has(runtime)) return;
+    seenRuntime.add(runtime);
+    exec.push(execChannel(runtime, info, kubernetes));
+  };
+  addExec(info.runtime);
+  if (kubernetes || info.runtime === "crictl" || info.runtime === "nerdctl" || info.runtime === "docker") {
+    addExec("crictl");
+    addExec("ctr");
+    addExec("nerdctl");
+  }
+  if (provider === "lmstudio") return [...exec, ...host, ...netns];
+  return [...host, ...netns, ...exec];
+}
+function unsupportedProcessMessage(target) {
+  if (target.id === "llama.cpp") {
+    return "\u5BB9\u5668\u5185 llama.cpp server \u672A\u81EA\u52A8\u5904\u7406\uFF08\u4E0D\u4F1A\u505C\u6B62\u5BB9\u5668\uFF09\uFF1Brouter \u6A21\u5F0F\u53EF\u4F7F\u7528 /models/unload";
+  }
+  if (target.id === "sglang") {
+    return "\u5BB9\u5668\u5185 SGLang \u672A\u81EA\u52A8\u5904\u7406\uFF08\u4E0D\u4F1A\u505C\u6B62\u5BB9\u5668\uFF09\uFF1B\u53EF\u7528 --enable-memory-saver + release_memory_occupation";
+  }
+  return "\u5BB9\u5668\u5185 TGI \u6CA1\u6709\u6807\u51C6\u6A21\u578B\u5378\u8F7D API\uFF1B\u672A\u5904\u7406\uFF08\u4E0D\u4F1A\u505C\u6B62\u5BB9\u5668\uFF09";
+}
+async function findContainerServices(opts) {
+  const services = [];
+  const issues = [];
+  const seenIssues = /* @__PURE__ */ new Set();
+  const seenServices = /* @__PURE__ */ new Set();
+  const inspected = /* @__PURE__ */ new Map();
+  for (const app of opts.apps) {
+    const cg = readContainerInfo(app.pid);
+    if (cg === null) continue;
+    let info = inspected.get(cg.id);
+    if (info === void 0) {
+      info = await inspectContainer(cg.id, cg.runtime);
+      inspected.set(cg.id, info);
+    }
+    const procArgs = readProcessCmdline(app.pid);
+    if (info === null) {
+      info = {
+        runtime: cg.runtime,
+        id: cg.id,
+        name: "",
+        image: "",
+        // 自身 + 祖先进程命令行：识别被包装/多进程服务
+        command: [...procArgs, ...readAncestorCmdlines(app.pid)],
+        running: true,
+        hostPid: app.pid
+      };
+    }
+    if (!info.running) continue;
+    const rule = matchContainerTarget(
+      [info.image, info.name, ...info.command, ...procArgs].join(" ")
+    );
+    if (rule === void 0) continue;
+    if (rule.kind === "process") {
+      const message = `\u5BB9\u5668 ${info.name !== "" ? info.name : info.id.slice(0, 12)}\uFF1A${unsupportedProcessMessage(rule)}`;
+      if (!seenIssues.has(message)) {
+        seenIssues.add(message);
+        issues.push(message);
+      }
+      continue;
+    }
+    if (!isProviderTargetId(rule.id)) continue;
+    const key = `${info.id}:${rule.id}`;
+    if (seenServices.has(key)) continue;
+    seenServices.add(key);
+    const channels = channelsForProvider(rule.id, info, app.pid, cg.kubernetes);
+    if (channels.length === 0) {
+      const message = `\u5BB9\u5668 ${info.name !== "" ? info.name : info.id.slice(0, 12)} \u5185\u7684 ${rule.id} \u5360\u7528 GPU\uFF0C\u4F46\u6CA1\u6709\u53EF\u7528\u7684\u8BBF\u95EE\u901A\u9053\uFF1B\u672A\u5378\u8F7D\uFF08\u5BB9\u5668\u4FDD\u6301\u8FD0\u884C\uFF09`;
+      if (!seenIssues.has(message)) {
+        seenIssues.add(message);
+        issues.push(message);
+      }
+      continue;
+    }
+    services.push({
+      target: rule,
+      provider: rule.id,
+      pid: app.pid,
+      usedMb: app.usedMb,
+      info,
+      channels
+    });
+  }
+  return { services, issues };
+}
+var init_containers = __esm({
+  "src/core/gpu/containers.mts"() {
+    "use strict";
+    init_exec();
+    init_cri();
+    init_targets();
+  }
+});
+
+// src/core/gpu/channel.mts
+async function fetchDirect(baseUrl, req) {
+  try {
+    const headers = {};
+    let body;
+    if (req.body !== void 0) {
+      headers["content-type"] = "application/json";
+      body = JSON.stringify(req.body);
+    }
+    const timeoutMs = req.timeoutMs ?? 1e4;
+    const res = await fetchWithTimeout(
+      `${baseUrl}${req.path}`,
+      {
+        method: req.method ?? "GET",
+        headers,
+        ...body !== void 0 ? { body } : {}
+      },
+      timeoutMs
+    );
+    return { ok: res.ok, status: res.status, text: await res.text() };
+  } catch {
+    return null;
+  }
+}
+async function fetchViaNetns(pid, baseUrl, req) {
+  const timeoutMs = req.timeoutMs ?? 1e4;
+  const headers = {};
+  let body;
+  if (req.body !== void 0) {
+    headers["content-type"] = "application/json";
+    body = JSON.stringify(req.body);
+  }
+  const payload = JSON.stringify({
+    url: `${baseUrl}${req.path}`,
+    method: req.method ?? "GET",
+    headers,
+    body,
+    timeout_ms: timeoutMs
+  });
+  const r = await tryExecCapture(
+    "nsenter",
+    ["-t", String(pid), "-n", process.execPath, "-e", NETNS_SCRIPT, payload],
+    { timeoutMs: timeoutMs + 3e3 }
+  );
+  if (r === null || r.code !== 0) return null;
+  try {
+    const parsed = JSON.parse(r.stdout);
+    if (typeof parsed.status !== "number" || typeof parsed.text !== "string") return null;
+    return {
+      ok: parsed.status >= 200 && parsed.status < 300,
+      status: parsed.status,
+      text: parsed.text
+    };
+  } catch {
+    return null;
+  }
+}
+async function channelFetch(channel, req) {
+  if (channel.kind === "host") return fetchDirect(channel.base_url, req);
+  if (channel.kind === "netns") {
+    let pid = channel.pid;
+    if (channel.container_id !== void 0) {
+      let cg = readContainerInfo(pid);
+      if (cg === null || cg.id !== channel.container_id) {
+        const info = await inspectContainer(channel.container_id, "docker");
+        if (info === null || info.hostPid === null) return null;
+        pid = info.hostPid;
+        cg = readContainerInfo(pid);
+        if (cg === null || cg.id !== channel.container_id) return null;
+      }
+    }
+    return fetchViaNetns(pid, channel.base_url, req);
+  }
+  return null;
+}
+var NETNS_SCRIPT;
+var init_channel = __esm({
+  "src/core/gpu/channel.mts"() {
+    "use strict";
+    init_exec();
+    init_net();
+    init_containers();
+    NETNS_SCRIPT = [
+      "const r = JSON.parse(process.argv[1]);",
+      "const ac = new AbortController();",
+      "const timer = setTimeout(() => ac.abort(), r.timeout_ms);",
+      "timer.unref();",
+      "fetch(r.url, { method: r.method, headers: r.headers, body: r.body, signal: ac.signal })",
+      "  .then(async (res) => {",
+      "    clearTimeout(timer);",
+      "    process.stdout.write(JSON.stringify({ status: res.status, text: await res.text() }));",
+      "  })",
+      "  .catch((e) => {",
+      "    clearTimeout(timer);",
+      "    process.stderr.write(String(e));",
+      "    process.exit(1);",
+      "  });"
+    ].join("\n");
+  }
+});
+
+// src/core/gpu/container-exec.mts
+async function crictlExec(channel, args, timeoutMs) {
+  if (!await crictlAvailable()) return null;
+  let last = null;
+  for (const ep of crictlEndpointCandidates(channel.crictl_endpoint)) {
+    const r = await tryExecCapture(
+      "crictl",
+      crictlArgs(ep, ["exec", channel.container_id, ...args]),
+      { timeoutMs }
+    );
+    if (r === null) continue;
+    if (r.code === 0) return r;
+    if (!isEndpointError(r.stderr)) return r;
+    last = r;
+  }
+  return last;
+}
+async function ctrExec(channel, args, timeoutMs) {
+  const addresses = channel.ctr_address !== void 0 ? [channel.ctr_address] : (() => {
+    const found = availableContainerdSockets();
+    return found.length > 0 ? found : [void 0];
+  })();
+  const namespaces = channel.ctr_namespace !== void 0 ? [channel.ctr_namespace] : CONTAINERD_NAMESPACES;
+  let last = null;
+  for (const address of addresses) {
+    for (const namespace of namespaces) {
+      const execId = `dycli-${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      const prefix = ["--namespace", namespace, ...address !== void 0 ? ["--address", address] : []];
+      const r = await tryExecCapture(
+        "ctr",
+        [
+          ...prefix,
+          "task",
+          "exec",
+          "--exec-id",
+          execId,
+          channel.container_id,
+          ...args
+        ],
+        { timeoutMs }
+      );
+      if (r === null) continue;
+      if (r.code === 0) return r;
+      if (!isEndpointError(r.stderr)) return r;
+      last = r;
+    }
+  }
+  return last;
+}
+async function nerdctlExec(channel, args, timeoutMs) {
+  const namespaces = channel.ctr_namespace !== void 0 ? [channel.ctr_namespace] : CONTAINERD_NAMESPACES;
+  let last = null;
+  for (const namespace of namespaces) {
+    const r = await tryExecCapture(
+      "nerdctl",
+      ["--namespace", namespace, "exec", channel.container_id, ...args],
+      { timeoutMs }
+    );
+    if (r === null) continue;
+    if (r.code === 0) return r;
+    if (!isEndpointError(r.stderr)) return r;
+    last = r;
+  }
+  return last;
+}
+async function containerExec(channel, args, timeoutMs) {
+  if (channel.runtime === "docker" || channel.runtime === "podman") {
+    return tryExecCapture(channel.runtime, ["exec", channel.container_id, ...args], { timeoutMs });
+  }
+  if (channel.runtime === "crictl") return crictlExec(channel, args, timeoutMs);
+  if (channel.runtime === "ctr") return ctrExec(channel, args, timeoutMs);
+  return nerdctlExec(channel, args, timeoutMs);
+}
+var init_container_exec = __esm({
+  "src/core/gpu/container-exec.mts"() {
+    "use strict";
+    init_exec();
+    init_cri();
   }
 });
 
 // src/core/gpu/providers/ollama.mts
 var ollama_exports = {};
 __export(ollama_exports, {
+  HOST_CHANNEL: () => HOST_CHANNEL,
   detect: () => detect,
   load: () => load,
   unload: () => unload
 });
-async function detect() {
+function parsePs(raw) {
+  const data = typeof raw === "object" && raw !== null ? raw : {};
+  if (!Array.isArray(data.models)) return [];
+  const names = [];
+  for (const m of data.models) {
+    if (typeof m !== "object" || m === null) continue;
+    const o = m;
+    const name = typeof o.name === "string" ? o.name : typeof o.model === "string" ? o.model : "";
+    if (name === "") continue;
+    if (typeof o.size_vram === "number" && o.size_vram <= 0) continue;
+    names.push(name);
+  }
+  return names;
+}
+async function detectHttp(channel) {
+  const res = await channelFetch(channel, { path: "/api/ps", timeoutMs: 2e3 });
+  if (res === null || !res.ok) return null;
   try {
-    const res = await fetchWithTimeout(`${BASE}/api/ps`, {}, 2e3);
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (!Array.isArray(data.models)) return [];
-    const names = [];
-    for (const m of data.models) {
-      const name = typeof m.name === "string" ? m.name : typeof m.model === "string" ? m.model : "";
-      if (name === "") continue;
-      if (typeof m.size_vram === "number" && m.size_vram <= 0) continue;
-      names.push(name);
-    }
-    return names;
+    return parsePs(JSON.parse(res.text));
   } catch {
     return null;
   }
 }
-async function unload(models) {
+async function detectExec(channel) {
+  const r = await containerExec(channel, ["ollama", "ps"], 1e4);
+  if (r === null || r.code !== 0) return null;
+  const names = [];
+  for (const rawLine of r.stdout.split("\n")) {
+    const line = rawLine.trim();
+    if (line === "" || /^NAME\b/i.test(line) || /^No models/i.test(line)) continue;
+    const name = line.split(/\s+/)[0];
+    if (name !== void 0 && name !== "") names.push(name);
+  }
+  return names;
+}
+async function detect(channel) {
+  if (channel.kind === "exec") return detectExec(channel);
+  return detectHttp(channel);
+}
+async function unload(channel, models) {
   const ok = [];
   const errors = [];
   for (const model of models) {
-    try {
-      const res = await fetchWithTimeout(
-        `${BASE}/api/generate`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ model, keep_alive: 0, stream: false })
-        },
-        15e3
-      );
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      ok.push(model);
-    } catch (e) {
-      errors.push(`ollama:${model} \u5378\u8F7D\u5931\u8D25\uFF08${e instanceof Error ? e.message : String(e)}\uFF09`);
+    if (channel.kind === "exec") {
+      const r = await containerExec(channel, ["ollama", "stop", model], 2e4);
+      if (r !== null && r.code === 0) ok.push(model);
+      else {
+        errors.push(
+          `ollama:${model} \u5378\u8F7D\u5931\u8D25\uFF08${r === null ? "\u5BB9\u5668\u5185 ollama \u4E0D\u53EF\u7528" : r.stderr.trim().slice(0, 200)}\uFF09`
+        );
+      }
+      continue;
     }
+    const res = await channelFetch(channel, {
+      path: "/api/generate",
+      method: "POST",
+      body: { model, keep_alive: 0, stream: false },
+      timeoutMs: 15e3
+    });
+    if (res === null) errors.push(`ollama:${model} \u5378\u8F7D\u5931\u8D25\uFF08\u901A\u9053\u4E0D\u53EF\u8FBE\uFF09`);
+    else if (!res.ok) errors.push(`ollama:${model} \u5378\u8F7D\u5931\u8D25\uFF08HTTP ${res.status}\uFF09`);
+    else ok.push(model);
   }
   return { ok, errors };
 }
-async function load(models) {
+async function load(channel, models) {
   const restored = [];
   const errors = [];
   for (const model of models) {
-    try {
-      const res = await fetchWithTimeout(
-        `${BASE}/api/generate`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ model, prompt: "", stream: false, keep_alive: "5m" })
-        },
-        6e4
+    if (channel.kind === "exec") {
+      const r = await containerExec(
+        channel,
+        ["ollama", "run", model, "--keepalive", "5m", ""],
+        12e4
       );
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      restored.push(model);
-    } catch (e) {
-      errors.push(`ollama:${model} \u91CD\u8F7D\u5931\u8D25\uFF08${e instanceof Error ? e.message : String(e)}\uFF09`);
+      if (r !== null && r.code === 0) restored.push(model);
+      else {
+        errors.push(
+          `ollama:${model} \u91CD\u8F7D\u5931\u8D25\uFF08${r === null ? "\u5BB9\u5668\u5185 ollama \u4E0D\u53EF\u7528" : r.stderr.trim().slice(0, 200)}\uFF09`
+        );
+      }
+      continue;
     }
+    const res = await channelFetch(channel, {
+      path: "/api/generate",
+      method: "POST",
+      body: { model, prompt: "", stream: false, keep_alive: "5m" },
+      timeoutMs: 6e4
+    });
+    if (res === null) errors.push(`ollama:${model} \u91CD\u8F7D\u5931\u8D25\uFF08\u901A\u9053\u4E0D\u53EF\u8FBE\uFF09`);
+    else if (!res.ok) errors.push(`ollama:${model} \u91CD\u8F7D\u5931\u8D25\uFF08HTTP ${res.status}\uFF09`);
+    else restored.push(model);
   }
   return { restored, errors };
 }
-var BASE;
+var BASE, HOST_CHANNEL;
 var init_ollama = __esm({
   "src/core/gpu/providers/ollama.mts"() {
     "use strict";
-    init_net();
+    init_channel();
+    init_container_exec();
     BASE = "http://127.0.0.1:11434";
+    HOST_CHANNEL = { kind: "host", base_url: BASE };
   }
 });
 
 // src/core/gpu/providers/lmstudio.mts
 var lmstudio_exports = {};
 __export(lmstudio_exports, {
+  HOST_CHANNEL: () => HOST_CHANNEL2,
   detect: () => detect2,
   load: () => load2,
   unload: () => unload2
@@ -3258,8 +3946,23 @@ function extractModels(raw) {
   }
   return out;
 }
-async function detect2() {
-  const r = await tryExecCapture("lms", ["ps", "--json"], { timeoutMs: 5e3 });
+function hostArgs(baseUrl, args) {
+  return baseUrl === BASE2 ? args : [...args, "--host", baseUrl];
+}
+async function detect2(channel) {
+  if (channel.kind === "exec") {
+    const r2 = await containerExec(channel, ["lms", "ps", "--json"], 1e4);
+    if (r2 === null || r2.code !== 0) return null;
+    try {
+      return extractModels(JSON.parse(r2.stdout));
+    } catch {
+      return null;
+    }
+  }
+  if (channel.kind === "netns") return null;
+  const r = await tryExecCapture("lms", hostArgs(channel.base_url, ["ps", "--json"]), {
+    timeoutMs: 1e4
+  });
   if (r === null || r.code !== 0) return null;
   try {
     return extractModels(JSON.parse(r.stdout));
@@ -3267,111 +3970,330 @@ async function detect2() {
     return null;
   }
 }
-async function unload2(models) {
+async function unload2(channel, models) {
   const ok = [];
   const errors = [];
   for (const model of models) {
-    const r = await tryExecCapture("lms", ["unload", model], { timeoutMs: 2e4 });
+    const r = channel.kind === "exec" ? await containerExec(channel, ["lms", "unload", model], 3e4) : channel.kind === "host" ? await tryExecCapture("lms", hostArgs(channel.base_url, ["unload", model]), {
+      timeoutMs: 3e4
+    }) : null;
     if (r !== null && r.code === 0) ok.push(model);
-    else errors.push(`lmstudio:${model} \u5378\u8F7D\u5931\u8D25\uFF08${r === null ? "lms \u4E0D\u53EF\u7528" : r.stderr.slice(0, 200)}\uFF09`);
+    else {
+      errors.push(
+        `lmstudio:${model} \u5378\u8F7D\u5931\u8D25\uFF08${r === null ? "lms \u4E0D\u53EF\u7528\u6216\u901A\u9053\u4E0D\u652F\u6301" : r.stderr.trim().slice(0, 200)}\uFF09`
+      );
+    }
   }
   return { ok, errors };
 }
-async function load2(models) {
+async function load2(channel, models) {
   const restored = [];
   const errors = [];
   for (const model of models) {
-    const r = await tryExecCapture("lms", ["load", model], { timeoutMs: 12e4 });
+    const r = channel.kind === "exec" ? await containerExec(channel, ["lms", "load", model], 13e4) : channel.kind === "host" ? await tryExecCapture("lms", hostArgs(channel.base_url, ["load", model]), {
+      timeoutMs: 13e4
+    }) : null;
     if (r !== null && r.code === 0) restored.push(model);
-    else errors.push(`lmstudio:${model} \u91CD\u8F7D\u5931\u8D25\uFF08${r === null ? "lms \u4E0D\u53EF\u7528" : r.stderr.slice(0, 200)}\uFF09`);
+    else {
+      errors.push(
+        `lmstudio:${model} \u91CD\u8F7D\u5931\u8D25\uFF08${r === null ? "lms \u4E0D\u53EF\u7528\u6216\u901A\u9053\u4E0D\u652F\u6301" : r.stderr.trim().slice(0, 200)}\uFF09`
+      );
+    }
   }
   return { restored, errors };
 }
+var BASE2, HOST_CHANNEL2;
 var init_lmstudio = __esm({
   "src/core/gpu/providers/lmstudio.mts"() {
     "use strict";
     init_exec();
+    init_container_exec();
+    BASE2 = "http://127.0.0.1:1234";
+    HOST_CHANNEL2 = { kind: "host", base_url: BASE2 };
   }
 });
 
 // src/core/gpu/providers/xinference.mts
 var xinference_exports = {};
 __export(xinference_exports, {
+  HOST_CHANNEL: () => HOST_CHANNEL3,
   detect: () => detect3,
   load: () => load3,
   unload: () => unload3
 });
-async function detect3() {
-  try {
-    const res = await fetchWithTimeout(`${BASE2}/v1/models`, {}, 2e3);
-    if (!res.ok) return null;
-    const data = await res.json();
-    const arr = Array.isArray(data) ? data : typeof data === "object" && data !== null && Array.isArray(data.data) ? data.data : [];
-    const out = [];
-    for (const item of arr) {
-      if (typeof item !== "object" || item === null) continue;
-      const o = item;
-      const id = typeof o.id === "string" ? o.id : "";
-      const name = typeof o.model_name === "string" ? o.model_name : id;
-      if (id !== "") out.push(id);
-      else if (name !== "") out.push(name);
+function parseModels(raw) {
+  const arr = Array.isArray(raw) ? raw : typeof raw === "object" && raw !== null && Array.isArray(raw.data) ? raw.data : [];
+  const out = [];
+  for (const item of arr) {
+    if (typeof item !== "object" || item === null) continue;
+    const o = item;
+    const id = typeof o.id === "string" ? o.id : "";
+    const name = typeof o.model_name === "string" ? o.model_name : id;
+    if (id !== "") out.push(id);
+    else if (name !== "") out.push(name);
+  }
+  return out;
+}
+async function runPython(channel, code, args, timeoutMs) {
+  let last = null;
+  for (const python of ["python3", "python"]) {
+    const r = await containerExec(channel, [python, "-c", code, ...args], timeoutMs);
+    if (r === null) continue;
+    if (r.code === 0) return r;
+    if (r.code === 127 || /not found|No such file|executable file not found/i.test(r.stderr)) {
+      last = r;
+      continue;
     }
-    return out;
+    return r;
+  }
+  return last;
+}
+async function detect3(channel) {
+  if (channel.kind === "exec") {
+    const r = await runPython(channel, PY_DETECT, [BASE3], 1e4);
+    if (r === null || r.code !== 0) return null;
+    try {
+      return parseModels(JSON.parse(r.stdout));
+    } catch {
+      return null;
+    }
+  }
+  const res = await channelFetch(channel, { path: "/v1/models", timeoutMs: 2e3 });
+  if (res === null || !res.ok) return null;
+  try {
+    return parseModels(JSON.parse(res.text));
   } catch {
     return null;
   }
 }
-async function unload3(models) {
+async function unload3(channel, models) {
   const ok = [];
   const errors = [];
   for (const id of models) {
-    try {
-      const res = await fetchWithTimeout(
-        `${BASE2}/v1/models/${encodeURIComponent(id)}`,
-        { method: "DELETE" },
-        3e4
-      );
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      ok.push(id);
-    } catch (e) {
-      errors.push(`xinference:${id} \u5378\u8F7D\u5931\u8D25\uFF08${e instanceof Error ? e.message : String(e)}\uFF09`);
+    if (channel.kind === "exec") {
+      const r = await runPython(channel, PY_DELETE, [BASE3, id], 4e4);
+      if (r !== null && r.code === 0) ok.push(id);
+      else {
+        errors.push(
+          `xinference:${id} \u5378\u8F7D\u5931\u8D25\uFF08${r === null ? "\u5BB9\u5668\u5185 Python \u4E0D\u53EF\u7528" : r.stderr.trim().slice(0, 200)}\uFF09`
+        );
+      }
+      continue;
     }
+    const res = await channelFetch(channel, {
+      path: `/v1/models/${encodeURIComponent(id)}`,
+      method: "DELETE",
+      timeoutMs: 3e4
+    });
+    if (res === null) errors.push(`xinference:${id} \u5378\u8F7D\u5931\u8D25\uFF08\u901A\u9053\u4E0D\u53EF\u8FBE\uFF09`);
+    else if (!res.ok) errors.push(`xinference:${id} \u5378\u8F7D\u5931\u8D25\uFF08HTTP ${res.status}\uFF09`);
+    else ok.push(id);
   }
   return { ok, errors };
 }
-async function load3(models) {
+async function load3(channel, models) {
   const restored = [];
   const errors = [];
   for (const id of models) {
-    try {
-      const res = await fetchWithTimeout(
-        `${BASE2}/v1/models`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ model_name: id, model_type: "LLM" })
-        },
-        12e4
-      );
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      restored.push(id);
-    } catch (e) {
-      errors.push(`xinference:${id} \u91CD\u8F7D\u5931\u8D25\uFF08${e instanceof Error ? e.message : String(e)}\uFF09`);
+    if (channel.kind === "exec") {
+      const r = await runPython(channel, PY_CREATE, [BASE3, id], 13e4);
+      if (r !== null && r.code === 0) restored.push(id);
+      else {
+        errors.push(
+          `xinference:${id} \u91CD\u8F7D\u5931\u8D25\uFF08${r === null ? "\u5BB9\u5668\u5185 Python \u4E0D\u53EF\u7528" : r.stderr.trim().slice(0, 200)}\uFF09`
+        );
+      }
+      continue;
     }
+    const res = await channelFetch(channel, {
+      path: "/v1/models",
+      method: "POST",
+      body: { model_name: id, model_type: "LLM" },
+      timeoutMs: 12e4
+    });
+    if (res === null) errors.push(`xinference:${id} \u91CD\u8F7D\u5931\u8D25\uFF08\u901A\u9053\u4E0D\u53EF\u8FBE\uFF09`);
+    else if (!res.ok) errors.push(`xinference:${id} \u91CD\u8F7D\u5931\u8D25\uFF08HTTP ${res.status}\uFF09`);
+    else restored.push(id);
   }
   return { restored, errors };
 }
-var BASE2;
+var BASE3, HOST_CHANNEL3, PY_DETECT, PY_DELETE, PY_CREATE;
 var init_xinference = __esm({
   "src/core/gpu/providers/xinference.mts"() {
     "use strict";
-    init_net();
-    BASE2 = "http://127.0.0.1:9997";
+    init_channel();
+    init_container_exec();
+    BASE3 = "http://127.0.0.1:9997";
+    HOST_CHANNEL3 = { kind: "host", base_url: BASE3 };
+    PY_DETECT = [
+      "import sys, urllib.request",
+      "base = sys.argv[1]",
+      "with urllib.request.urlopen(base + '/v1/models', timeout=3) as r:",
+      "    sys.stdout.write(r.read().decode())"
+    ].join("\n");
+    PY_DELETE = [
+      "import sys, urllib.parse, urllib.request",
+      "base, model_id = sys.argv[1], sys.argv[2]",
+      "url = base + '/v1/models/' + urllib.parse.quote(model_id, safe='')",
+      "req = urllib.request.Request(url, method='DELETE')",
+      "with urllib.request.urlopen(req, timeout=30) as r:",
+      "    sys.stdout.write(r.read().decode())"
+    ].join("\n");
+    PY_CREATE = [
+      "import json, sys, urllib.request",
+      "base, model_id = sys.argv[1], sys.argv[2]",
+      "data = json.dumps({'model_name': model_id, 'model_type': 'LLM'}).encode()",
+      "req = urllib.request.Request(base + '/v1/models', data=data, method='POST', headers={'Content-Type': 'application/json'})",
+      "with urllib.request.urlopen(req, timeout=120) as r:",
+      "    sys.stdout.write(r.read().decode())"
+    ].join("\n");
+  }
+});
+
+// src/core/gpu/providers/vllm.mts
+var vllm_exports = {};
+__export(vllm_exports, {
+  HOST_CHANNEL: () => HOST_CHANNEL4,
+  detect: () => detect4,
+  load: () => load4,
+  unload: () => unload4
+});
+function parseSleeping(text) {
+  const raw = text.trim().toLowerCase();
+  if (raw === "true") return true;
+  if (raw === "false") return false;
+  try {
+    const data = JSON.parse(text);
+    if (typeof data === "boolean") return data;
+    if (typeof data === "object" && data !== null) {
+      const o = data;
+      if (typeof o.is_sleeping === "boolean") return o.is_sleeping;
+      if (typeof o.sleeping === "boolean") return o.sleeping;
+    }
+  } catch {
+  }
+  return null;
+}
+async function runPython2(channel, args, timeoutMs) {
+  let last = null;
+  for (const python of ["python3", "python"]) {
+    const r = await containerExec(channel, [python, "-c", PY_HTTP, ...args], timeoutMs);
+    if (r === null) continue;
+    if (r.code === 0) return r;
+    if (r.code === 127 || /not found|No such file|executable file not found/i.test(r.stderr)) {
+      last = r;
+      continue;
+    }
+    return r;
+  }
+  return last;
+}
+async function pythonHttp(channel, method, path, body, timeoutMs) {
+  const bodyArg = body !== void 0 ? JSON.stringify(body) : "";
+  const r = await runPython2(channel, [method, `${BASE4}${path}`, bodyArg], timeoutMs + 5e3);
+  if (r === null || r.code !== 0) return null;
+  const nl = r.stdout.indexOf("\n");
+  const statusLine = nl >= 0 ? r.stdout.slice(0, nl) : r.stdout;
+  const text = nl >= 0 ? r.stdout.slice(nl + 1) : "";
+  const status = Number(statusLine.trim());
+  if (!Number.isFinite(status)) return null;
+  return { status, text };
+}
+async function detect4(channel) {
+  if (channel.kind === "exec") {
+    const res2 = await pythonHttp(channel, "GET", "/is_sleeping", void 0, 5e3);
+    if (res2 === null || res2.status === 404 || res2.status === 400) return null;
+    if (res2.status < 200 || res2.status >= 300) return null;
+    const sleeping2 = parseSleeping(res2.text);
+    if (sleeping2 === null) return null;
+    return sleeping2 ? [] : ["sleep"];
+  }
+  const res = await channelFetch(channel, { path: "/is_sleeping", timeoutMs: 3e3 });
+  if (res === null || res.status === 404 || res.status === 400) return null;
+  if (!res.ok) return null;
+  const sleeping = parseSleeping(res.text);
+  if (sleeping === null) return null;
+  return sleeping ? [] : ["sleep"];
+}
+async function unload4(channel, models) {
+  if (models.length === 0) return { ok: [], errors: [] };
+  if (channel.kind === "exec") {
+    const res2 = await pythonHttp(channel, "POST", "/sleep?level=1", {}, 3e4);
+    if (res2 !== null && res2.status >= 200 && res2.status < 300) return { ok: models, errors: [] };
+    return {
+      ok: [],
+      errors: [
+        `vllm \u5378\u8F7D\u5931\u8D25\uFF08${res2 === null ? "\u5BB9\u5668\u5185 Python \u4E0D\u53EF\u7528" : `HTTP ${res2.status}\uFF1B\u9700 --enable-sleep-mode + VLLM_SERVER_DEV_MODE=1`}\uFF09`
+      ]
+    };
+  }
+  const res = await channelFetch(channel, {
+    path: "/sleep?level=1",
+    method: "POST",
+    body: {},
+    timeoutMs: 3e4
+  });
+  if (res !== null && res.ok) return { ok: models, errors: [] };
+  return {
+    ok: [],
+    errors: [
+      `vllm \u5378\u8F7D\u5931\u8D25\uFF08${res === null ? "\u901A\u9053\u4E0D\u53EF\u8FBE" : `HTTP ${res.status}\uFF1B\u9700 --enable-sleep-mode + VLLM_SERVER_DEV_MODE=1`}\uFF09`
+    ]
+  };
+}
+async function load4(channel, models) {
+  if (models.length === 0) return { restored: [], errors: [] };
+  if (channel.kind === "exec") {
+    const res2 = await pythonHttp(channel, "POST", "/wake_up", {}, 12e4);
+    if (res2 !== null && res2.status >= 200 && res2.status < 300) return { restored: models, errors: [] };
+    return {
+      restored: [],
+      errors: [
+        `vllm \u6062\u590D\u5931\u8D25\uFF08${res2 === null ? "\u5BB9\u5668\u5185 Python \u4E0D\u53EF\u7528" : `HTTP ${res2.status}`}\uFF09`
+      ]
+    };
+  }
+  const res = await channelFetch(channel, {
+    path: "/wake_up",
+    method: "POST",
+    body: {},
+    timeoutMs: 12e4
+  });
+  if (res !== null && res.ok) return { restored: models, errors: [] };
+  return {
+    restored: [],
+    errors: [`vllm \u6062\u590D\u5931\u8D25\uFF08${res === null ? "\u901A\u9053\u4E0D\u53EF\u8FBE" : `HTTP ${res.status}`}\uFF09`]
+  };
+}
+var BASE4, HOST_CHANNEL4, PY_HTTP;
+var init_vllm = __esm({
+  "src/core/gpu/providers/vllm.mts"() {
+    "use strict";
+    init_channel();
+    init_container_exec();
+    BASE4 = "http://127.0.0.1:8000";
+    HOST_CHANNEL4 = { kind: "host", base_url: BASE4 };
+    PY_HTTP = [
+      "import sys, urllib.request, urllib.error",
+      "method, url, body = sys.argv[1], sys.argv[2], sys.argv[3]",
+      "data = body.encode() if body else None",
+      "req = urllib.request.Request(url, data=data, method=method, headers={'Content-Type': 'application/json'})",
+      "try:",
+      "    with urllib.request.urlopen(req, timeout=5) as r:",
+      "        print(r.status)",
+      "        sys.stdout.write(r.read().decode())",
+      "except urllib.error.HTTPError as e:",
+      "    print(e.code)",
+      "    sys.stdout.write(e.read().decode())",
+      "except Exception as e:",
+      "    sys.stderr.write(str(e))",
+      "    sys.exit(1)"
+    ].join("\n");
   }
 });
 
 // src/core/gpu/providers/process.mts
-import { readFileSync as readFileSync6, readlinkSync } from "fs";
+import { readFileSync as readFileSync7, readlinkSync } from "fs";
 import { spawn as spawn3 } from "child_process";
 async function listProcesses() {
   const r = await tryExecCapture("ps", ["-eo", "pid=,uid=,comm=,args="], { timeoutMs: 1e4 });
@@ -3405,7 +4327,7 @@ async function ancestorPids() {
 function cmdlineOf(info) {
   if (process.platform === "linux") {
     try {
-      const parts = readFileSync6(`/proc/${info.pid}/cmdline`, "utf8").split("\0").filter((x) => x !== "");
+      const parts = readFileSync7(`/proc/${info.pid}/cmdline`, "utf8").split("\0").filter((x) => x !== "");
       if (parts.length > 0) return parts;
     } catch {
     }
@@ -3419,10 +4341,17 @@ function cwdOf(pid) {
     return null;
   }
 }
-async function findTargetProcesses() {
+function hasForeignRoot(pid) {
+  try {
+    return readlinkSync(`/proc/${pid}/root`) !== "/";
+  } catch {
+    return true;
+  }
+}
+async function findTargetProcesses(opts = {}) {
   const uid = typeof process.getuid === "function" ? process.getuid() : -1;
   if (uid < 0) return [];
-  const gpuPids = await gpuProcessPids();
+  const gpuPids = opts.gpuPids ?? await gpuProcessPids();
   if (gpuPids === null || gpuPids.size === 0) return [];
   const ancestors = await ancestorPids();
   const procs = await listProcesses();
@@ -3432,6 +4361,8 @@ async function findTargetProcesses() {
     if (!gpuPids.has(p.pid)) continue;
     if (p.pid === 1 || p.pid === process.pid || ancestors.has(p.pid)) continue;
     if (PROTECTED_COMMS.has(p.comm)) continue;
+    if (readContainerInfo(p.pid) !== null) continue;
+    if (hasForeignRoot(p.pid)) continue;
     const rule = GPU_PROCESS_TARGETS.find((r) => r.pattern.test(p.comm) || r.pattern.test(p.args));
     if (rule === void 0) continue;
     const cmdline = cmdlineOf(p);
@@ -3508,6 +4439,7 @@ var init_process = __esm({
     init_net();
     init_targets();
     init_detect();
+    init_containers();
   }
 });
 
@@ -3551,23 +4483,84 @@ async function takeoverGpu(opts) {
   const evicted = [];
   for (const id of GPU_PROVIDER_IDS) {
     const adapter = PROVIDERS[id];
-    const models = await adapter.detect();
+    const channel = HOST_CHANNELS[id];
+    const models = await adapter.detect(channel);
     if (models === null || models.length === 0) continue;
     opts.log(`GPU \u63A5\u7BA1\uFF1A\u5378\u8F7D ${id} \u6A21\u578B ${models.join(", ")}`);
-    const result = await adapter.unload(models);
+    const result = await adapter.unload(channel, models);
     if (result.ok.length > 0) {
-      entries.push({ kind: "provider", provider: id, models: result.ok });
-      lease.entries.push({ kind: "provider", provider: id, models: result.ok });
+      entries.push({ kind: "provider", provider: id, models: result.ok, channel });
+      lease.entries.push({ kind: "provider", provider: id, models: result.ok, channel });
       writeLease(lease);
-      evicted.push({ kind: "provider", provider: id, models: result.ok });
+      evicted.push({ kind: "provider", provider: id, models: result.ok, via: "host" });
     }
     for (const e of result.errors) {
       issues.push({ code: "gpu_takeover_failed", message: e });
     }
   }
-  const targets = await findTargetProcesses();
+  if (entries.length > 0) await sleep(500);
+  const apps = await gpuComputeApps();
+  const gpuPids = apps !== null ? new Set(apps.map((a) => a.pid)) : /* @__PURE__ */ new Set();
+  if (apps === null) {
+    issues.push({
+      code: "gpu_takeover_failed",
+      message: "nvidia-smi \u65E0\u6CD5\u8BFB\u53D6\u8BA1\u7B97\u8FDB\u7A0B\uFF0C\u8DF3\u8FC7\u5BB9\u5668/\u8FDB\u7A0B\u63A5\u7BA1"
+    });
+  }
+  const discovery = await findContainerServices({ apps: apps ?? [] });
+  for (const issue of discovery.issues) {
+    issues.push({ code: "gpu_takeover_failed", message: issue });
+  }
+  for (const service of discovery.services) {
+    const adapter = PROVIDERS[service.provider];
+    let accessed = false;
+    for (const channel of service.channels) {
+      const models = await adapter.detect(channel);
+      if (models === null) continue;
+      accessed = true;
+      if (models.length === 0) break;
+      const name = service.info.name !== "" ? service.info.name : service.info.id.slice(0, 12);
+      opts.log(
+        `GPU \u63A5\u7BA1\uFF1A\u5378\u8F7D\u5BB9\u5668\u5185 ${service.provider} \u6A21\u578B ${models.join(", ")}\uFF08${name}\uFF0C${channel.kind} \u901A\u9053\uFF09`
+      );
+      const result = await adapter.unload(channel, models);
+      if (result.ok.length > 0) {
+        const fallbacks = service.channels.filter((c) => c !== channel);
+        const providerEntry = {
+          kind: "provider",
+          provider: service.provider,
+          models: result.ok,
+          channel,
+          ...fallbacks.length > 0 ? { fallbacks } : {}
+        };
+        entries.push(providerEntry);
+        lease.entries.push(providerEntry);
+        writeLease(lease);
+        evicted.push({
+          kind: "provider",
+          provider: service.provider,
+          models: result.ok,
+          via: channel.kind,
+          container: name
+        });
+      }
+      for (const e of result.errors) {
+        issues.push({ code: "gpu_takeover_failed", message: e });
+      }
+      break;
+    }
+    if (!accessed) {
+      const name = service.info.name !== "" ? service.info.name : service.info.id.slice(0, 12);
+      const why = service.provider === "vllm" ? "\u672A\u542F\u7528 sleep mode\uFF08\u9700\u8981 --enable-sleep-mode + VLLM_SERVER_DEV_MODE=1\uFF09" : "\u65E0\u6CD5\u8BBF\u95EE\uFF08host/netns/exec \u5747\u4E0D\u53EF\u7528\uFF09";
+      issues.push({
+        code: "gpu_takeover_failed",
+        message: `\u5BB9\u5668\u5185 ${service.provider} ${why}\uFF1B\u672A\u5378\u8F7D\uFF0C\u5BB9\u5668\u4FDD\u6301\u8FD0\u884C\uFF08${name}\uFF09`
+      });
+    }
+  }
+  const targets = await findTargetProcesses({ gpuPids });
   if (targets.length > 0) {
-    opts.log(`GPU \u63A5\u7BA1\uFF1A\u9A71\u9010\u8FDB\u7A0B ${targets.map((t) => `${t.target}(pid ${t.pid})`).join(", ")}`);
+    opts.log(`GPU \u63A5\u7BA1\uFF1A\u9A71\u9010\u88F8\u673A\u8FDB\u7A0B ${targets.map((t) => `${t.target}(pid ${t.pid})`).join(", ")}`);
   }
   const killed = await evictProcesses(targets);
   for (const t of killed.evicted) {
@@ -3600,15 +4593,58 @@ async function restoreLease(lease, log) {
   const errors = [];
   for (const entry of lease.entries) {
     if (entry.kind !== "provider") continue;
-    optsLog(log, `GPU \u6062\u590D\uFF1A\u91CD\u8F7D ${entry.provider} \u6A21\u578B ${entry.models.join(", ")}`);
+    if (!Array.isArray(entry.models)) {
+      errors.push({ code: "gpu_restore_failed", message: "GPU \u79DF\u7EA6\u4E2D\u7684\u6A21\u578B\u8BB0\u5F55\u65E0\u6548\uFF1B\u8DF3\u8FC7" });
+      continue;
+    }
     const adapter = PROVIDERS[entry.provider];
-    const r2 = await adapter.load(entry.models);
+    if (adapter === void 0) {
+      errors.push({
+        code: "gpu_restore_failed",
+        message: `GPU \u79DF\u7EA6\u4E2D\u7684 provider ${String(entry.provider)} \u672A\u77E5\uFF1B\u8DF3\u8FC7`
+      });
+      continue;
+    }
+    const primary = entry.channel ?? HOST_CHANNELS[entry.provider];
+    const candidates = [
+      primary,
+      ...Array.isArray(entry.fallbacks) ? entry.fallbacks : []
+    ];
+    let channel = null;
+    let current = null;
+    for (const c of candidates) {
+      const det = await adapter.detect(c);
+      if (det !== null) {
+        channel = c;
+        current = det;
+        break;
+      }
+    }
+    if (channel === null) {
+      channel = primary;
+      current = null;
+    }
+    const missing = current === null ? entry.models : entry.models.filter((m) => !current.includes(m));
+    if (missing.length === 0) {
+      restored.push(`${entry.provider}:\u5DF2\u52A0\u8F7D\uFF08\u8DF3\u8FC7\uFF09`);
+      continue;
+    }
+    optsLog(
+      log,
+      `GPU \u6062\u590D\uFF1A\u91CD\u8F7D ${entry.provider} \u6A21\u578B ${missing.join(", ")}\uFF08${channel.kind} \u901A\u9053\uFF09`
+    );
+    const r2 = await adapter.load(channel, missing);
     for (const m of r2.restored) restored.push(`${entry.provider}:${m}`);
     for (const e of r2.errors) errors.push({ code: "gpu_restore_failed", message: e });
   }
-  const procs = lease.entries.filter((e) => e.kind === "process");
+  const procs = lease.entries.filter(
+    (e) => e.kind === "process"
+  );
   if (procs.length > 0) {
-    optsLog(log, `GPU \u6062\u590D\uFF1A\u91CD\u542F\u8FDB\u7A0B ${procs.map((p) => `${p.process.target}(pid ${p.process.pid})`).join(", ")}`);
+    optsLog(
+      log,
+      `GPU \u6062\u590D\uFF1A\u91CD\u542F\u88F8\u673A\u8FDB\u7A0B ${procs.map((p) => `${p.process.target}(pid ${p.process.pid})`).join(", ")}`
+    );
   }
   const r = await restartProcesses(procs.map((p) => p.process));
   restored.push(...r.restored);
@@ -3632,22 +4668,32 @@ async function restoreLeaseIfAny(log = () => {
 function optsLog(log, msg) {
   log(msg);
 }
-var PROVIDERS;
+var PROVIDERS, HOST_CHANNELS;
 var init_takeover = __esm({
   "src/core/gpu/takeover.mts"() {
     "use strict";
     init_errors();
+    init_net();
     init_detect();
     init_lease();
     init_targets();
     init_ollama();
     init_lmstudio();
     init_xinference();
+    init_vllm();
     init_process();
+    init_containers();
     PROVIDERS = {
       ollama: ollama_exports,
       lmstudio: lmstudio_exports,
-      xinference: xinference_exports
+      xinference: xinference_exports,
+      vllm: vllm_exports
+    };
+    HOST_CHANNELS = {
+      ollama: HOST_CHANNEL,
+      lmstudio: HOST_CHANNEL2,
+      xinference: HOST_CHANNEL3,
+      vllm: HOST_CHANNEL4
     };
   }
 });
@@ -3661,7 +4707,7 @@ __export(local_session_exports, {
   readEnginePid: () => readEnginePid,
   stopResidualEngine: () => stopResidualEngine
 });
-import { closeSync, existsSync as existsSync9, openSync, readFileSync as readFileSync7, readSync, rmSync as rmSync7, statSync, unlinkSync, writeFileSync as writeFileSync3 } from "fs";
+import { closeSync, existsSync as existsSync10, openSync, readFileSync as readFileSync8, readSync, rmSync as rmSync7, statSync, unlinkSync, writeFileSync as writeFileSync3 } from "fs";
 import { spawn as spawn4 } from "child_process";
 import { join as join8 } from "path";
 function enginePidFile(root) {
@@ -3669,9 +4715,9 @@ function enginePidFile(root) {
 }
 function readEnginePid(root) {
   const file = enginePidFile(root);
-  if (!existsSync9(file)) return null;
+  if (!existsSync10(file)) return null;
   try {
-    const text = readFileSync7(file, "utf8").trim();
+    const text = readFileSync8(file, "utf8").trim();
     if (/^\d+$/.test(text)) {
       return { pid: Number(text), port: 0, comfyui_dir: "", task_id: "", started_at: "" };
     }
@@ -3756,7 +4802,7 @@ async function stopResidualEngine(root, log) {
   rmSync7(enginePidFile(root), { force: true });
 }
 function tailFile(file, lines) {
-  if (!existsSync9(file)) return "(\u6587\u4EF6\u4E0D\u5B58\u5728)";
+  if (!existsSync10(file)) return "(\u6587\u4EF6\u4E0D\u5B58\u5728)";
   let size = 0;
   try {
     size = statSync(file).size;
@@ -3868,13 +4914,13 @@ var init_local_session = __esm({
         const started = Date.now();
         const comfyDir = this.comfyDir();
         const venvPython = join8(this.venvDir(), "bin", "python");
-        if (!existsSync9(venvPython)) {
+        if (!existsSync10(venvPython)) {
           throw new DaoyanCliError({
             code: "engine_start_failed",
             message: `venv \u4E0D\u5B58\u5728\uFF1A${venvPython}\u3002\u8FD0\u884C daoyan init --mode=local \u90E8\u7F72\u5F15\u64CE`
           });
         }
-        if (!existsSync9(join8(comfyDir, "main.py"))) {
+        if (!existsSync10(join8(comfyDir, "main.py"))) {
           throw new DaoyanCliError({
             code: "engine_start_failed",
             message: `ComfyUI \u76EE\u5F55\u65E0\u6548\uFF1A${comfyDir}\uFF08\u7F3A\u5C11 main.py\uFF09\u3002\u8FD0\u884C daoyan init --mode=local`
@@ -4058,7 +5104,7 @@ ${tailFile(logFile, 8)}`
         const explicit = this.opts.machine.engine.models_config;
         if (explicit !== void 0 && explicit !== null && explicit !== "") return explicit;
         const auto = join8(this.opts.root, EXTRA_MODELS_FILE);
-        return existsSync9(auto) ? auto : null;
+        return existsSync10(auto) ? auto : null;
       }
       /**
        * 清理本次 run 的 scratch 文件（local 拥有引擎文件系统）。
@@ -4083,7 +5129,7 @@ ${tailFile(logFile, 8)}`
 });
 
 // src/core/machine/lock.mts
-import { closeSync as closeSync2, existsSync as existsSync10, openSync as openSync2, readFileSync as readFileSync8, rmSync as rmSync8, unlinkSync as unlinkSync2, writeFileSync as writeFileSync4 } from "fs";
+import { closeSync as closeSync2, existsSync as existsSync11, openSync as openSync2, readFileSync as readFileSync9, rmSync as rmSync8, unlinkSync as unlinkSync2, writeFileSync as writeFileSync4 } from "fs";
 import { homedir as homedir2 } from "os";
 import { dirname as dirname5, join as join9 } from "path";
 function machineLockPath() {
@@ -4099,10 +5145,10 @@ function pidAlive2(pid) {
   }
 }
 function inspectMachineLock(path = machineLockPath()) {
-  if (!existsSync10(path)) return { status: "absent", path };
+  if (!existsSync11(path)) return { status: "absent", path };
   let raw;
   try {
-    raw = JSON.parse(readFileSync8(path, "utf8"));
+    raw = JSON.parse(readFileSync9(path, "utf8"));
   } catch (e) {
     return {
       status: "corrupt",
@@ -4218,7 +5264,7 @@ function attachMachineLock(opts) {
 }
 async function recoverStaleLock(record, path = machineLockPath()) {
   try {
-    if (record.kind === "generation" && existsSync10(join9(record.project, "project.json"))) {
+    if (record.kind === "generation" && existsSync11(join9(record.project, "project.json"))) {
       const store = await Promise.resolve().then(() => (init_store(), store_exports));
       const task = store.readTask(record.project, record.task_id);
       if (task !== null && (task.status === "queued" || task.status === "running")) {
@@ -4236,7 +5282,7 @@ async function recoverStaleLock(record, path = machineLockPath()) {
   } catch {
   }
   try {
-    if (record.mode === "local" && existsSync10(join9(record.project, "project.json"))) {
+    if (record.mode === "local" && existsSync11(join9(record.project, "project.json"))) {
       const local = await Promise.resolve().then(() => (init_local_session(), local_session_exports));
       await local.stopResidualEngine(record.project, () => {
       });
@@ -4291,7 +5337,7 @@ var init_lock = __esm({
 
 // src/commands/init.mts
 import { basename, isAbsolute as isAbsolute2, join as join10, resolve as resolve2 } from "path";
-import { existsSync as existsSync11, statSync as statSync2 } from "fs";
+import { existsSync as existsSync12, statSync as statSync2 } from "fs";
 function parseArgs(args) {
   const flags = { noSkill: false };
   for (let i = 0; i < args.length; i++) {
@@ -4353,7 +5399,7 @@ function parseArgs(args) {
 }
 function resolveModelPath(raw) {
   const abs = isAbsolute2(raw) ? raw : resolve2(process.cwd(), raw);
-  if (!existsSync11(abs) || !statSync2(abs).isDirectory()) {
+  if (!existsSync12(abs) || !statSync2(abs).isDirectory()) {
     throw new DaoyanCliError({
       code: "config_invalid",
       message: `--modelpath \u5FC5\u987B\u662F\u5DF2\u5B58\u5728\u7684\u76EE\u5F55\uFF08\u6536\u5230 ${raw}\uFF09`
@@ -4411,7 +5457,7 @@ async function runInit(ctx2, args) {
         writeJsonAtomic2(resolve2(root, "project.json"), project);
       }
       const prevComfyAbs = prevLocal?.comfyui_dir !== void 0 ? isAbsolute2(prevLocal.comfyui_dir) ? prevLocal.comfyui_dir : resolve2(root, prevLocal.comfyui_dir) : null;
-      const reuseCustomEngine = flags.version === void 0 && prevLocal?.comfyui_dir !== void 0 && prevLocal.comfyui_dir !== "engine/ComfyUI" && prevComfyAbs !== null && existsSync11(join10(prevComfyAbs, "main.py"));
+      const reuseCustomEngine = flags.version === void 0 && prevLocal?.comfyui_dir !== void 0 && prevLocal.comfyui_dir !== "engine/ComfyUI" && prevComfyAbs !== null && existsSync12(join10(prevComfyAbs, "main.py"));
       if (reuseCustomEngine) {
         say(`\u590D\u7528 engine use \u9009\u5B9A\u7684\u5F15\u64CE\u76EE\u5F55\uFF1A${prevLocal?.comfyui_dir}`);
         comfyVersion = prevLocal?.comfyui_version ?? version;
@@ -4647,18 +5693,18 @@ var init_graph = __esm({
 });
 
 // src/core/workflow/load.mts
-import { existsSync as existsSync12, readFileSync as readFileSync9 } from "fs";
+import { existsSync as existsSync13, readFileSync as readFileSync10 } from "fs";
 import { dirname as dirname6, join as join11 } from "path";
 function workflowError(message, details) {
   throw new DaoyanCliError({ code: "workflow_invalid", message, details });
 }
 function loadGraphFile(abs, rel) {
-  if (!existsSync12(abs)) {
+  if (!existsSync13(abs)) {
     workflowError(`workflow \u6587\u4EF6\u4E0D\u5B58\u5728\uFF1A${rel}`, { path: rel });
   }
   let raw;
   try {
-    raw = JSON.parse(readFileSync9(abs, "utf8"));
+    raw = JSON.parse(readFileSync10(abs, "utf8"));
   } catch (e) {
     workflowError(`${rel} \u4E0D\u662F\u5408\u6CD5 JSON\uFF1A${e instanceof Error ? e.message : String(e)}`, { path: rel });
   }
@@ -4680,10 +5726,10 @@ function bindingsPathOf(workflowAbs) {
 }
 function loadBindings(workflowAbs) {
   const file = bindingsPathOf(workflowAbs);
-  if (!existsSync12(file)) return null;
+  if (!existsSync13(file)) return null;
   let raw;
   try {
-    raw = JSON.parse(readFileSync9(file, "utf8"));
+    raw = JSON.parse(readFileSync10(file, "utf8"));
   } catch (e) {
     throw new DaoyanCliError({
       code: "workflow_invalid",
@@ -4877,7 +5923,7 @@ var init_load = __esm({
 });
 
 // src/commands/validate.mts
-import { existsSync as existsSync13, readFileSync as readFileSync10, readdirSync as readdirSync3 } from "fs";
+import { existsSync as existsSync14, readFileSync as readFileSync11, readdirSync as readdirSync3 } from "fs";
 import { isAbsolute as isAbsolute3, join as join12 } from "path";
 function fromGraphIssue(prefix, i) {
   return {
@@ -4890,7 +5936,7 @@ function fromGraphIssue(prefix, i) {
 }
 function validateWorkflows(root, machine, issues) {
   const dir = join12(root, WORKFLOWS_DIR);
-  if (!existsSync13(dir)) {
+  if (!existsSync14(dir)) {
     issues.push({
       path: WORKFLOWS_DIR,
       code: "workflows_dir_missing",
@@ -4916,7 +5962,7 @@ function validateWorkflows(root, machine, issues) {
     const abs = join12(dir, f);
     let raw;
     try {
-      raw = JSON.parse(readFileSync10(abs, "utf8"));
+      raw = JSON.parse(readFileSync11(abs, "utf8"));
     } catch (e) {
       issues.push({
         path: rel,
@@ -5064,7 +6110,7 @@ function validateShots(root, shots, issues) {
     const ref = s.workflow ?? shots.workflow ?? null;
     if (ref !== null) {
       const wf = resolveWorkflowRef(root, ref);
-      if (!existsSync13(wf.abs)) {
+      if (!existsSync14(wf.abs)) {
         issues.push({
           path: tag,
           code: "shot_workflow_missing",
@@ -5072,7 +6118,7 @@ function validateShots(root, shots, issues) {
           message: `workflow \u6587\u4EF6\u4E0D\u5B58\u5728\uFF1A${wf.rel}`,
           hint: "\u5148\u521B\u5EFA/\u5BFC\u5165\u8BE5 workflow\u3002"
         });
-      } else if (!existsSync13(bindingsPathOf(wf.abs))) {
+      } else if (!existsSync14(bindingsPathOf(wf.abs))) {
         issues.push({
           path: tag,
           code: "shot_bindings_missing",
@@ -5097,7 +6143,7 @@ function validateShots(root, shots, issues) {
           message: `\u951A\u70B9 key "${ff}" \u4E0D\u5728 meta.anchors`,
           hint: "\u5728 meta.anchors \u767B\u8BB0\u6216\u6539\u7528\u5B58\u5728\u7684 key\u3002"
         });
-      } else if (!existsSync13(join12(root, rel))) {
+      } else if (!existsSync14(join12(root, rel))) {
         issues.push({
           path: tag,
           code: "anchor_file_missing",
@@ -5162,7 +6208,7 @@ function validateMachine(root, machine, issues) {
   }
   if (machine.engine.mode !== "local") return;
   const comfyDir = machine.engine.comfyui_dir !== void 0 ? isAbsolute3(machine.engine.comfyui_dir) ? machine.engine.comfyui_dir : join12(root, machine.engine.comfyui_dir) : join12(root, "engine", "ComfyUI");
-  if (!existsSync13(join12(comfyDir, "main.py"))) {
+  if (!existsSync14(join12(comfyDir, "main.py"))) {
     issues.push({
       path: ".dycli/machine.json",
       code: "engine_not_installed",
@@ -5171,7 +6217,7 @@ function validateMachine(root, machine, issues) {
       hint: "\u8FD0\u884C daoyan init --mode=local \u90E8\u7F72\u5F15\u64CE\u3002"
     });
   }
-  if (machine.engine.modelpath !== void 0 && !existsSync13(machine.engine.modelpath)) {
+  if (machine.engine.modelpath !== void 0 && !existsSync14(machine.engine.modelpath)) {
     issues.push({
       path: ".dycli/machine.json",
       code: "modelpath_missing",
@@ -5180,7 +6226,7 @@ function validateMachine(root, machine, issues) {
       hint: "\u91CD\u65B0 init --modelpath\uFF0C\u6216\u6302\u8F7D\u8BE5\u76EE\u5F55\u3002"
     });
   }
-  if (machine.engine.models_config !== null && machine.engine.models_config !== void 0 && !existsSync13(machine.engine.models_config)) {
+  if (machine.engine.models_config !== null && machine.engine.models_config !== void 0 && !existsSync14(machine.engine.models_config)) {
     issues.push({
       path: ".dycli/machine.json",
       code: "models_config_missing",
@@ -5197,7 +6243,7 @@ async function runValidate(ctx2) {
   const issues = [];
   if (project.default_workflow !== void 0) {
     const wf = resolveWorkflowRef(root, project.default_workflow);
-    if (!existsSync13(wf.abs)) {
+    if (!existsSync14(wf.abs)) {
       issues.push({
         path: "project.default_workflow",
         code: "default_workflow_missing",
@@ -5345,7 +6391,7 @@ var init_ffmpeg = __esm({
 });
 
 // src/core/run/store.mts
-import { copyFileSync, existsSync as existsSync14, readdirSync as readdirSync4, readFileSync as readFileSync11, renameSync as renameSync3, writeFileSync as writeFileSync5 } from "fs";
+import { copyFileSync, existsSync as existsSync15, readdirSync as readdirSync4, readFileSync as readFileSync12, renameSync as renameSync3, writeFileSync as writeFileSync5 } from "fs";
 import { basename as basename2, join as join13 } from "path";
 function newRunId(machineId) {
   return makeId(machineId);
@@ -5366,7 +6412,7 @@ function writeInputsSnapshot(root, runId, inputs, files) {
   writeJsonAtomic(join13(runDir(root, runId), RUN_INPUTS_FILE), { inputs, files });
 }
 function copyRunInput(root, runId, source, desiredName) {
-  if (!existsSync14(source)) {
+  if (!existsSync15(source)) {
     throw new DaoyanCliError({ code: "config_invalid", message: `\u8F93\u5165\u6587\u4EF6\u4E0D\u5B58\u5728\uFF1A${source}` });
   }
   const name = basename2(desiredName ?? source).replace(/[^A-Za-z0-9._-]/g, "_");
@@ -5374,7 +6420,7 @@ function copyRunInput(root, runId, source, desiredName) {
   ensureDir(dir);
   const dest = join13(dir, name);
   copyFileSync(source, dest);
-  const bytes = new Uint8Array(readFileSync11(dest));
+  const bytes = new Uint8Array(readFileSync12(dest));
   return { name, sha256: sha256(bytes), bytes: bytes.byteLength };
 }
 function writeRunOutput(root, runId, filename, bytes) {
@@ -5382,7 +6428,7 @@ function writeRunOutput(root, runId, filename, bytes) {
   const dir = join13(runDir(root, runId), "outputs");
   ensureDir(dir);
   let name = safe;
-  for (let i = 1; existsSync14(join13(dir, name)); i++) {
+  for (let i = 1; existsSync15(join13(dir, name)); i++) {
     const dot = safe.lastIndexOf(".");
     name = dot > 0 ? `${safe.slice(0, dot)}_${i}${safe.slice(dot)}` : `${safe}_${i}`;
   }
@@ -5409,7 +6455,7 @@ function requireRun(root, runId) {
 }
 function listRuns(root) {
   const dir = join13(root, RUNS_DIR);
-  if (!existsSync14(dir)) return [];
+  if (!existsSync15(dir)) return [];
   const out = [];
   for (const ent of readdirSync4(dir, { withFileTypes: true })) {
     if (!ent.isDirectory()) continue;
@@ -5440,7 +6486,7 @@ var init_store2 = __esm({
 });
 
 // src/core/task/plans.mts
-import { existsSync as existsSync15, mkdirSync as mkdirSync3, statSync as statSync3 } from "fs";
+import { existsSync as existsSync16, mkdirSync as mkdirSync3, statSync as statSync3 } from "fs";
 import { basename as basename3, join as join14 } from "path";
 function splitTarget(target) {
   const dot = target.indexOf(".");
@@ -5565,7 +6611,7 @@ function pickRelaySource(root, upstreamId) {
     });
   }
   const abs = runOutputAbs(root, rec, chosen);
-  if (!existsSync15(abs)) {
+  if (!existsSync16(abs)) {
     throw new DaoyanCliError({
       code: "relay_upstream_missing",
       message: `\u63A5\u529B\u4E0A\u6E38\u4EA7\u7269\u4E0D\u5728\u5DE5\u4F5C\u533A\uFF08\u53EF\u80FD\u672A git lfs pull\uFF09\uFF1A${rec.run_id}/${chosen.path}`,
@@ -5594,7 +6640,7 @@ function firstFrameUpload(opts) {
       });
     }
     const src = join14(opts.root, rel);
-    if (!existsSync15(src)) {
+    if (!existsSync16(src)) {
       throw new DaoyanCliError({
         code: "anchor_not_found",
         message: `\u951A\u70B9\u56FE\u7247\u4E0D\u5B58\u5728\uFF1A${rel}`,
@@ -5624,7 +6670,7 @@ function firstFrameUpload(opts) {
   mkdirSync3(relayDir, { recursive: true });
   const cache = join14(relayDir, `relay_${upstream.id}_to_${opts.shot.id}.png`);
   let needExtract = true;
-  if (existsSync15(cache)) {
+  if (existsSync16(cache)) {
     try {
       needExtract = statSync3(cache).mtimeMs < statSync3(sourceClip).mtimeMs;
     } catch {
@@ -5795,7 +6841,7 @@ var init_signals = __esm({
 });
 
 // src/core/task/events.mts
-import { existsSync as existsSync16, readFileSync as readFileSync12 } from "fs";
+import { existsSync as existsSync17, readFileSync as readFileSync13 } from "fs";
 import { join as join15 } from "path";
 import { appendFileSync as appendFileSync2 } from "fs";
 function eventsPath(taskDir2) {
@@ -5803,9 +6849,9 @@ function eventsPath(taskDir2) {
 }
 function readEvents(taskDir2, fromSeq = 0) {
   const file = eventsPath(taskDir2);
-  if (!existsSync16(file)) return [];
+  if (!existsSync17(file)) return [];
   const out = [];
-  for (const line of readFileSync12(file, "utf8").split("\n")) {
+  for (const line of readFileSync13(file, "utf8").split("\n")) {
     if (line.trim() === "") continue;
     try {
       const ev = JSON.parse(line);
@@ -6035,7 +7081,7 @@ var init_preflight = __esm({
 });
 
 // src/core/run/executor.mts
-import { existsSync as existsSync17, readFileSync as readFileSync13, statSync as statSync4, openSync as openSync3, readSync as readSync2, closeSync as closeSync3 } from "fs";
+import { existsSync as existsSync18, readFileSync as readFileSync14, statSync as statSync4, openSync as openSync3, readSync as readSync2, closeSync as closeSync3 } from "fs";
 import { basename as basename4, join as join16 } from "path";
 function collectOutputItems(outputs) {
   const out = [];
@@ -6058,7 +7104,7 @@ function collectOutputItems(outputs) {
   return out;
 }
 function readTailText(file, lines) {
-  if (!existsSync17(file)) return "";
+  if (!existsSync18(file)) return "";
   let size = 0;
   try {
     size = statSync4(file).size;
@@ -6147,7 +7193,7 @@ async function executeRun(opts) {
     }
     for (const up of opts.plan.uploads) {
       opts.event("upload_started", { run_id: opts.runId, logical: up.logical });
-      const bytes = new Uint8Array(readFileSync13(up.source));
+      const bytes = new Uint8Array(readFileSync14(up.source));
       files.push(copyRunInput(opts.root, opts.runId, up.source, up.desiredName));
       const engineName = `dycli_${opts.runId}_${basename4(up.desiredName).replace(/[^A-Za-z0-9._-]/g, "_")}`;
       const name = await opts.session.client.uploadImage(engineName, bytes, true);
@@ -6356,9 +7402,9 @@ function patchRunCleanup(opts) {
   let first = true;
   for (const runId of opts.runIds) {
     const file = join16(opts.root, "runs", runId, "run.json");
-    if (!existsSync17(file)) continue;
+    if (!existsSync18(file)) continue;
     try {
-      const rec = JSON.parse(readFileSync13(file, "utf8"));
+      const rec = JSON.parse(readFileSync14(file, "utf8"));
       rec.engine.cleanup = opts.cleanup;
       if (opts.gpu !== void 0) {
         const gpu = { ...opts.gpu, restored: opts.restored };
@@ -6398,7 +7444,7 @@ var init_executor = __esm({
 });
 
 // src/core/task/worker.mts
-import { existsSync as existsSync18, readdirSync as readdirSync5 } from "fs";
+import { existsSync as existsSync19, readdirSync as readdirSync5 } from "fs";
 import { basename as basename5, dirname as dirname7, join as join17, resolve as resolve3 } from "path";
 function isFatalRunError(code) {
   return code === "engine_oom" || code === "engine_crashed" || code === "engine_unreachable" || code === "engine_busy" || code === "engine_start_failed" || code === "engine_stop_failed" || code === "gpu_lease_corrupt" || code === "machine_busy" || code === "machine_lock_corrupt" || code === "worker_start_failed";
@@ -6803,7 +7849,7 @@ var init_worker = __esm({
 });
 
 // src/core/task/create.mts
-import { closeSync as closeSync4, openSync as openSync4, readFileSync as readFileSync14 } from "fs";
+import { closeSync as closeSync4, openSync as openSync4, readFileSync as readFileSync15 } from "fs";
 import { spawn as spawn6 } from "child_process";
 import { join as join18 } from "path";
 function sleepMs(ms) {
@@ -6915,7 +7961,7 @@ function taskRuns(root, task) {
   const out = [];
   for (const id of task.runs) {
     try {
-      const raw = JSON.parse(readFileSync14(join18(root, "runs", id, RUN_FILE), "utf8"));
+      const raw = JSON.parse(readFileSync15(join18(root, "runs", id, RUN_FILE), "utf8"));
       out.push(raw);
     } catch {
     }
@@ -7046,7 +8092,7 @@ var init_create = __esm({
 });
 
 // src/core/run/summary.mts
-import { existsSync as existsSync19 } from "fs";
+import { existsSync as existsSync20 } from "fs";
 import { join as join19 } from "path";
 function outputSummaries(root, rec) {
   return rec.outputs.map((o) => {
@@ -7057,7 +8103,7 @@ function outputSummaries(root, rec) {
       abs_path: abs,
       sha256: o.sha256,
       bytes: o.bytes,
-      present: existsSync19(abs)
+      present: existsSync20(abs)
     };
   });
 }
@@ -7475,7 +8521,7 @@ var init_shot = __esm({
 });
 
 // src/commands/wrap.mts
-import { existsSync as existsSync20, mkdirSync as mkdirSync4, writeFileSync as writeFileSync6 } from "fs";
+import { existsSync as existsSync21, mkdirSync as mkdirSync4, writeFileSync as writeFileSync6 } from "fs";
 import { join as join20 } from "path";
 function pickVideoAt(root, rec) {
   const chosen = rec.outputs.find((o) => /\.(mp4|webm|mkv|mov|gif)$/i.test(o.name)) ?? rec.outputs[0];
@@ -7519,7 +8565,7 @@ async function runWrap(ctx2, args) {
       continue;
     }
     const pick = pickVideoAt(root, rec);
-    if (pick === null || !existsSync20(pick.abs)) {
+    if (pick === null || !existsSync21(pick.abs)) {
       missing.push(shot.id);
       continue;
     }
@@ -7615,7 +8661,7 @@ var init_wrap = __esm({
 });
 
 // src/commands/logs.mts
-import { closeSync as closeSync5, existsSync as existsSync21, openSync as openSync5, readSync as readSync3, readdirSync as readdirSync6, statSync as statSync5 } from "fs";
+import { closeSync as closeSync5, existsSync as existsSync22, openSync as openSync5, readSync as readSync3, readdirSync as readdirSync6, statSync as statSync5 } from "fs";
 import { join as join21 } from "path";
 function parseArgs2(args) {
   const out = { follow: false, n: 100, src: "all" };
@@ -7680,7 +8726,7 @@ function cleanLines(raw) {
   return out;
 }
 function readTail(file, n) {
-  if (!existsSync21(file)) return [];
+  if (!existsSync22(file)) return [];
   let size = 0;
   try {
     size = statSync5(file).size;
@@ -7700,8 +8746,8 @@ function readTail(file, n) {
 }
 function fileSources(root, src) {
   const dir = join21(root, LOG_DIR);
-  const engines = existsSync21(dir) ? readdirSync6(dir).filter((f) => /^engine-.*\.log$/.test(f)).sort().reverse() : [];
-  const workers = existsSync21(dir) ? readdirSync6(dir).filter((f) => /^worker-.*\.log$/.test(f)).sort().reverse() : [];
+  const engines = existsSync22(dir) ? readdirSync6(dir).filter((f) => /^engine-.*\.log$/.test(f)).sort().reverse() : [];
+  const workers = existsSync22(dir) ? readdirSync6(dir).filter((f) => /^worker-.*\.log$/.test(f)).sort().reverse() : [];
   const all = [
     ...workers[0] !== void 0 ? [{ name: "worker", file: join21(dir, workers[0]) }] : [],
     ...engines[0] !== void 0 ? [{ name: "engine", file: join21(dir, engines[0]) }] : [],
@@ -7797,7 +8843,7 @@ async function runLogs(ctx2, args) {
     return taskEvents(ctx2, root, taskId, flags);
   }
   const sources = fileSources(root, flags.src);
-  const existing = sources.filter((s) => existsSync21(s.file));
+  const existing = sources.filter((s) => existsSync22(s.file));
   if (existing.length === 0) {
     if (ctx2.json) {
       emitData({ sources: {}, note: "\u6682\u65E0\u65E5\u5FD7\u6587\u4EF6\uFF1B\u8FD0\u884C\u4EFB\u52A1\u540E\u53EF\u7528 logs --task <id>" });
@@ -7831,7 +8877,7 @@ async function runLogs(ctx2, args) {
     while (!stop) {
       await new Promise((r) => setTimeout(r, 500));
       for (const s of existing) {
-        if (!existsSync21(s.file)) continue;
+        if (!existsSync22(s.file)) continue;
         let size = 0;
         try {
           size = statSync5(s.file).size;
@@ -7885,7 +8931,7 @@ var init_logs = __esm({
 });
 
 // src/commands/status.mts
-import { existsSync as existsSync22 } from "fs";
+import { existsSync as existsSync23 } from "fs";
 import { join as join22 } from "path";
 function parseArgs3(args) {
   const out = { wait: false };
@@ -7952,7 +8998,7 @@ function shotProgress(root, shots) {
   if (shots === null) return [];
   return shots.shots.map((s) => {
     const rec = latestSucceededRun(root, `shot:${s.id}`);
-    const present = rec !== null && rec.outputs.some((o) => existsSync22(join22(root, RUNS_DIR, rec.run_id, o.path)));
+    const present = rec !== null && rec.outputs.some((o) => existsSync23(join22(root, RUNS_DIR, rec.run_id, o.path)));
     return {
       id: s.id,
       slug: s.slug ?? null,
@@ -8194,7 +9240,7 @@ var init_status = __esm({
 });
 
 // src/commands/engine.mts
-import { existsSync as existsSync23, readdirSync as readdirSync7 } from "fs";
+import { existsSync as existsSync24, readdirSync as readdirSync7 } from "fs";
 import { isAbsolute as isAbsolute4, join as join23, relative, resolve as resolve4 } from "path";
 async function comfyTags(limit) {
   try {
@@ -8255,7 +9301,7 @@ async function runEngine(ctx2, args) {
           mode: "local",
           comfyui_dir: portablePath(found.root, dirs.comfyDir),
           venv_dir: portablePath(found.root, dirs.venvDir),
-          installed: existsSync23(join23(dirs.comfyDir, "main.py")),
+          installed: existsSync24(join23(dirs.comfyDir, "main.py")),
           version: machine2.engine.comfyui_version ?? found.config.comfyui?.version ?? null
         };
       } else if (machine2 !== null && machine2.engine.mode === "remote") {
@@ -8303,7 +9349,7 @@ async function runEngine(ctx2, args) {
     });
     try {
       const base = join23(root, "engine", "versions", tag);
-      if (existsSync23(join23(base, "ComfyUI", "main.py")) && existsSync23(join23(base, ".venv", "bin", "python"))) {
+      if (existsSync24(join23(base, "ComfyUI", "main.py")) && existsSync24(join23(base, ".venv", "bin", "python"))) {
         say(`\u7248\u672C ${tag} \u5DF2\u5B89\u88C5\uFF1A${portablePath(root, base)}`);
       } else {
         say(`\u5B89\u88C5 ComfyUI ${tag} \u2192 engine/versions/${tag} ...`);
@@ -8338,10 +9384,10 @@ async function runEngine(ctx2, args) {
       let comfyDir;
       let venvDir;
       let version;
-      if (existsSync23(join23(asPath, "main.py"))) {
+      if (existsSync24(join23(asPath, "main.py"))) {
         comfyDir = asPath;
         venvDir = join23(asPath, ".venv");
-        if (!existsSync23(join23(venvDir, "bin", "python"))) {
+        if (!existsSync24(join23(venvDir, "bin", "python"))) {
           throw new DaoyanCliError({
             code: "config_invalid",
             message: `\u8DEF\u5F84\u4E0B\u7F3A\u5C11 venv\uFF1A${join23(venvDir, "bin", "python")}`
@@ -8351,13 +9397,13 @@ async function runEngine(ctx2, args) {
         const base = join23(root, "engine", "versions", target);
         comfyDir = join23(base, "ComfyUI");
         venvDir = join23(base, ".venv");
-        if (!existsSync23(join23(comfyDir, "main.py"))) {
+        if (!existsSync24(join23(comfyDir, "main.py"))) {
           throw new DaoyanCliError({
             code: "provision_failed",
             message: `\u672A\u627E\u5230\u7248\u672C ${target}\uFF08${portablePath(root, comfyDir)}\uFF09\u3002\u5148\u5B89\u88C5\uFF1Adaoyan engine install ${target}`
           });
         }
-        if (!existsSync23(join23(venvDir, "bin", "python"))) {
+        if (!existsSync24(join23(venvDir, "bin", "python"))) {
           throw new DaoyanCliError({
             code: "provision_failed",
             message: `\u7248\u672C ${target} \u7F3A\u5C11 venv\uFF1A${portablePath(root, venvDir)}`
@@ -8662,11 +9708,11 @@ var init_ops = __esm({
 });
 
 // src/commands/workflow.mts
-import { existsSync as existsSync24, readFileSync as readFileSync15, readdirSync as readdirSync8 } from "fs";
+import { existsSync as existsSync25, readFileSync as readFileSync16, readdirSync as readdirSync8 } from "fs";
 import { basename as basename6, join as join24, resolve as resolve5 } from "path";
 function readStdin() {
   try {
-    return readFileSync15(0, "utf8");
+    return readFileSync16(0, "utf8");
   } catch (e) {
     throw new DaoyanCliError({
       code: "usage",
@@ -8737,7 +9783,7 @@ async function ensureCatalog(opts) {
   }
 }
 function readOpsFile(path) {
-  const text = path === "-" ? readStdin() : readFileSync15(path, "utf8");
+  const text = path === "-" ? readStdin() : readFileSync16(path, "utf8");
   try {
     return parseOpsPayload(JSON.parse(text));
   } catch (e) {
@@ -8750,9 +9796,9 @@ function readOpsFile(path) {
   }
 }
 function isEmptyPlaceholder(abs) {
-  if (!existsSync24(abs)) return false;
+  if (!existsSync25(abs)) return false;
   try {
-    const parsed = parseGraph(JSON.parse(readFileSync15(abs, "utf8")));
+    const parsed = parseGraph(JSON.parse(readFileSync16(abs, "utf8")));
     return !hasGraphErrors(parsed.issues) && Object.keys(parsed.graph).length === 0;
   } catch {
     return false;
@@ -8774,7 +9820,7 @@ async function runWorkflow(ctx2, args) {
     const { root } = requireProject(ctx2);
     const target = resolveWorkflowRef(root, name);
     const replaced = isEmptyPlaceholder(target.abs);
-    if (existsSync24(target.abs) && !replaced) {
+    if (existsSync25(target.abs) && !replaced) {
       throw new DaoyanCliError({ code: "usage", message: `workflow ${name} \u5DF2\u5B58\u5728\uFF1A${target.rel}`, exit: 2 });
     }
     ensureDir(join24(root, WORKFLOWS_DIR));
@@ -8799,7 +9845,7 @@ async function runWorkflow(ctx2, args) {
     const { root } = requireProject(ctx2);
     const target = resolveWorkflowRef(root, name);
     const replaced = isEmptyPlaceholder(target.abs);
-    if (existsSync24(target.abs) && !replaced) {
+    if (existsSync25(target.abs) && !replaced) {
       throw new DaoyanCliError({ code: "usage", message: `workflow ${name} \u5DF2\u5B58\u5728`, exit: 2 });
     }
     const loaded = loadGraphFile(resolve5(process.cwd(), source), basename6(source));
@@ -8811,10 +9857,10 @@ async function runWorkflow(ctx2, args) {
   if (sub === "list") {
     const { root } = requireProject(ctx2);
     const dir = join24(root, WORKFLOWS_DIR);
-    const items = existsSync24(dir) ? readdirSync8(dir).filter((f) => f.endsWith(".json") && !f.endsWith(BINDINGS_SUFFIX)).sort().map((f) => {
+    const items = existsSync25(dir) ? readdirSync8(dir).filter((f) => f.endsWith(".json") && !f.endsWith(BINDINGS_SUFFIX)).sort().map((f) => {
       const abs = join24(dir, f);
       try {
-        const parsed = parseGraph(JSON.parse(readFileSync15(abs, "utf8")));
+        const parsed = parseGraph(JSON.parse(readFileSync16(abs, "utf8")));
         const stats = graphStats(parsed.graph);
         return {
           name: f.slice(0, -".json".length),
@@ -8868,7 +9914,7 @@ async function runWorkflow(ctx2, args) {
       nodes: stats.nodes,
       links: stats.links,
       graph_sha256: loaded.sha256,
-      bindings: existsSync24(bindingsPathOf(ref.abs)) ? bindingsPathOf(ref.abs).slice(root.length + 1) : null,
+      bindings: existsSync25(bindingsPathOf(ref.abs)) ? bindingsPathOf(ref.abs).slice(root.length + 1) : null,
       ...full ? { graph: loaded.graph } : { node_list: nodeSummaries(loaded.graph) }
     };
     if (ctx2.json) {
@@ -9028,7 +10074,7 @@ async function runWorkflow(ctx2, args) {
     const ref = resolveWorkflowRef(root, name);
     let raw;
     try {
-      raw = JSON.parse(readFileSync15(ref.abs, "utf8"));
+      raw = JSON.parse(readFileSync16(ref.abs, "utf8"));
     } catch (e) {
       throw new DaoyanCliError({
         code: "workflow_invalid",

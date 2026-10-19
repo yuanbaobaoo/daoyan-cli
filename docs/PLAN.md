@@ -80,7 +80,7 @@ help / update
 | 里程碑 | 内容 | 状态 |
 |---|---|---|
 | M1 基础层 | 配置 v2、图模型/ops/catalog、run store、mock server | ✅ v0.1 |
-| M2 引擎会话 | local/remote session、machine lock、task worker、GPU 租约/接管 | ✅ v0.1（真实 GPU 接管待 Linux 验收） |
+| M2 引擎会话 | local/remote session、machine lock、task worker、GPU 租约/接管（容器内只卸载模型，不停止容器） | ✅ v0.1（真实 Linux GPU/容器验收待执行） |
 | M3 命令层 | init/workflow/run/shot/batch/wrap/status/logs/skill、Agent 契约 | ✅ v0.1 |
 | M4 可移植 | 真实 ComfyUI/GPU E2E、跨机器实操、文档 | 🚧 文档已重写；真实环境验收待执行 |
 

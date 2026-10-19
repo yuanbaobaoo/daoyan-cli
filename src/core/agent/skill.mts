@@ -605,7 +605,9 @@ task start → machine lock → 回收残留引擎 → 恢复旧 GPU 租约
 - 平台：Linux + NVIDIA；其他平台给 \`gpu_unsupported\` 警告，任务继续；
 - 内置模型服务：ollama、LM Studio、xinference —— 卸载模型，保留进程，任务后重载；
 - 内置进程服务：vLLM、TGI、llama.cpp server、SGLang —— SIGTERM/SIGKILL，任务后 best-effort 重启；
-- 未知进程永不处理；
+- 容器：通过 cgroup 识别 Docker / Podman / containerd / k8s 内的 ollama/xinference/LM Studio/vLLM；只卸载模型，不停止容器或进程；通过端口映射、nsenter 或容器内 CLI/Python 访问，不需要 kubectl；
+- 容器内 vLLM 仅在启用 --enable-sleep-mode + VLLM_SERVER_DEV_MODE=1 时自动 sleep；裸机 vLLM 仍走进程接管；容器内 TGI/llama.cpp/SGLang 没有通用无停机卸载能力时只提示，不停止容器；
+- 未知进程/容器永不处理；
 - 租约：\`~/.dycli/gpu/lease.json\`，异常退出后下一次 local 任务先恢复；
 - 恢复失败：\`gpu_restore_failed\`，租约保留重试。
 

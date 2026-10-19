@@ -68,7 +68,7 @@
 | `model_not_found` | 否 | — | loader 枚举不匹配；检查 modelpath/文件名 |
 | `node_missing` | 否 | — | 引擎缺节点类；安装 custom node |
 | `gpu_unsupported` | 否 | — | 平台不支持接管；任务继续 |
-| `gpu_takeover_failed` | 否 | — | 某个内置目标卸载/驱逐失败；任务继续 |
+| `gpu_takeover_failed` | 否 | — | 某个内置目标（模型服务/裸机进程/容器内服务）卸载或驱逐失败；任务继续 |
 | `gpu_restore_failed` | 是 | — | 恢复失败；租约保留，下次 local 任务重试 |
 | `gpu_lease_corrupt` | 否 | — | 租约损坏；确认无任务后处理 `~/.dycli/gpu/lease.json` |
 | `wrap_failed` | 否 | — | 片段不足/ffmpeg 失败 |

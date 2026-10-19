@@ -862,15 +862,33 @@ release machine task lock
 
 | 类别 | 目标 | 行为 |
 |---|---|---|
-| 模型服务 | ollama、LM Studio、xinference | API 卸载模型，保留进程；任务后重载 |
-| 进程服务 | vLLM、TGI、llama.cpp server、SGLang | 记录 cmdline/cwd/env，SIGTERM → SIGKILL；任务后重启 |
-| 其他 | 未知进程 | 不接管 |
+| 模型服务 | ollama、LM Studio、xinference | API/CLI 卸载模型，保留进程；任务后重载；容器内实例通过 host/netns/exec 访问 |
+| 容器内 vLLM | 启用 sleep mode 的实例 | `/sleep?level=1` 卸载、`/wake_up` 恢复；不停止进程/容器 |
+| 进程服务 | TGI、llama.cpp server、SGLang（仅裸机） | 记录 cmdline/cwd（不含 env），SIGTERM → SIGKILL；任务后重启 |
+| 容器内进程服务 | TGI、llama.cpp、SGLang | 没有通用无停机卸载 API 时只记录提示，不停止容器 |
+| 其他 | 未知进程/容器 | 不接管 |
 
 - 列表是 `GPU_TAKEOVER_TARGETS` 常量，随 dycli 版本维护；用户不配置；
 - 模型服务通过各自 API/CLI 卸载与重载（ollama `/api/ps`、LM Studio `lms`、xinference `/v1/models`）；使用默认端口自动探测，不需要用户配置；
 - 模型服务优先，进程服务其次；
-- 只处理当前用户、非关键进程；永不驱逐 PID 1、dycli 自身及祖先、显示管理器、sshd/systemd、内核线程、其他用户进程；
-- 容器内 `nvidia-smi` 可能看到宿主机 PID；进程服务重启是 best-effort。
+- 宿主进程只处理当前用户、非关键进程；永不驱逐 PID 1、dycli 自身及祖先、显示管理器、sshd/systemd、内核线程、其他用户进程；
+- 容器内进程不按宿主进程裸杀，统一交给下面的容器层。
+
+#### 容器（Docker / Podman / containerd / CRI-O / k8s）
+
+- 原则：**只卸载模型，不停止容器、不停止容器内进程、不缩容 k8s 工作负载**；
+- 识别：`nvidia-smi --query-compute-apps=pid[,used_memory]` 得到宿主 PID，再读 `/proc/<pid>/cgroup` 提取容器 ID；inspect 不可用时用 `/proc/<pid>/cmdline` 匹配内置目标；支持 systemd 与 cgroupfs 两种 cgroup 驱动；
+- 目标：ollama、LM Studio、xinference、vLLM（sleep mode）；容器内 TGI / llama.cpp / SGLang 没有通用无停机卸载能力时只记录提示，不停止容器；
+- 访问通道（按顺序尝试）：
+  1. **host**：Docker/Podman 端口映射到宿主机，或容器使用 host 网络；
+  2. **netns**：`nsenter -t <pid> -n <本机 node> -e <脚本>` 进入容器网络命名空间，直接调用 `127.0.0.1:<port>`；**不需要 kubectl**，需要 root / CAP_SYS_ADMIN；
+  3. **exec**：`docker exec` / `podman exec` / `crictl exec` / `ctr task exec` / `nerdctl exec`，在容器内执行 provider 自带 CLI 或 Python（ollama ps/stop/run、lms、Python urllib）；**不需要 kubectl**；
+- k8s 节点没有 kubectl：用 `crictl` / `ctr` / `nerdctl` 或 `nsenter` 即可；都没有权限且端口未映射时，无法访问容器内 API，记 `gpu_takeover_failed`，容器保持运行；
+- 容器内 vLLM：只有启动时设置 `VLLM_SERVER_DEV_MODE=1` 且带 `--enable-sleep-mode`，`/is_sleeping` 可用时才自动 `/sleep`；未启用时只记录 `gpu_takeover_failed`；裸机 vLLM 仍走进程接管；
+- `crictl` 默认端点不可用时探测本机 containerd / k3s / CRI-O / cri-dockerd socket；仍不可用则尝试 `ctr` / `nerdctl`；
+- 不读取、不记录容器环境变量；所有命令使用参数数组，不经过 shell；
+- 容器内进程一律从裸机进程接管路径排除；cgroup 解析失败时，`/proc/<pid>/root != "/"` 的进程也按容器处理；
+- 恢复：按租约记录的通道重载模型；容器本身不动。
 
 #### 平台
 
@@ -881,12 +899,13 @@ release machine task lock
 
 1. machine task lock（worker 已持有）；
 2. 回收残留引擎，恢复旧租约；
-3. `project.json.gpu.takeover=true` 时读取 `nvidia-smi` 并探测内置目标；
+3. `project.json.gpu.takeover=true` 时读取 `nvidia-smi`，探测内置模型服务、容器与裸机进程；
 4. 写 GPU 租约；
-5. 模型服务卸载模型（保留进程）；
-6. 进程服务按内置匹配规则 kill，记录重启信息；
-7. 启动引擎、提交任务；
-8. cleanup：free + 停止引擎 → 恢复模型/进程 → 释放 GPU 锁。
+5. 宿主机模型服务卸载模型（保留进程）；
+6. 容器内模型服务通过 host / netns / exec 通道卸载模型（**不停止容器**）；
+7. 裸机进程服务按内置匹配规则 kill，记录重启信息；
+8. 启动引擎、提交任务；
+9. cleanup：free + 停止引擎 → 按租约通道重载模型 / 重启裸机进程 → 释放 GPU 锁。
 
 规则：
 
@@ -897,8 +916,8 @@ release machine task lock
 
 #### 恢复
 
-- 模型服务：按租约重载模型；
-- 进程服务：按记录的 cmdline/cwd/env 重启，best-effort；
+- 模型服务：按租约记录的通道（host / netns / exec）重载模型；容器保持运行，不需要 start；
+- 进程服务：按记录的 cmdline/cwd 重启，best-effort；
 - 恢复失败：`gpu_restore_failed`，租约保留，下次任务重试；
 - `SIGKILL` / 崩溃：租约保留；下一次 local 任务先恢复旧租约；
 - 锁与租约位置：`~/.dycli/machine.lock`、`~/.dycli/gpu/lease.json`，不进仓库；
@@ -907,7 +926,8 @@ release machine task lock
 #### 安全边界
 
 - 默认关闭；
-- 只操作内置目标，未知进程永不 kill；
+- 只操作内置目标，未知进程/容器永不处理；
+- 容器只卸载模型，不 stop / scale / kill；没有无停机卸载 API 的容器内进程只记录提示，容器保持运行；
 - 所有动作写日志与 `run.json`；
 - 不记录环境变量等可能含密钥的内容；
 - 部分接管失败时继续执行，最终以 `engine_oom` 或成功结束；恢复仍执行；

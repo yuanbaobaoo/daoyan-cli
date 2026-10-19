@@ -8,6 +8,7 @@ import { nowIso } from "../../../shared/fs.mts";
 import { sleep } from "../../../shared/net.mts";
 import { GPU_PROCESS_TARGETS, PROTECTED_COMMS } from "../targets.mts";
 import { gpuProcessPids } from "../detect.mts";
+import { readContainerInfo } from "../containers.mts";
 
 /**
  * 单个进程快照。
@@ -133,14 +134,32 @@ function cwdOf(pid: number): string | null {
 }
 
 /**
- * 找出可接管的进程（内置规则 + 当前用户 + 非保护进程）。
+ * 进程根目录是否指向容器/其他 mount namespace（不是 "/"）。
+ * cgroup 解析失败时的兜底：读不到也按容器处理，避免裸杀。
  */
-export async function findTargetProcesses(): Promise<ProcessTargetRecord[]> {
+function hasForeignRoot(pid: number): boolean {
+  try {
+    return readlinkSync(`/proc/${pid}/root`) !== "/";
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * 找出可接管的宿主进程（内置规则 + 当前用户 + 非保护进程）。
+ * 容器内进程一律排除：它们由容器运行时接管层处理，裸杀会破坏容器且无法正确恢复。
+ */
+export async function findTargetProcesses(opts: {
+  /**
+   * 已获取的 GPU 计算进程集合；省略时内部重新查询。
+   */
+  gpuPids?: ReadonlySet<number>;
+} = {}): Promise<ProcessTargetRecord[]> {
   // 当前用户（无法获取 uid 时不接管）
   const uid = typeof process.getuid === "function" ? process.getuid() : -1;
   if (uid < 0) return [];
   // 仅接管 nvidia-smi 报告的实际 GPU 计算进程；拿不到列表则不接管
-  const gpuPids = await gpuProcessPids();
+  const gpuPids = opts.gpuPids ?? (await gpuProcessPids());
   if (gpuPids === null || gpuPids.size === 0) return [];
   // 保护进程集合
   const ancestors = await ancestorPids();
@@ -153,6 +172,10 @@ export async function findTargetProcesses(): Promise<ProcessTargetRecord[]> {
     if (!gpuPids.has(p.pid)) continue;
     if (p.pid === 1 || p.pid === process.pid || ancestors.has(p.pid)) continue;
     if (PROTECTED_COMMS.has(p.comm)) continue;
+    // 容器内进程交给容器层（只卸载模型）；即使运行时不可用也不裸杀
+    if (readContainerInfo(p.pid) !== null) continue;
+    // cgroup 未识别但根目录不是 "/"：同样视为容器/隔离进程
+    if (hasForeignRoot(p.pid)) continue;
     // 命中规则（comm 与 args 都看）
     const rule = GPU_PROCESS_TARGETS.find((r) => r.pattern.test(p.comm) || r.pattern.test(p.args));
     if (rule === undefined) continue;

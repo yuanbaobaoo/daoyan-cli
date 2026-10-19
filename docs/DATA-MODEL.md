@@ -265,7 +265,10 @@ shot/batch 必须有 bindings，至少映射 `prompt` 与 `seed`；`run` 不强�
 ## 8. 机器锁与 GPU 租约（本机，不在仓库）
 
 - `~/.dycli/machine.lock`：`token/kind/task_id/project/mode/command/pid/started_at`；原子创建，owner PID 探活；损坏需人工处理。
-- `~/.dycli/gpu/lease.json`：`version/task_id/project/created_at/entries[]`；记录 provider 模型或进程重启信息；恢复成功后删除。
+- `~/.dycli/gpu/lease.json`：`version/task_id/project/created_at/entries[]`；条目只有两类：
+  - `provider`：服务 id（ollama / lmstudio / xinference / vllm）+ 被卸载的模型名 + 可选 `channel`（主通道）与 `fallbacks[]`（备用通道）；通道类型为 host / netns / exec（含容器 ID 与运行时），恢复时依次尝试；
+  - `process`：裸机进程目标 id + cmdline + cwd（不含环境变量）；
+  - 容器不会被停止，因此没有容器恢复条目；全部恢复成功后删除。
 
 ## 9. Git 约定
 

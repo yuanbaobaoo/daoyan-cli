@@ -160,7 +160,7 @@ export const COMMANDS: CommandMeta[] = [
       { name: "--modelpath", type: "path", description: "local：外部模型根目录（已存在）" },
       { name: "--url", type: "url", description: "remote：外部 ComfyUI base URL（必填）" },
       { name: "--version", type: "tag", description: "local：ComfyUI 版本 tag" },
-      { name: "--mirror", type: "url", description: "local：pip 镜像源" },
+      { name: "--mirror", type: "url", description: "local：pip 源（默认阿里云 PyPI；可传 https://pypi.org/simple/ 覆盖）" },
       { name: "--no-skill", type: "boolean", default: false, description: "不生成 .agents/skills/daoyan 与 AGENTS.md" },
     ],
     examples: [
@@ -444,8 +444,15 @@ export const COMMANDS: CommandMeta[] = [
     name: "engine install",
     group: "engine",
     summary: "安装指定 ComfyUI 版本到 engine/versions/<tag>",
-    usage: "daoyan engine install <版本 tag> [--json]",
+    usage: "daoyan engine install <版本 tag> [--mirror <url>] [--json]",
     args: [{ name: "tag", type: "string", required: true, description: "ComfyUI tag" }],
+    flags: [
+      {
+        name: "--mirror",
+        type: "url",
+        description: "pip 源（默认阿里云 PyPI；可传 https://pypi.org/simple/ 覆盖）",
+      },
+    ],
     implemented: true,
     run: (ctx, args) => runEngine(ctx, ["install", ...args]),
   },

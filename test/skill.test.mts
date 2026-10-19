@@ -30,6 +30,10 @@ test("Skill 生成哈希稳定且文件齐全", () => {
   assert.equal(a.has("reference/errors.md"), true);
   // 命令索引进入 SKILL.md
   assert.equal(a.get("SKILL.md")?.includes("daoyan run <workflow>"), true);
+  // init venv 故障的排查说明必须进入 Skill
+  assert.match(a.get("SKILL.md") ?? "", /ensurepip/);
+  assert.match(a.get("reference/lifecycle.md") ?? "", /python3\.12-venv/);
+  assert.match(a.get("reference/errors.md") ?? "", /ensurepip/);
 });
 
 test("writeSkill 幂等，AGENTS.md 保留用户内容且不重复块", () => {

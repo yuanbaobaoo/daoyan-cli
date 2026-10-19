@@ -96,7 +96,10 @@ export const ERROR_META: Record<ErrCode, ErrorMeta> = {
   skill_write_failed: { retryable: false, hint: "检查项目目录写权限；修复后重新运行 daoyan skill update。" },
   external_tool_missing: { retryable: false, hint: "安装缺失的外部工具（python3 / git / ffmpeg 等）后重试。" },
   update_failed: { retryable: true, hint: "检查网络与 npm 权限后重试。" },
-  provision_failed: { retryable: true, hint: "检查网络、磁盘与 Python 环境；可用 --mirror 切换 pip 源。" },
+  provision_failed: {
+    retryable: true,
+    hint: "检查网络、磁盘与 Python 环境；pip 默认阿里云 PyPI，可用 --mirror 覆盖。",
+  },
   artifact_download_failed: {
     retryable: true,
     hint: "引擎产物仍在 scratch 中；检查 /view 可达性后重试，或手动取回。",

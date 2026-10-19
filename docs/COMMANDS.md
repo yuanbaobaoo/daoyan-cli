@@ -54,6 +54,7 @@ daoyan init --mode=remote --url <url> [--no-skill]
 
 - `--mode` 必填；在当前目录工作，不接收项目名；
 - local 部署 `engine/`（venv + ComfyUI + custom nodes）并生成 `extra_model_paths.yaml`；只部署不启动；
+- pip 依赖默认使用阿里云 PyPI（`https://mirrors.aliyun.com/pypi/simple/`）；可用 `--mirror https://pypi.org/simple/` 或其他镜像覆盖；
 - 已有 `project.json`：不覆盖共享文件，只更新本机 `.dycli/machine.json`；
 - 默认生成 `.agents/skills/daoyan/` 与 `AGENTS.md` 管理块；
 - local 的部署期间持有 machine lock。
@@ -167,11 +168,12 @@ daoyan logs [-f] [-n N] [--src daoyan-cli|engine|worker|all]
 
 ```bash
 daoyan engine ls
-daoyan engine install <tag>
+daoyan engine install <tag> [--mirror <url>]
 daoyan engine use <tag|路径>
 ```
 
 - local 专属；`install` 安装到 `engine/versions/<tag>/`，`use` 更新本机 machine 配置；
+- `install` 的 pip 源默认阿里云 PyPI，`--mirror https://pypi.org/simple/` 可覆盖；
 - 两个命令都持 machine lock，忙时 `machine_busy`。
 
 ## 元

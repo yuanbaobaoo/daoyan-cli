@@ -1134,7 +1134,7 @@ daoyan logs [-f] [-n N] [--src daoyan-cli|engine|all]
             [--task <task_id> | --run <run_id>] [--json]
 
 daoyan engine ls
-daoyan engine install <版本 tag>
+daoyan engine install <版本 tag> [--mirror <url>]
 daoyan engine use <版本 tag|路径>
 ```
 
@@ -1149,6 +1149,7 @@ daoyan engine use <版本 tag|路径>
 - `--modelpath` 必须是已存在的目录，否则 `config_invalid`；
 - 目录中没有 `project.json`：按当前目录名创建新项目骨架；已有 `project.json`：只绑定/更新本机 `.dycli/machine.json`，不覆盖共享文件；
 - local 只部署，不启动引擎；remote 不部署；
+- pip 依赖默认使用阿里云 PyPI（`https://mirrors.aliyun.com/pypi/simple/`）；`--mirror` 可覆盖（官方源 `https://pypi.org/simple/`）；
 - 可重复运行 `init` 更新本机配置；
 - 默认生成 `.agents/skills/daoyan/` 并写入/更新 `AGENTS.md` 管理块；`--no-skill` 跳过；
 - local 的 `init` / `engine install` / `engine use` 在 machine lock 被占用时拒绝（`machine_busy`），避免改动正在使用的引擎；

@@ -253,6 +253,8 @@ function skillMd(version: string, commands: readonly SkillCommand[]): string {
     "daoyan workflow node KSampler --json",
     "```",
     "",
+    "> local init 安装依赖时默认使用阿里云 PyPI（`https://mirrors.aliyun.com/pypi/simple/`）；网络/镜像不适用时用 `--mirror https://pypi.org/simple/` 覆盖。",
+    "",
     "## 核心闭环",
     "",
     "```text",
@@ -295,6 +297,7 @@ function skillMd(version: string, commands: readonly SkillCommand[]): string {
     "- `model_not_found` / `node_missing`：检查 `modelpath` / custom nodes，修正后重试。",
     "- `workflow_invalid`：`workflow validate <name> --json` 按 `issues[]` 修正。",
     "- `engine_unreachable`：remote 模式不会代为启动；检查 URL/网络。",
+    "- `provision_failed` 且日志含 `ensurepip is not available` / `Failing command: .../.venv/bin/python3`：Ubuntu/Debian 缺少 `python3.X-venv`；安装对应包、删除半成品 `engine/.venv` 后重跑 `daoyan init`。完整步骤见 `reference/lifecycle.md`。",
     "",
     "完整错误码见 `reference/errors.md`。",
     "",
@@ -580,7 +583,74 @@ task start → machine lock → 回收残留引擎 → 恢复旧 GPU 租约
 \`\`\`
 
 - 任务之外没有常驻引擎；\`status\` 不拉起引擎；
+- 依赖安装默认使用阿里云 PyPI（\`https://mirrors.aliyun.com/pypi/simple/\`）；可用 \`--mirror\` 覆盖（官方源 \`https://pypi.org/simple/\`）；
 - 唯一例外：\`workflow nodes --refresh\` 的 metadata session（不加载模型，取完 /object_info 立即停止）。
+
+### init 失败：ensurepip is not available
+
+症状（\`daoyan init --mode=local\`）：
+
+\`\`\`text
+The virtual environment was not created successfully because ensurepip is not
+available.
+...
+Failing command: <项目>/engine/.venv/bin/python3
+
+ERROR[provision_failed] python3 -m venv 失败（退出码 1）。Ubuntu 需 python3-venv 包
+\`\`\`
+
+原因：Ubuntu/Debian 把 \`venv\` / \`ensurepip\` 拆成独立包；\`python3 --version\` 正常，但系统 Python 没有 pip 引导模块。与 ComfyUI 版本、GPU、k3s 无关。
+
+处理步骤：
+
+1. 确认解释器与实际版本：
+
+   \`\`\`bash
+   which python3
+   readlink -f "$(which python3)"
+   python3 -c 'import sys; print(sys.executable, sys.version)'
+   python3 -m ensurepip --version
+   \`\`\`
+
+2. 安装与版本匹配的 venv 包（示例为 Python 3.12；其他版本替换数字）：
+
+   \`\`\`bash
+   apt-get update
+   apt-get install -y python3.12-venv
+   # 或元包：apt-get install -y python3-venv
+   \`\`\`
+
+   如果 ComfyUI 依赖需要编译，再补：
+
+   \`\`\`bash
+   apt-get install -y python3.12-dev build-essential
+   \`\`\`
+
+3. 删除失败留下的半成品 venv（重要，否则 dycli 可能误判为可复用）：
+
+   \`\`\`bash
+   rm -rf <项目>/engine/.venv
+   \`\`\`
+
+4. 重新执行 init（项目骨架会复用，不会覆盖已有 \`project.json\`）：
+
+   \`\`\`bash
+   daoyan init --mode=local --modelpath /data/models
+   \`\`\`
+
+5. 验证：
+
+   \`\`\`bash
+   python3 -m ensurepip --version
+   python3 -m venv /tmp/venv-test && /tmp/venv-test/bin/pip --version
+   rm -rf /tmp/venv-test
+   \`\`\`
+
+特殊情况：
+
+- **无 root / 无 sudo**：不要反复重试 init；把 \`python3.X-venv\` 安装命令交给有权限的用户。
+- **\`python3\` 不是系统 Python**（pyenv / conda / \`/usr/local/bin/python3\`）：apt 包可能无效。检查 \`which python3\`；改用带 \`ensurepip\` 的解释器，或使用 \`virtualenv\` / \`uv\`。
+- **仍有其他 provision 失败**：阅读完整错误日志与 \`hint\`，不要只根据退出码猜测。
 
 ## remote
 
@@ -666,6 +736,7 @@ ${rows}
 - \`model_not_found\` / \`node_missing\`：修 modelpath / custom nodes。
 - \`workflow_invalid\`：按 \`issues[]\` 修图或 bindings。
 - \`engine_unreachable\`：remote 不代启；检查 URL/网络。
+- \`provision_failed\` + \`ensurepip is not available\`：安装 \`python3.X-venv\`（如 \`python3.12-venv\`），删除半成品 \`engine/.venv\`，重跑 \`daoyan init\`；详见 \`reference/lifecycle.md\`。
 - \`worker_crashed\` / \`machine_lock_corrupt\`：下一次任务会做 stale 恢复；锁损坏需人工确认后删除。
 
 退出码：0 成功；1 业务失败；2 用法错误；130 取消/中断。

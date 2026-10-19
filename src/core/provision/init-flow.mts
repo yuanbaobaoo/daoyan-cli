@@ -27,6 +27,17 @@ const COMFY_REPO = "https://github.com/comfyanonymous/ComfyUI.git";
 export const COMFY_TAGS_API = "https://api.github.com/repos/comfyanonymous/ComfyUI/tags";
 // 最低 Python 版本
 const MIN_PYTHON = "3.10";
+// 默认 pip 源（阿里云 PyPI，国内网络更稳）
+export const DEFAULT_PIP_MIRROR = "https://mirrors.aliyun.com/pypi/simple/";
+
+/**
+ * pip index 参数：未显式指定 --mirror 时默认阿里云 PyPI。
+ */
+export function pipIndexArgs(mirror?: string): string[] {
+  // 空字符串按未指定处理
+  const index = mirror !== undefined && mirror.trim() !== "" ? mirror.trim() : DEFAULT_PIP_MIRROR;
+  return ["--index-url", index];
+}
 
 /**
  * 进度日志回调。
@@ -261,16 +272,18 @@ export async function pipInstall(
   if (!existsSync(req)) {
     throw new DaoyanCliError({ code: "provision_failed", message: `缺少 ${req}（clone 未完成？）` });
   }
-  log(`安装 ComfyUI 依赖（pip install -r ${req}，可能需要下载 torch，耗时较长）...`);
+  // pip 源（默认阿里云）
+  const indexArgs = pipIndexArgs(mirror);
+  const sourceLabel = mirror !== undefined && mirror.trim() !== "" ? "自定义镜像" : "阿里云（默认）";
+  log(`安装 ComfyUI 依赖（pip install -r ${req}，源：${sourceLabel}，可能需要下载 torch，耗时较长）...`);
   // pip 参数
-  const args = ["install", "-r", req];
-  if (mirror !== undefined) args.push("--index-url", mirror);
+  const args = ["install", "-r", req, ...indexArgs];
   // pip 退出码
   const r = await execInherit(pip, args, { cwd: root });
   if (r !== 0) {
     throw new DaoyanCliError({
       code: "provision_failed",
-      message: `pip install 失败（退出码 ${r}）。可用 --mirror 指定镜像源重试`,
+      message: `pip install 失败（退出码 ${r}）。默认使用阿里云 PyPI；可用 --mirror 切换官方源或其他镜像重试`,
     });
   }
   log("ComfyUI 依赖安装完成");
@@ -299,15 +312,14 @@ export async function installCustomNodes(
     const req = join(target, "requirements.txt");
     if (existsSync(req)) {
       log(`安装 ${node.name} 依赖...`);
-      // pip 参数
-      const args = ["install", "-r", req];
-      if (mirror !== undefined) args.push("--index-url", mirror);
+      // pip 参数（默认阿里云源）
+      const args = ["install", "-r", req, ...pipIndexArgs(mirror)];
       // pip 退出码
       const r = await execInherit(join(venvDir, "bin", "pip"), args, { cwd: root });
       if (r !== 0) {
         throw new DaoyanCliError({
           code: "provision_failed",
-          message: `custom node ${node.name} 依赖安装失败（退出码 ${r}）`,
+          message: `custom node ${node.name} 依赖安装失败（退出码 ${r}）。默认使用阿里云 PyPI；可用 --mirror 覆盖`,
         });
       }
     }

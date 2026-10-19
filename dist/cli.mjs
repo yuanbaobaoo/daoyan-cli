@@ -109,7 +109,10 @@ var init_errors = __esm({
       skill_write_failed: { retryable: false, hint: "\u68C0\u67E5\u9879\u76EE\u76EE\u5F55\u5199\u6743\u9650\uFF1B\u4FEE\u590D\u540E\u91CD\u65B0\u8FD0\u884C daoyan skill update\u3002" },
       external_tool_missing: { retryable: false, hint: "\u5B89\u88C5\u7F3A\u5931\u7684\u5916\u90E8\u5DE5\u5177\uFF08python3 / git / ffmpeg \u7B49\uFF09\u540E\u91CD\u8BD5\u3002" },
       update_failed: { retryable: true, hint: "\u68C0\u67E5\u7F51\u7EDC\u4E0E npm \u6743\u9650\u540E\u91CD\u8BD5\u3002" },
-      provision_failed: { retryable: true, hint: "\u68C0\u67E5\u7F51\u7EDC\u3001\u78C1\u76D8\u4E0E Python \u73AF\u5883\uFF1B\u53EF\u7528 --mirror \u5207\u6362 pip \u6E90\u3002" },
+      provision_failed: {
+        retryable: true,
+        hint: "\u68C0\u67E5\u7F51\u7EDC\u3001\u78C1\u76D8\u4E0E Python \u73AF\u5883\uFF1Bpip \u9ED8\u8BA4\u963F\u91CC\u4E91 PyPI\uFF0C\u53EF\u7528 --mirror \u8986\u76D6\u3002"
+      },
       artifact_download_failed: {
         retryable: true,
         hint: "\u5F15\u64CE\u4EA7\u7269\u4ECD\u5728 scratch \u4E2D\uFF1B\u68C0\u67E5 /view \u53EF\u8FBE\u6027\u540E\u91CD\u8BD5\uFF0C\u6216\u624B\u52A8\u53D6\u56DE\u3002"
@@ -1057,6 +1060,8 @@ function skillMd(version, commands) {
     "daoyan workflow node KSampler --json",
     "```",
     "",
+    "> local init \u5B89\u88C5\u4F9D\u8D56\u65F6\u9ED8\u8BA4\u4F7F\u7528\u963F\u91CC\u4E91 PyPI\uFF08`https://mirrors.aliyun.com/pypi/simple/`\uFF09\uFF1B\u7F51\u7EDC/\u955C\u50CF\u4E0D\u9002\u7528\u65F6\u7528 `--mirror https://pypi.org/simple/` \u8986\u76D6\u3002",
+    "",
     "## \u6838\u5FC3\u95ED\u73AF",
     "",
     "```text",
@@ -1099,6 +1104,7 @@ function skillMd(version, commands) {
     "- `model_not_found` / `node_missing`\uFF1A\u68C0\u67E5 `modelpath` / custom nodes\uFF0C\u4FEE\u6B63\u540E\u91CD\u8BD5\u3002",
     "- `workflow_invalid`\uFF1A`workflow validate <name> --json` \u6309 `issues[]` \u4FEE\u6B63\u3002",
     "- `engine_unreachable`\uFF1Aremote \u6A21\u5F0F\u4E0D\u4F1A\u4EE3\u4E3A\u542F\u52A8\uFF1B\u68C0\u67E5 URL/\u7F51\u7EDC\u3002",
+    "- `provision_failed` \u4E14\u65E5\u5FD7\u542B `ensurepip is not available` / `Failing command: .../.venv/bin/python3`\uFF1AUbuntu/Debian \u7F3A\u5C11 `python3.X-venv`\uFF1B\u5B89\u88C5\u5BF9\u5E94\u5305\u3001\u5220\u9664\u534A\u6210\u54C1 `engine/.venv` \u540E\u91CD\u8DD1 `daoyan init`\u3002\u5B8C\u6574\u6B65\u9AA4\u89C1 `reference/lifecycle.md`\u3002",
     "",
     "\u5B8C\u6574\u9519\u8BEF\u7801\u89C1 `reference/errors.md`\u3002",
     "",
@@ -1369,7 +1375,74 @@ task start \u2192 machine lock \u2192 \u56DE\u6536\u6B8B\u7559\u5F15\u64CE \u219
 \`\`\`
 
 - \u4EFB\u52A1\u4E4B\u5916\u6CA1\u6709\u5E38\u9A7B\u5F15\u64CE\uFF1B\`status\` \u4E0D\u62C9\u8D77\u5F15\u64CE\uFF1B
+- \u4F9D\u8D56\u5B89\u88C5\u9ED8\u8BA4\u4F7F\u7528\u963F\u91CC\u4E91 PyPI\uFF08\`https://mirrors.aliyun.com/pypi/simple/\`\uFF09\uFF1B\u53EF\u7528 \`--mirror\` \u8986\u76D6\uFF08\u5B98\u65B9\u6E90 \`https://pypi.org/simple/\`\uFF09\uFF1B
 - \u552F\u4E00\u4F8B\u5916\uFF1A\`workflow nodes --refresh\` \u7684 metadata session\uFF08\u4E0D\u52A0\u8F7D\u6A21\u578B\uFF0C\u53D6\u5B8C /object_info \u7ACB\u5373\u505C\u6B62\uFF09\u3002
+
+### init \u5931\u8D25\uFF1Aensurepip is not available
+
+\u75C7\u72B6\uFF08\`daoyan init --mode=local\`\uFF09\uFF1A
+
+\`\`\`text
+The virtual environment was not created successfully because ensurepip is not
+available.
+...
+Failing command: <\u9879\u76EE>/engine/.venv/bin/python3
+
+ERROR[provision_failed] python3 -m venv \u5931\u8D25\uFF08\u9000\u51FA\u7801 1\uFF09\u3002Ubuntu \u9700 python3-venv \u5305
+\`\`\`
+
+\u539F\u56E0\uFF1AUbuntu/Debian \u628A \`venv\` / \`ensurepip\` \u62C6\u6210\u72EC\u7ACB\u5305\uFF1B\`python3 --version\` \u6B63\u5E38\uFF0C\u4F46\u7CFB\u7EDF Python \u6CA1\u6709 pip \u5F15\u5BFC\u6A21\u5757\u3002\u4E0E ComfyUI \u7248\u672C\u3001GPU\u3001k3s \u65E0\u5173\u3002
+
+\u5904\u7406\u6B65\u9AA4\uFF1A
+
+1. \u786E\u8BA4\u89E3\u91CA\u5668\u4E0E\u5B9E\u9645\u7248\u672C\uFF1A
+
+   \`\`\`bash
+   which python3
+   readlink -f "$(which python3)"
+   python3 -c 'import sys; print(sys.executable, sys.version)'
+   python3 -m ensurepip --version
+   \`\`\`
+
+2. \u5B89\u88C5\u4E0E\u7248\u672C\u5339\u914D\u7684 venv \u5305\uFF08\u793A\u4F8B\u4E3A Python 3.12\uFF1B\u5176\u4ED6\u7248\u672C\u66FF\u6362\u6570\u5B57\uFF09\uFF1A
+
+   \`\`\`bash
+   apt-get update
+   apt-get install -y python3.12-venv
+   # \u6216\u5143\u5305\uFF1Aapt-get install -y python3-venv
+   \`\`\`
+
+   \u5982\u679C ComfyUI \u4F9D\u8D56\u9700\u8981\u7F16\u8BD1\uFF0C\u518D\u8865\uFF1A
+
+   \`\`\`bash
+   apt-get install -y python3.12-dev build-essential
+   \`\`\`
+
+3. \u5220\u9664\u5931\u8D25\u7559\u4E0B\u7684\u534A\u6210\u54C1 venv\uFF08\u91CD\u8981\uFF0C\u5426\u5219 dycli \u53EF\u80FD\u8BEF\u5224\u4E3A\u53EF\u590D\u7528\uFF09\uFF1A
+
+   \`\`\`bash
+   rm -rf <\u9879\u76EE>/engine/.venv
+   \`\`\`
+
+4. \u91CD\u65B0\u6267\u884C init\uFF08\u9879\u76EE\u9AA8\u67B6\u4F1A\u590D\u7528\uFF0C\u4E0D\u4F1A\u8986\u76D6\u5DF2\u6709 \`project.json\`\uFF09\uFF1A
+
+   \`\`\`bash
+   daoyan init --mode=local --modelpath /data/models
+   \`\`\`
+
+5. \u9A8C\u8BC1\uFF1A
+
+   \`\`\`bash
+   python3 -m ensurepip --version
+   python3 -m venv /tmp/venv-test && /tmp/venv-test/bin/pip --version
+   rm -rf /tmp/venv-test
+   \`\`\`
+
+\u7279\u6B8A\u60C5\u51B5\uFF1A
+
+- **\u65E0 root / \u65E0 sudo**\uFF1A\u4E0D\u8981\u53CD\u590D\u91CD\u8BD5 init\uFF1B\u628A \`python3.X-venv\` \u5B89\u88C5\u547D\u4EE4\u4EA4\u7ED9\u6709\u6743\u9650\u7684\u7528\u6237\u3002
+- **\`python3\` \u4E0D\u662F\u7CFB\u7EDF Python**\uFF08pyenv / conda / \`/usr/local/bin/python3\`\uFF09\uFF1Aapt \u5305\u53EF\u80FD\u65E0\u6548\u3002\u68C0\u67E5 \`which python3\`\uFF1B\u6539\u7528\u5E26 \`ensurepip\` \u7684\u89E3\u91CA\u5668\uFF0C\u6216\u4F7F\u7528 \`virtualenv\` / \`uv\`\u3002
+- **\u4ECD\u6709\u5176\u4ED6 provision \u5931\u8D25**\uFF1A\u9605\u8BFB\u5B8C\u6574\u9519\u8BEF\u65E5\u5FD7\u4E0E \`hint\`\uFF0C\u4E0D\u8981\u53EA\u6839\u636E\u9000\u51FA\u7801\u731C\u6D4B\u3002
 
 ## remote
 
@@ -1447,6 +1520,7 @@ ${rows}
 - \`model_not_found\` / \`node_missing\`\uFF1A\u4FEE modelpath / custom nodes\u3002
 - \`workflow_invalid\`\uFF1A\u6309 \`issues[]\` \u4FEE\u56FE\u6216 bindings\u3002
 - \`engine_unreachable\`\uFF1Aremote \u4E0D\u4EE3\u542F\uFF1B\u68C0\u67E5 URL/\u7F51\u7EDC\u3002
+- \`provision_failed\` + \`ensurepip is not available\`\uFF1A\u5B89\u88C5 \`python3.X-venv\`\uFF08\u5982 \`python3.12-venv\`\uFF09\uFF0C\u5220\u9664\u534A\u6210\u54C1 \`engine/.venv\`\uFF0C\u91CD\u8DD1 \`daoyan init\`\uFF1B\u8BE6\u89C1 \`reference/lifecycle.md\`\u3002
 - \`worker_crashed\` / \`machine_lock_corrupt\`\uFF1A\u4E0B\u4E00\u6B21\u4EFB\u52A1\u4F1A\u505A stale \u6062\u590D\uFF1B\u9501\u635F\u574F\u9700\u4EBA\u5DE5\u786E\u8BA4\u540E\u5220\u9664\u3002
 
 \u9000\u51FA\u7801\uFF1A0 \u6210\u529F\uFF1B1 \u4E1A\u52A1\u5931\u8D25\uFF1B2 \u7528\u6CD5\u9519\u8BEF\uFF1B130 \u53D6\u6D88/\u4E2D\u65AD\u3002
@@ -2848,6 +2922,10 @@ var init_net = __esm({
 // src/core/provision/init-flow.mts
 import { existsSync as existsSync6, readFileSync as readFileSync6, renameSync as renameSync2, writeFileSync as writeFileSync3 } from "fs";
 import { join as join4 } from "path";
+function pipIndexArgs(mirror) {
+  const index = mirror !== void 0 && mirror.trim() !== "" ? mirror.trim() : DEFAULT_PIP_MIRROR;
+  return ["--index-url", index];
+}
 function projectTemplate(name) {
   return {
     name,
@@ -3013,14 +3091,15 @@ async function pipInstall(root, venvDir, mirror, log, requirements) {
   if (!existsSync6(req)) {
     throw new DaoyanCliError({ code: "provision_failed", message: `\u7F3A\u5C11 ${req}\uFF08clone \u672A\u5B8C\u6210\uFF1F\uFF09` });
   }
-  log(`\u5B89\u88C5 ComfyUI \u4F9D\u8D56\uFF08pip install -r ${req}\uFF0C\u53EF\u80FD\u9700\u8981\u4E0B\u8F7D torch\uFF0C\u8017\u65F6\u8F83\u957F\uFF09...`);
-  const args = ["install", "-r", req];
-  if (mirror !== void 0) args.push("--index-url", mirror);
+  const indexArgs = pipIndexArgs(mirror);
+  const sourceLabel = mirror !== void 0 && mirror.trim() !== "" ? "\u81EA\u5B9A\u4E49\u955C\u50CF" : "\u963F\u91CC\u4E91\uFF08\u9ED8\u8BA4\uFF09";
+  log(`\u5B89\u88C5 ComfyUI \u4F9D\u8D56\uFF08pip install -r ${req}\uFF0C\u6E90\uFF1A${sourceLabel}\uFF0C\u53EF\u80FD\u9700\u8981\u4E0B\u8F7D torch\uFF0C\u8017\u65F6\u8F83\u957F\uFF09...`);
+  const args = ["install", "-r", req, ...indexArgs];
   const r = await execInherit(pip, args, { cwd: root });
   if (r !== 0) {
     throw new DaoyanCliError({
       code: "provision_failed",
-      message: `pip install \u5931\u8D25\uFF08\u9000\u51FA\u7801 ${r}\uFF09\u3002\u53EF\u7528 --mirror \u6307\u5B9A\u955C\u50CF\u6E90\u91CD\u8BD5`
+      message: `pip install \u5931\u8D25\uFF08\u9000\u51FA\u7801 ${r}\uFF09\u3002\u9ED8\u8BA4\u4F7F\u7528\u963F\u91CC\u4E91 PyPI\uFF1B\u53EF\u7528 --mirror \u5207\u6362\u5B98\u65B9\u6E90\u6216\u5176\u4ED6\u955C\u50CF\u91CD\u8BD5`
     });
   }
   log("ComfyUI \u4F9D\u8D56\u5B89\u88C5\u5B8C\u6210");
@@ -3035,13 +3114,12 @@ async function installCustomNodes(root, venvDir, nodes, mirror, log, comfyDir = 
     const req = join4(target, "requirements.txt");
     if (existsSync6(req)) {
       log(`\u5B89\u88C5 ${node.name} \u4F9D\u8D56...`);
-      const args = ["install", "-r", req];
-      if (mirror !== void 0) args.push("--index-url", mirror);
+      const args = ["install", "-r", req, ...pipIndexArgs(mirror)];
       const r = await execInherit(join4(venvDir, "bin", "pip"), args, { cwd: root });
       if (r !== 0) {
         throw new DaoyanCliError({
           code: "provision_failed",
-          message: `custom node ${node.name} \u4F9D\u8D56\u5B89\u88C5\u5931\u8D25\uFF08\u9000\u51FA\u7801 ${r}\uFF09`
+          message: `custom node ${node.name} \u4F9D\u8D56\u5B89\u88C5\u5931\u8D25\uFF08\u9000\u51FA\u7801 ${r}\uFF09\u3002\u9ED8\u8BA4\u4F7F\u7528\u963F\u91CC\u4E91 PyPI\uFF1B\u53EF\u7528 --mirror \u8986\u76D6`
         });
       }
     }
@@ -3168,7 +3246,7 @@ async function allocatePort(existing) {
   if (existing !== void 0 && existing > 0) return existing;
   return freePort("127.0.0.1");
 }
-var COMFY_REPO, COMFY_TAGS_API, MIN_PYTHON;
+var COMFY_REPO, COMFY_TAGS_API, MIN_PYTHON, DEFAULT_PIP_MIRROR;
 var init_init_flow = __esm({
   "src/core/provision/init-flow.mts"() {
     "use strict";
@@ -3180,6 +3258,7 @@ var init_init_flow = __esm({
     COMFY_REPO = "https://github.com/comfyanonymous/ComfyUI.git";
     COMFY_TAGS_API = "https://api.github.com/repos/comfyanonymous/ComfyUI/tags";
     MIN_PYTHON = "3.10";
+    DEFAULT_PIP_MIRROR = "https://mirrors.aliyun.com/pypi/simple/";
   }
 });
 
@@ -9998,8 +10077,25 @@ async function runEngine(ctx2, args) {
     });
   }
   if (sub === "install") {
-    const tag = rest[0];
-    if (tag === void 0 || tag === "") usageError("\u7528\u6CD5\uFF1Adaoyan engine install <\u7248\u672C tag>");
+    let tag;
+    let mirror;
+    for (let i = 0; i < rest.length; i++) {
+      const a = rest[i];
+      if (a === void 0) break;
+      const { name, inline } = splitInlineFlag(a);
+      if (name === "--mirror") {
+        const v = takeValue(rest, i, inline, "--mirror");
+        mirror = v.value;
+        i += v.skip;
+        continue;
+      }
+      if (name.startsWith("-")) usageError(`\u672A\u77E5\u53C2\u6570 ${name}`);
+      if (tag !== void 0) usageError(`engine install \u53EA\u63A5\u53D7\u4E00\u4E2A\u7248\u672C tag\uFF08\u591A\u4F59\uFF1A${a}\uFF09`);
+      tag = a;
+    }
+    if (tag === void 0 || tag === "") {
+      usageError("\u7528\u6CD5\uFF1Adaoyan engine install <\u7248\u672C tag> [--mirror <url>]");
+    }
     const lock = await acquireMachineLock({
       taskId: `metadata-engine-install-${process.pid}`,
       project: root,
@@ -10013,7 +10109,14 @@ async function runEngine(ctx2, args) {
         say(`\u7248\u672C ${tag} \u5DF2\u5B89\u88C5\uFF1A${portablePath(root, base)}`);
       } else {
         say(`\u5B89\u88C5 ComfyUI ${tag} \u2192 engine/versions/${tag} ...`);
-        await installEngineAt({ root, baseDir: base, version: tag, project, log: say });
+        await installEngineAt({
+          root,
+          baseDir: base,
+          version: tag,
+          project,
+          log: say,
+          ...mirror !== void 0 ? { mirror } : {}
+        });
       }
       if (ctx2.json) {
         emitData({
@@ -10909,7 +11012,7 @@ var init_registry = __esm({
           { name: "--modelpath", type: "path", description: "local\uFF1A\u5916\u90E8\u6A21\u578B\u6839\u76EE\u5F55\uFF08\u5DF2\u5B58\u5728\uFF09" },
           { name: "--url", type: "url", description: "remote\uFF1A\u5916\u90E8 ComfyUI base URL\uFF08\u5FC5\u586B\uFF09" },
           { name: "--version", type: "tag", description: "local\uFF1AComfyUI \u7248\u672C tag" },
-          { name: "--mirror", type: "url", description: "local\uFF1Apip \u955C\u50CF\u6E90" },
+          { name: "--mirror", type: "url", description: "local\uFF1Apip \u6E90\uFF08\u9ED8\u8BA4\u963F\u91CC\u4E91 PyPI\uFF1B\u53EF\u4F20 https://pypi.org/simple/ \u8986\u76D6\uFF09" },
           { name: "--no-skill", type: "boolean", default: false, description: "\u4E0D\u751F\u6210 .agents/skills/daoyan \u4E0E AGENTS.md" }
         ],
         examples: [
@@ -11181,8 +11284,15 @@ var init_registry = __esm({
         name: "engine install",
         group: "engine",
         summary: "\u5B89\u88C5\u6307\u5B9A ComfyUI \u7248\u672C\u5230 engine/versions/<tag>",
-        usage: "daoyan engine install <\u7248\u672C tag> [--json]",
+        usage: "daoyan engine install <\u7248\u672C tag> [--mirror <url>] [--json]",
         args: [{ name: "tag", type: "string", required: true, description: "ComfyUI tag" }],
+        flags: [
+          {
+            name: "--mirror",
+            type: "url",
+            description: "pip \u6E90\uFF08\u9ED8\u8BA4\u963F\u91CC\u4E91 PyPI\uFF1B\u53EF\u4F20 https://pypi.org/simple/ \u8986\u76D6\uFF09"
+          }
+        ],
         implemented: true,
         run: (ctx2, args) => runEngine(ctx2, ["install", ...args])
       },

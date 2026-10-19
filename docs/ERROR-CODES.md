@@ -43,7 +43,7 @@
 | `skill_write_failed` | 否 | — | 生成 `.agents` 或 `AGENTS.md` 失败 |
 | `external_tool_missing` | 否 | — | python3/git/ffmpeg 等缺失 |
 | `update_failed` | 是 | — | 自升级失败 |
-| `provision_failed` | 是 | — | 引擎部署失败 |
+| `provision_failed` | 是 | — | 引擎部署失败；pip 默认阿里云 PyPI，可用 `--mirror` 覆盖 |
 | `artifact_download_failed` | 是 | — | `/view` 下载失败；引擎 scratch 保留 |
 | `engine_not_ready` | 是 | 5000 | 引擎未就绪 |
 | `engine_start_failed` | 否 | — | local 启动失败/就绪超时；看 `logs/engine-*.log` |

@@ -8,7 +8,7 @@ import { DaoyanCliError } from "../shared/errors.mts";
 import { emitData } from "../shared/json.mts";
 import { say } from "../shared/log.mts";
 import type { CliContext } from "../shared/context.mts";
-import { usageError } from "../shared/args.mts";
+import { splitInlineFlag, takeValue, usageError } from "../shared/args.mts";
 import { loadMachine, loadMachineIfExists, projectFromContext, requireProject, saveMachine } from "../core/project/config.mts";
 import type { MachineLocalEngine } from "../core/project/types.mts";
 import { COMFY_TAGS_API, installEngineAt } from "../core/provision/init-flow.mts";
@@ -141,8 +141,26 @@ export async function runEngine(ctx: CliContext, args: string[]): Promise<number
   }
 
   if (sub === "install") {
-    const tag = rest[0];
-    if (tag === undefined || tag === "") usageError("用法：daoyan engine install <版本 tag>");
+    // 版本 tag + 可选 pip 源
+    let tag: string | undefined;
+    let mirror: string | undefined;
+    for (let i = 0; i < rest.length; i++) {
+      const a = rest[i];
+      if (a === undefined) break;
+      const { name, inline } = splitInlineFlag(a);
+      if (name === "--mirror") {
+        const v = takeValue(rest, i, inline, "--mirror");
+        mirror = v.value;
+        i += v.skip;
+        continue;
+      }
+      if (name.startsWith("-")) usageError(`未知参数 ${name}`);
+      if (tag !== undefined) usageError(`engine install 只接受一个版本 tag（多余：${a}）`);
+      tag = a;
+    }
+    if (tag === undefined || tag === "") {
+      usageError("用法：daoyan engine install <版本 tag> [--mirror <url>]");
+    }
     // 持锁安装
     const lock = await acquireMachineLock({
       taskId: `metadata-engine-install-${process.pid}`,
@@ -158,7 +176,14 @@ export async function runEngine(ctx: CliContext, args: string[]): Promise<number
         say(`版本 ${tag} 已安装：${portablePath(root, base)}`);
       } else {
         say(`安装 ComfyUI ${tag} → engine/versions/${tag} ...`);
-        await installEngineAt({ root, baseDir: base, version: tag, project, log: say });
+        await installEngineAt({
+          root,
+          baseDir: base,
+          version: tag,
+          project,
+          log: say,
+          ...(mirror !== undefined ? { mirror } : {}),
+        });
       }
       if (ctx.json) {
         emitData({

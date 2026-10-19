@@ -5,7 +5,7 @@
 #   curl -fsSL https://github.com/yuanbaobaoo/daoyan-cli/releases/latest/download/install.sh | bash
 #
 # 可选环境变量：
-#   DAYOAN_REF=v0.0.6                  git tag / 分支 / commit（默认 master，仅在回退 git 时使用）
+#   DAYOAN_REF=v0.0.7                  git tag / 分支 / commit（默认 master，仅在回退 git 时使用）
 #   DAYOAN_REPO=<git url>              自建 git 镜像（默认 GitHub）
 #   DAYOAN_MANIFEST_URL=<url|路径>     更新清单（默认 Release latest.json；显式设为空则走 git）
 #   DAYOAN_TGZ_URL=<url|路径>          直接安装指定 tgz（优先于 manifest）

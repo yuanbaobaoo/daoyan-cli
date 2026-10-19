@@ -14,7 +14,7 @@ var VERSION;
 var init_version = __esm({
   "src/shared/version.mts"() {
     "use strict";
-    VERSION = "0.0.6";
+    VERSION = "0.0.7";
   }
 });
 

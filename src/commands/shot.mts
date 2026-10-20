@@ -4,7 +4,10 @@
 import { DaoyanCliError } from "../shared/errors.mts";
 import type { CliContext } from "../shared/context.mts";
 import { splitInlineFlag, takeValue, usageError } from "../shared/args.mts";
-import { loadMachine, loadShotsFile, requireProject } from "../core/project/config.mts";
+import { loadMachine, requireProject } from "../core/project/config.mts";
+import { resolveEpisodeContext } from "../core/story/paths.mts";
+import { checkStoryGate, gateError, loadContextShots } from "../core/story/production.mts";
+import type { StoryBlocker } from "../core/story/types.mts";
 import { enqueueRunTask } from "./run.mts";
 
 /**
@@ -35,6 +38,14 @@ interface ShotFlags {
      * --force（hidden；retake 默认 true）。
      */
     force: boolean;
+    /**
+     * --episode（多集必填）。
+     */
+    episode?: string;
+    /**
+     * --allow-incomplete：显式绕过剧情门禁。
+     */
+    allowIncomplete: boolean;
 }
 
 /**
@@ -42,10 +53,21 @@ interface ShotFlags {
  */
 function parseShotArgs(args: string[], presetForce: boolean): ShotFlags {
     // 结果
-    const out: ShotFlags = { ids: [], wait: false, force: presetForce };
+    const out: ShotFlags = { ids: [], wait: false, force: presetForce, allowIncomplete: false };
     for (let i = 0; i < args.length; i++) {
         const raw = args[i] ?? "";
         const { name, inline } = splitInlineFlag(raw);
+        if (name === "--episode") {
+            // --episode 取值
+            const v = takeValue(args, i, inline, "--episode");
+            out.episode = v.value;
+            i += v.skip;
+            continue;
+        }
+        if (name === "--allow-incomplete") {
+            out.allowIncomplete = true;
+            continue;
+        }
         if (name === "--steps") {
             const v = takeValue(args, i, inline, "--steps");
             out.steps = Number(v.value);
@@ -92,8 +114,10 @@ export async function runShot(ctx: CliContext, args: string[], presetForce = fal
     const flags = parseShotArgs(args, presetForce);
     const { root, config: project } = requireProject(ctx);
     const machine = loadMachine(root);
+    // 剧集上下文
+    const context = resolveEpisodeContext(root, flags.episode);
     // 分镜表（提前校验镜号，避免创建无效 task）
-    const shots = loadShotsFile(root);
+    const shots = loadContextShots(root, context);
     for (const id of flags.ids) {
         if (!shots.shots.some((s) => s.id === id)) {
             throw new DaoyanCliError({
@@ -103,6 +127,22 @@ export async function runShot(ctx: CliContext, args: string[], presetForce = fal
             });
         }
     }
+    // 剧情门禁
+    const gate = checkStoryGate(root, context, project);
+    // 门禁警告
+    let warnings: StoryBlocker[] = [];
+    // 是否显式绕过
+    let bypassed = false;
+    if (gate.blockers.length > 0) {
+        if (flags.allowIncomplete) {
+            bypassed = true;
+            warnings = gate.blockers;
+        } else if (gate.mode === "strict") {
+            throw gateError(context, gate.blockers, gate.stage);
+        } else {
+            warnings = gate.blockers;
+        }
+    }
     return enqueueRunTask({
         ctx,
         root,
@@ -110,12 +150,15 @@ export async function runShot(ctx: CliContext, args: string[], presetForce = fal
         machine,
         command: `${presetForce ? "retake" : "shot"} ${flags.ids.join(" ")}`,
         kind: presetForce ? "retake" : "shot",
+        episodeId: context.episode_id,
         ...(flags.requestId !== undefined ? { requestId: flags.requestId } : {}),
         options: {
             shots: flags.ids,
             force: flags.force,
             ...(flags.steps !== undefined ? { steps: flags.steps } : {}),
             ...(flags.timeoutHours !== undefined ? { timeout_ms: Math.round(flags.timeoutHours * 3_600_000) } : {}),
+            ...(bypassed ? { story_gate_bypassed: true } : {}),
+            ...(warnings.length > 0 ? { story_gate_warnings: warnings } : {}),
         },
         wait: flags.wait,
     });
@@ -128,9 +171,24 @@ export async function runBatch(ctx: CliContext, args: string[]): Promise<number>
     let timeoutHours: number | undefined;
     let requestId: string | undefined;
     let wait = false;
+    // 目标剧集
+    let episode: string | undefined;
+    // 是否显式绕过门禁
+    let allowIncomplete = false;
     for (let i = 0; i < args.length; i++) {
         const raw = args[i] ?? "";
         const { name, inline } = splitInlineFlag(raw);
+        if (name === "--episode") {
+            // --episode 取值
+            const v = takeValue(args, i, inline, "--episode");
+            episode = v.value;
+            i += v.skip;
+            continue;
+        }
+        if (name === "--allow-incomplete") {
+            allowIncomplete = true;
+            continue;
+        }
         if (name === "--timeout") {
             const v = takeValue(args, i, inline, "--timeout");
             timeoutHours = Number(v.value);
@@ -155,9 +213,27 @@ export async function runBatch(ctx: CliContext, args: string[]): Promise<number>
     }
     const { root, config: project } = requireProject(ctx);
     const machine = loadMachine(root);
+    // 剧集上下文
+    const context = resolveEpisodeContext(root, episode);
     // 提前校验分镜表存在且非空
-    const shots = loadShotsFile(root);
+    const shots = loadContextShots(root, context);
     if (shots.shots.length === 0) throw new DaoyanCliError({ code: "config_invalid", message: "shots.json 没有镜头" });
+    // 剧情门禁
+    const gate = checkStoryGate(root, context, project);
+    // 门禁警告
+    let warnings: StoryBlocker[] = [];
+    // 是否显式绕过
+    let bypassed = false;
+    if (gate.blockers.length > 0) {
+        if (allowIncomplete) {
+            bypassed = true;
+            warnings = gate.blockers;
+        } else if (gate.mode === "strict") {
+            throw gateError(context, gate.blockers, gate.stage);
+        } else {
+            warnings = gate.blockers;
+        }
+    }
     return enqueueRunTask({
         ctx,
         root,
@@ -165,10 +241,13 @@ export async function runBatch(ctx: CliContext, args: string[]): Promise<number>
         machine,
         command: "batch",
         kind: "batch",
+        episodeId: context.episode_id,
         ...(requestId !== undefined ? { requestId } : {}),
         options: {
             force: false,
             ...(timeoutHours !== undefined ? { timeout_ms: Math.round(timeoutHours * 3_600_000) } : {}),
+            ...(bypassed ? { story_gate_bypassed: true } : {}),
+            ...(warnings.length > 0 ? { story_gate_warnings: warnings } : {}),
         },
         wait,
     });

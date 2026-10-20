@@ -101,6 +101,10 @@ export interface ExecuteRunOptions {
      */
     machineId: string;
     /**
+     * 所属剧集 id（legacy / 系列级为 null）。
+     */
+    episodeId: string | null;
+    /**
      * 幂等键。
      */
     requestId: string | null;
@@ -241,6 +245,7 @@ function writeFailedRun(opts: {
     runId: string;
     taskId: string;
     machineId: string;
+    episodeId: string | null;
     requestId: string | null;
     plan: RunPlan;
     session: EngineSession;
@@ -256,6 +261,7 @@ function writeFailedRun(opts: {
         run_id: opts.runId,
         task_id: opts.taskId,
         machine_id: opts.machineId,
+        episode_id: opts.episodeId,
         request_id: opts.requestId,
         label: opts.plan.label,
         workflow: { path: opts.plan.workflowRel, sha256: graphSha256(opts.plan.graph) },
@@ -324,7 +330,7 @@ export async function executeRun(opts: ExecuteRunOptions): Promise<RunRecord> {
             if (target === undefined) {
                 throw new DaoyanCliError({
                     code: "workflow_invalid",
-                    message: `first_frame 绑定指向不存在的节点 ${up.target.node}`,
+                    message: `资产绑定 ${up.logical} 指向不存在的节点 ${up.target.node}`,
                 });
             }
             target.inputs[up.target.input] = name;
@@ -459,6 +465,7 @@ export async function executeRun(opts: ExecuteRunOptions): Promise<RunRecord> {
                         run_id: opts.runId,
                         task_id: opts.taskId,
                         machine_id: opts.machineId,
+                        episode_id: opts.episodeId,
                         request_id: opts.requestId,
                         label: opts.plan.label,
                         workflow: { path: opts.plan.workflowRel, sha256: graphSha256(graph) },
@@ -507,6 +514,7 @@ export async function executeRun(opts: ExecuteRunOptions): Promise<RunRecord> {
                 runId: opts.runId,
                 taskId: opts.taskId,
                 machineId: opts.machineId,
+                episodeId: opts.episodeId,
                 requestId: opts.requestId,
                 plan: opts.plan,
                 session: opts.session,
@@ -525,6 +533,7 @@ export async function executeRun(opts: ExecuteRunOptions): Promise<RunRecord> {
             runId: opts.runId,
             taskId: opts.taskId,
             machineId: opts.machineId,
+            episodeId: opts.episodeId,
             requestId: opts.requestId,
             plan: opts.plan,
             session: opts.session,

@@ -19,6 +19,16 @@ export const ERROR_CODES = [
     "provision_failed",
     "artifact_download_failed",
     "web_start_failed",
+    // 剧本 / 设定集
+    "story_not_found",
+    "episode_not_found",
+    "episode_required",
+    "story_conflict",
+    "story_invalid",
+    "story_stale",
+    "story_gate_failed",
+    "asset_not_found",
+    "asset_invalid",
     // 引擎
     "engine_not_ready",
     "engine_start_failed",
@@ -108,6 +118,48 @@ export const ERROR_META: Record<ErrCode, ErrorMeta> = {
     web_start_failed: {
         retryable: false,
         hint: "检查监听地址与端口占用；端口冲突时省略 --port 让系统分配，或改用 --port <n>。",
+    },
+
+    story_not_found: {
+        retryable: false,
+        hint: "先运行 daoyan story init 启用多集剧本与设定集。",
+        nextActions: ["story init"],
+    },
+    episode_not_found: {
+        retryable: false,
+        hint: "用 story episode list 查看可用剧集，或先 story episode add。",
+        nextActions: ["story episode list --json"],
+    },
+    episode_required: {
+        retryable: false,
+        hint: "多集项目必须用 --episode <id> 指定目标集；单集项目可省略。",
+        nextActions: ["story status --json", "story episode list --json"],
+    },
+    story_conflict: {
+        retryable: true,
+        retryAfterMs: 0,
+        hint: "文件已被其它修改；重新读取最新内容后重试。",
+    },
+    story_invalid: {
+        retryable: false,
+        hint: "按 details.issues / details.references 修正剧本、设定集、拆解或分镜后重试。",
+    },
+    story_stale: {
+        retryable: false,
+        hint: "该集拆解或分镜基于旧剧本；重新拆解 / 更新分镜，或显式允许 stale。",
+    },
+    story_gate_failed: {
+        retryable: false,
+        hint: "按 details.blockers 修复剧本、拆解、资产或工作流后再拍摄。",
+        nextActions: ["story status --episode <id> --json"],
+    },
+    asset_not_found: {
+        retryable: false,
+        hint: "检查 owner / asset id / run 产物名；用 story asset list 查看已有资产。",
+    },
+    asset_invalid: {
+        retryable: false,
+        hint: "检查文件类型、大小、路径与哈希；重新生成或转换格式后重试。",
     },
 
     engine_not_ready: { retryable: true, retryAfterMs: 5_000, hint: "确认引擎可达后再执行任务。" },

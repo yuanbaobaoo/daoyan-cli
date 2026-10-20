@@ -31,6 +31,7 @@ export function runSummary(root: string, rec: RunRecord): Record<string, unknown
         run_id: rec.run_id,
         task_id: rec.task_id,
         machine_id: rec.machine_id,
+        episode_id: rec.episode_id ?? null,
         label: rec.label,
         status: rec.status,
         workflow: rec.workflow,

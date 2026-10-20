@@ -17,6 +17,7 @@ import {
     validateBindings,
 } from "../workflow/load.mts";
 import type { WorkflowGraph } from "../workflow/graph.mts";
+import { resolveWorkflowAssets } from "../story/workflow-assets.mts";
 
 /**
  * 一个待上传的输入文件。
@@ -253,9 +254,9 @@ function shotLogicalValues(shots: ShotsFile, shot: ShotSpec, stepsOverride?: num
 /**
  * 选择上游 run 的产物文件（优先视频）。
  */
-function pickRelaySource(root: string, upstreamId: string): string {
+function pickRelaySource(root: string, upstreamId: string, labelPrefix: string): string {
     // 上游最新成功 run
-    const rec = latestSucceededRun(root, `shot:${upstreamId}`);
+    const rec = latestSucceededRun(root, `${labelPrefix}${upstreamId}`);
     if (rec === null) {
         throw new DaoyanCliError({
             code: "relay_upstream_missing",
@@ -287,7 +288,13 @@ function pickRelaySource(root: string, upstreamId: string): string {
 /**
  * 解析首帧（锚点 / 接力 / 纯文生），返回上传计划。
  */
-function firstFrameUpload(opts: { root: string; shots: ShotsFile; shot: ShotSpec; bindings: Bindings | null }): {
+function firstFrameUpload(opts: {
+    root: string;
+    shots: ShotsFile;
+    shot: ShotSpec;
+    bindings: Bindings | null;
+    labelPrefix: string;
+}): {
     upload: UploadSpec | null;
     descriptor: JsonValue | undefined;
 } {
@@ -343,7 +350,7 @@ function firstFrameUpload(opts: { root: string; shots: ShotsFile; shot: ShotSpec
         });
     }
     // 上游产物
-    const sourceClip = pickRelaySource(opts.root, upstream.id);
+    const sourceClip = pickRelaySource(opts.root, upstream.id, opts.labelPrefix);
     // 接力帧缓存目录
     const relayDir = join(opts.root, RELAY_DIR);
     mkdirSync(relayDir, { recursive: true });
@@ -393,6 +400,7 @@ export async function planShotRuns(opts: {
     shotIds?: string[];
     stepsOverride?: number;
     force: boolean;
+    labelPrefix?: string;
     log: (m: string) => void;
 }): Promise<PlannedRuns> {
     // 目标镜头
@@ -417,11 +425,13 @@ export async function planShotRuns(opts: {
     // 结果
     const plans: RunPlan[] = [];
     const skipped: string[] = [];
+    // label 前缀
+    const labelPrefix = opts.labelPrefix ?? "shot:";
     for (const shot of targets) {
         // 已有成功 run：跳过（retake 强制重拍）
         if (!opts.force) {
             // 该镜最新 run
-            const existing = latestRunByLabel(opts.root, `shot:${shot.id}`);
+            const existing = latestRunByLabel(opts.root, `${labelPrefix}${shot.id}`);
             if (existing !== null && existing.status === "succeeded") {
                 skipped.push(shot.id);
                 opts.log(`镜 ${shot.id} 已有成功 run ${existing.run_id}，跳过（retake 强制重拍）`);
@@ -476,7 +486,9 @@ export async function planShotRuns(opts: {
         // 逻辑输入
         const values = shotLogicalValues(opts.shots, shot, opts.stepsOverride);
         // 首帧
-        const ff = firstFrameUpload({ root: opts.root, shots: opts.shots, shot, bindings });
+        const ff = firstFrameUpload({ root: opts.root, shots: opts.shots, shot, bindings, labelPrefix });
+        // 剧情资产槽位
+        const assetPlan = resolveWorkflowAssets({ root: opts.root, shot, workflowAbs: wf.abs });
         // 应用逻辑值
         const applied = applyLogicalValues(over.graph, bindings, values);
         const applyError = applied.issues.find((i) => i.severity === "error");
@@ -489,13 +501,17 @@ export async function planShotRuns(opts: {
         }
         // 待执行计划
         const plan: RunPlan = {
-            label: `shot:${shot.id}`,
+            label: `${labelPrefix}${shot.id}`,
             workflowAbs: wf.abs,
             workflowRel: wf.rel,
             graph: applied.graph,
-            inputs: { ...applied.applied, ...(ff.descriptor !== undefined ? { first_frame: ff.descriptor } : {}) },
+            inputs: {
+                ...applied.applied,
+                ...(ff.descriptor !== undefined ? { first_frame: ff.descriptor } : {}),
+                ...(assetPlan.records.length > 0 ? { assets: assetPlan.records as unknown as JsonValue } : {}),
+            },
             overrides: over.applied,
-            uploads: ff.upload !== null ? [ff.upload] : [],
+            uploads: [...(ff.upload !== null ? [ff.upload] : []), ...assetPlan.uploads],
             warnings: applied.unmapped.map((k) => ({
                 code: "binding_not_found",
                 message: `逻辑输入 "${k}" 没有 binding，已忽略`,

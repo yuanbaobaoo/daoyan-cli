@@ -11,6 +11,8 @@ import { say, warn } from "../../shared/log.mts";
 import { onSignal } from "../../shared/signals.mts";
 import { loadMachine, loadShotsFile, readProjectAt } from "../project/config.mts";
 import { LOG_DIR, isTerminalStatus, type MachineConfig, type ProjectConfig } from "../project/types.mts";
+import { resolveEpisodeContext } from "../story/paths.mts";
+import { loadEpisodeShots } from "../story/store.mts";
 import { attachMachineLock, type AcquiredLock } from "../machine/lock.mts";
 import {
     appendTaskRun,
@@ -81,6 +83,7 @@ function shotTargets(
     root: string,
     shots: import("../project/types.mts").ShotsFile,
     task: ReturnType<typeof requireTask>,
+    labelPrefix: string,
 ): { execute: string[]; skipped: string[] } {
     // 任务选项
     const o = task.options;
@@ -104,7 +107,7 @@ function shotTargets(
     const execute: string[] = [];
     const skipped: string[] = [];
     for (const id of ids) {
-        if (!force && latestSucceededRun(root, `shot:${id}`) !== null) skipped.push(id);
+        if (!force && latestSucceededRun(root, `${labelPrefix}${id}`) !== null) skipped.push(id);
         else execute.push(id);
     }
     return { execute, skipped };
@@ -230,6 +233,8 @@ export async function runWorker(opts: WorkerOptions): Promise<number> {
         let shotsFile: import("../project/types.mts").ShotsFile | null = null;
         let shotQueue: string[] = [];
         let skippedShots: string[] = [];
+        // 单集 label 前缀（legacy: shot:；多集: ep:<id>:shot:）
+        let labelPrefix = "shot:";
         if (task.kind === "run") {
             const o = task.options;
             if (o.workflow === undefined || o.workflow === "") {
@@ -244,8 +249,24 @@ export async function runWorker(opts: WorkerOptions): Promise<number> {
                 ...(o.label !== undefined ? { label: o.label } : {}),
             });
         } else {
-            shotsFile = loadShotsFile(root);
-            const targets = shotTargets(root, shotsFile, task);
+            // 剧集上下文；story 模式必须已有 episode_id
+            const context = resolveEpisodeContext(root, task.episode_id ?? undefined);
+            if (!context.legacy && (task.episode_id === null || task.episode_id === undefined)) {
+                throw new DaoyanCliError({
+                    code: "story_invalid",
+                    message: "story 模式的 shot 任务缺少 episode_id",
+                });
+            }
+            labelPrefix = context.label_prefix;
+            shotsFile = context.legacy ? loadShotsFile(root) : loadEpisodeShots(root, context.episode_id as string);
+            if (shotsFile === null) {
+                throw new DaoyanCliError({
+                    code: "story_invalid",
+                    message: `剧集 ${String(context.episode_id)} 的分镜不存在`,
+                });
+            }
+            // 目标镜头
+            const targets = shotTargets(root, shotsFile, task, context.label_prefix);
             shotQueue = targets.execute;
             skippedShots = targets.skipped;
             for (const id of skippedShots) appendEvent(taskDir, "run_skipped", { shot_id: id });
@@ -312,6 +333,7 @@ export async function runWorker(opts: WorkerOptions): Promise<number> {
                     runId,
                     taskId,
                     machineId: machine.machine_id,
+                    episodeId: task.episode_id ?? null,
                     requestId: task.request_id,
                     timeoutMs: Math.max(1_000, deadline - Date.now()),
                     signal: controller.signal,
@@ -363,6 +385,7 @@ export async function runWorker(opts: WorkerOptions): Promise<number> {
                         shots: shotsFile as import("../project/types.mts").ShotsFile,
                         shotIds: [id],
                         force: true,
+                        labelPrefix,
                         ...(task.options.steps !== undefined ? { stepsOverride: task.options.steps } : {}),
                         log: say,
                     });

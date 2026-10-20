@@ -100,6 +100,14 @@ function isProjectConfig(v: unknown): v is ProjectConfig {
     if (typeof o.name !== "string" || o.name.trim() === "") return false;
     if (o.version !== 2) return false;
     if (o.default_workflow !== undefined && typeof o.default_workflow !== "string") return false;
+    if (o.story !== undefined) {
+        if (typeof o.story !== "object" || o.story === null) return false;
+        // story 段宽松视图
+        const s = o.story as Record<string, unknown>;
+        if (s.enforce !== undefined && s.enforce !== "strict" && s.enforce !== "warn" && s.enforce !== "off") {
+            return false;
+        }
+    }
     if (o.gpu !== undefined) {
         if (typeof o.gpu !== "object" || o.gpu === null) return false;
         // gpu 段的宽松视图

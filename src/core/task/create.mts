@@ -79,6 +79,10 @@ export interface CreateTaskOptions {
      */
     command: string;
     /**
+     * 所属剧集 id（legacy / 系列级为空）。
+     */
+    episodeId?: string | null;
+    /**
      * 幂等键。
      */
     requestId?: string;
@@ -115,6 +119,7 @@ export async function createAndStartTask(opts: CreateTaskOptions): Promise<Creat
         taskId,
         kind: opts.kind,
         machineId: opts.machine.machine_id,
+        episodeId: opts.episodeId ?? null,
         requestId: opts.requestId !== undefined && opts.requestId !== "" ? opts.requestId : null,
         mode,
         command: opts.command,
@@ -151,6 +156,7 @@ export async function createAndStartTask(opts: CreateTaskOptions): Promise<Creat
         appendEvent(taskDir(opts.root, taskId), "queued", {
             kind: record.kind,
             command: record.command,
+            episode_id: record.episode_id ?? null,
         });
 
         // 3) spawn detached worker

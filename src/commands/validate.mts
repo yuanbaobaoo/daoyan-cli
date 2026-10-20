@@ -26,9 +26,12 @@ import {
     validateGraphWithCatalog,
 } from "../core/workflow/load.mts";
 import { readCatalog } from "../core/workflow/catalog.mts";
+import { loadWorkflowAssets, validateWorkflowAssetsGraph } from "../core/story/workflow-assets.mts";
 import { skillState } from "../core/agent/skill.mts";
 import { inspectMachineLock } from "../core/machine/lock.mts";
 import { VERSION } from "../shared/version.mts";
+import { storyEnabled } from "../core/story/paths.mts";
+import { validateStory } from "../core/story/validate.mts";
 
 // 尺寸建议（warning，不阻断）
 const DIM_MULTIPLE = 32;
@@ -44,6 +47,10 @@ export interface ValidationIssue {
      * 定位路径（文件/字段/镜号）。
      */
     path: string;
+    /**
+     * 所属剧集（story 模式；全局为 null）。
+     */
+    episode_id?: string | null;
     /**
      * 稳定问题码。
      */
@@ -125,6 +132,24 @@ function validateWorkflows(root: string, machine: MachineConfig | null, issues: 
         }
         const parsed = parseGraph(raw);
         for (const i of parsed.issues) issues.push(fromGraphIssue(rel, i));
+        // 剧情资产槽位
+        try {
+            // 工作流资产槽位
+            const assets = loadWorkflowAssets(abs);
+            if (assets !== null) {
+                for (const i of validateWorkflowAssetsGraph(assets, parsed.graph, `${rel}.assets`)) {
+                    issues.push({ ...i, path: i.path });
+                }
+            }
+        } catch (e) {
+            issues.push({
+                path: `${rel}.assets`,
+                code: e instanceof DaoyanCliError ? e.code : "asset_slot_invalid",
+                severity: "error",
+                message: e instanceof Error ? e.message : String(e),
+                hint: "修正 workflows/<name>.assets.json。",
+            });
+        }
         // bindings
         let bindings = null;
         try {
@@ -445,7 +470,21 @@ export async function runValidate(ctx: CliContext): Promise<number> {
 
     validateMachine(root, machine, issues);
     validateWorkflows(root, machine, issues);
-    validateShots(root, shots, issues);
+    if (storyEnabled(root)) {
+        // story 模式：根 shots.json 被忽略，校验分集剧本 / 设定集 / 拆解 / 分镜
+        for (const item of validateStory(root)) {
+            issues.push({
+                path: item.path,
+                episode_id: item.episode_id,
+                code: item.code,
+                severity: item.severity === "error" ? "error" : "warning",
+                message: item.message,
+                hint: item.hint,
+            });
+        }
+    } else {
+        validateShots(root, shots, issues);
+    }
 
     // 机器锁
     const lock = inspectMachineLock();

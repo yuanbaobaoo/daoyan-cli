@@ -34,6 +34,14 @@ export interface StatusSnapshotOptions {
      * 当前命令注册表；用于判断项目内 Skill 是否 stale。
      */
     commands?: readonly SkillCommand[];
+    /**
+     * 镜头 label 前缀（legacy: shot:；多集: ep:<id>:shot:）。
+     */
+    labelPrefix?: string;
+    /**
+     * 只展示该剧集的 task（story 模式）。
+     */
+    episodeId?: string | null;
 }
 
 /**
@@ -89,11 +97,15 @@ async function safeQueue(client: ComfyClient): Promise<Record<string, number> | 
 /**
  * 镜头进度（从 runs 推导）。
  */
-export function shotProgress(root: string, shots: ShotsFile | null): Array<Record<string, unknown>> {
+export function shotProgress(
+    root: string,
+    shots: ShotsFile | null,
+    labelPrefix = "shot:",
+): Array<Record<string, unknown>> {
     if (shots === null) return [];
     return shots.shots.map((s) => {
         // 最新成功 run
-        const rec = latestSucceededRun(root, `shot:${s.id}`);
+        const rec = latestSucceededRun(root, `${labelPrefix}${s.id}`);
         // 第一个产物是否存在
         const present = rec !== null && rec.outputs.some((o) => existsSync(join(root, RUNS_DIR, rec.run_id, o.path)));
         return {
@@ -137,8 +149,14 @@ export async function buildStatusSnapshot(
     const engine = await probeEngine(root, machine, options.engineTimeoutMs);
     // 机器锁
     const lock = inspectMachineLock();
-    // 全部任务
-    const tasks = listTasks(root);
+    // 全部任务（可按集过滤）
+    const tasks = listTasks(root).filter(
+        (t) =>
+            options.episodeId === undefined ||
+            options.episodeId === null ||
+            options.episodeId === "" ||
+            t.episode_id === options.episodeId,
+    );
     // 本机 / 其他机器任务
     const { active, synced } = splitActiveTasks(tasks, machine);
     // GPU
@@ -148,7 +166,7 @@ export async function buildStatusSnapshot(
     // Skill 状态
     const skill = skillState(root, VERSION, options.commands ?? []);
     // 镜头进度
-    const shot = shotProgress(root, shots);
+    const shot = shotProgress(root, shots, options.labelPrefix);
     // 最近任务列表
     const recentTasks = tasks.slice(0, 10).map(taskSummary);
     return {

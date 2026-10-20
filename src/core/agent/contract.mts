@@ -22,6 +22,7 @@ export const AGENTS_BLOCK_BODY = [
     "Before creating or running workflows, read `.agents/skills/daoyan/SKILL.md`.",
     "Use `daoyan` commands with `--json`; do not edit `engine/`, `logs/`, or `.dycli/`.",
     "Only one generation task runs per machine; if you get `machine_busy`, inspect the owner and retry later.",
+    "For multi-episode projects, use `daoyan story` commands and pass `--episode <id>` to shot/batch/wrap; check `story status` before generation.",
 ].join("\n");
 
 /**
@@ -39,6 +40,7 @@ export function capabilities(): Record<string, unknown> {
         bindings: true,
         git_friendly_records: true,
         project_skill: true,
+        story_lifecycle: "multi-episode",
         web_ui: "read-only",
         user_level_skill: false,
         http_api: [
@@ -68,6 +70,13 @@ export const PROJECT_SCHEMA: Record<string, unknown> = {
         name: { type: "string", minLength: 1 },
         version: { const: 2 },
         default_workflow: { type: "string" },
+        story: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+                enforce: { enum: ["strict", "warn", "off"], default: "strict" },
+            },
+        },
         gpu: {
             type: "object",
             additionalProperties: false,

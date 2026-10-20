@@ -9,9 +9,11 @@ import type { CliContext } from "../shared/context.mts";
 import { splitInlineFlag, takeValue, usageError } from "../shared/args.mts";
 import { sha256File } from "../shared/fs.mts";
 import { execCapture } from "../shared/exec.mts";
-import { loadShotsFile, requireProject } from "../core/project/config.mts";
-import { CONCAT_LIST_FILE, FINAL_DIR, type RunRecord } from "../core/project/types.mts";
+import { requireProject } from "../core/project/config.mts";
+import { CONCAT_LIST_FILE, type RunRecord } from "../core/project/types.mts";
 import { latestSucceededRun, requireRun, runOutputAbs } from "../core/run/store.mts";
+import { resolveEpisodeContext } from "../core/story/paths.mts";
+import { loadContextShots } from "../core/story/production.mts";
 
 /**
  * 选中的片段。
@@ -50,6 +52,8 @@ function pickVideoAt(root: string, rec: RunRecord): { path: string; abs: string 
 export async function runWrap(ctx: CliContext, args: string[]): Promise<number> {
     // --select 镜号=run_id
     const explicit = new Map<string, string>();
+    // --episode
+    let episode: string | undefined;
     for (let i = 0; i < args.length; i++) {
         const { name, inline } = splitInlineFlag(args[i] ?? "");
         if (name === "--select") {
@@ -60,11 +64,21 @@ export async function runWrap(ctx: CliContext, args: string[]): Promise<number> 
             i += v.skip;
             continue;
         }
+        if (name === "--episode") {
+            // --episode 取值
+            const v = takeValue(args, i, inline, "--episode");
+            episode = v.value;
+            i += v.skip;
+            continue;
+        }
         usageError(`未知参数 ${name}`);
     }
 
     const { root } = requireProject(ctx);
-    const shots = loadShotsFile(root);
+    // 剧集上下文
+    const context = resolveEpisodeContext(root, episode);
+    // 本集分镜
+    const shots = loadContextShots(root, context);
     // 选中片段
     const clips: SelectedClip[] = [];
     // 缺失镜号
@@ -81,8 +95,14 @@ export async function runWrap(ctx: CliContext, args: string[]): Promise<number> 
                     message: `--select ${shot.id}=${explicitId} 的 run 不是 succeeded（${rec.status}）`,
                 });
             }
+            if (context.episode_id !== null && rec.episode_id !== context.episode_id) {
+                throw new DaoyanCliError({
+                    code: "wrap_failed",
+                    message: `--select ${shot.id}=${explicitId} 的 run 属于 ${String(rec.episode_id ?? "未归属")}，不是 ${context.episode_id}`,
+                });
+            }
         } else {
-            rec = latestSucceededRun(root, `shot:${shot.id}`);
+            rec = latestSucceededRun(root, `${context.label_prefix}${shot.id}`);
         }
         if (rec === null) {
             missing.push(shot.id);
@@ -106,7 +126,7 @@ export async function runWrap(ctx: CliContext, args: string[]): Promise<number> 
     }
 
     // 交付目录
-    const finalDir = join(root, FINAL_DIR);
+    const finalDir = context.final_dir;
     mkdirSync(finalDir, { recursive: true });
     // 时间戳（含毫秒，避免同秒覆盖）
     const ts = new Date()
@@ -123,7 +143,7 @@ export async function runWrap(ctx: CliContext, args: string[]): Promise<number> 
     const listFile = join(root, CONCAT_LIST_FILE);
     writeFileSync(listFile, clips.map((c) => `file '${c.abs.replace(/'/g, "'\\''")}'`).join("\n") + "\n");
 
-    say(`合片 ${clips.length} 段 → final/${outName}（libx264 / crf18 / faststart）...`);
+    say(`合片 ${clips.length} 段 → ${context.final_rel}/${outName}（libx264 / crf18 / faststart）...`);
     // ffmpeg 合片
     const r = await execCapture("ffmpeg", [
         "-y",
@@ -154,6 +174,7 @@ export async function runWrap(ctx: CliContext, args: string[]): Promise<number> 
     // cut manifest
     const manifest = {
         cut: outName,
+        episode_id: context.episode_id,
         created_at: new Date().toISOString(),
         clips: clips.map((c) => ({
             shot: c.shot,
@@ -166,9 +187,10 @@ export async function runWrap(ctx: CliContext, args: string[]): Promise<number> 
     writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
 
     const data = {
-        output: `${FINAL_DIR}/${outName}`,
+        episode_id: context.episode_id,
+        output: `${context.final_rel}/${outName}`,
         abs_path: outPath,
-        manifest: `${FINAL_DIR}/${manifestName}`,
+        manifest: `${context.final_rel}/${manifestName}`,
         sha256: sha256File(outPath),
         clips: clips.map((c) => ({ shot: c.shot, run_id: c.run_id, artifact: c.artifact })),
         missing,
@@ -178,7 +200,7 @@ export async function runWrap(ctx: CliContext, args: string[]): Promise<number> 
         return 0;
     }
     if (missing.length > 0) say(`注意：${missing.length} 镜未完成未纳入（${missing.join(" ")}）`);
-    say(`合片完成：final/${outName}`);
-    say(`清单：final/${manifestName}`);
+    say(`合片完成：${context.final_rel}/${outName}`);
+    say(`清单：${context.final_rel}/${manifestName}`);
     return 0;
 }

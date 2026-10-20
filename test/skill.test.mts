@@ -28,6 +28,11 @@ test("Skill 生成哈希稳定且文件齐全", () => {
     assert.equal(a.has("SKILL.md"), true);
     assert.equal(a.has("reference/protocol.md"), true);
     assert.equal(a.has("reference/errors.md"), true);
+    assert.equal(a.has("reference/story.md"), true);
+    // 多集生命周期进入 Skill
+    assert.match(a.get("SKILL.md") ?? "", /多集短剧生命周期/);
+    assert.match(a.get("reference/story.md") ?? "", /story script sync/);
+    assert.match(a.get("reference/story.md") ?? "", /参考资产/);
     // 命令索引进入 SKILL.md
     assert.equal(a.get("SKILL.md")?.includes("daoyan run <workflow>"), true);
     // init venv 故障的排查说明必须进入 Skill

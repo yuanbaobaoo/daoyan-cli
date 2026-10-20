@@ -30,6 +30,9 @@ import { buildStatusSnapshot, shotProgress } from "../status/snapshot.mts";
 import { readEvents } from "../task/events.mts";
 import { taskDir } from "../task/store.mts";
 import { runDir } from "../run/store.mts";
+import { storyEnabled } from "../story/paths.mts";
+import { computeSeriesStoryStatus } from "../story/validate.mts";
+import type { SeriesStoryStatus } from "../story/types.mts";
 
 /**
  * 产物类型。
@@ -98,6 +101,10 @@ export interface WebRunSummary {
      * 机器标签。
      */
     machine_id: string;
+    /**
+     * 所属剧集。
+     */
+    episode_id: string | null;
     /**
      * 幂等键。
      */
@@ -169,6 +176,10 @@ export interface WebArtifactItem {
      */
     machine_id: string;
     /**
+     * 所属剧集。
+     */
+    episode_id: string | null;
+    /**
      * run label。
      */
     label: string | null;
@@ -218,6 +229,10 @@ export interface ArtifactQuery {
      * 文本搜索（run_id / label / prompt / 文件名）。
      */
     search?: string;
+    /**
+     * 剧集 id 过滤（story 模式）。
+     */
+    episode?: string;
     /**
      * 返回条数上限。
      */
@@ -296,6 +311,10 @@ export interface WebTaskItem {
      * 机器标签。
      */
     machine_id: string;
+    /**
+     * 所属剧集。
+     */
+    episode_id: string | null;
     /**
      * 幂等键。
      */
@@ -627,6 +646,10 @@ export interface WebShotsView {
  */
 export interface WebFinalItem {
     /**
+     * 所属剧集（legacy 为 null）。
+     */
+    episode_id: string | null;
+    /**
      * 成片文件名。
      */
     name: string;
@@ -788,7 +811,10 @@ function runMediaUrl(runId: string, name: string): string {
 /**
  * 成片媒体地址。
  */
-function finalMediaUrl(name: string): string {
+function finalMediaUrl(name: string, episodeId?: string): string {
+    if (episodeId !== undefined && episodeId !== "") {
+        return `${MEDIA_PREFIX}/final/${encodeURIComponent(episodeId)}/${encodeURIComponent(name)}`;
+    }
     return `${MEDIA_PREFIX}/final/${encodeURIComponent(name)}`;
 }
 
@@ -933,6 +959,7 @@ export function runSummaryDto(root: string, run: RunRecord): WebRunSummary {
         run_id: run.run_id,
         task_id: run.task_id,
         machine_id: run.machine_id,
+        episode_id: run.episode_id ?? null,
         request_id: run.request_id,
         label: run.label,
         status: run.status,
@@ -961,6 +988,7 @@ function flattenArtifacts(root: string, runs: RunRecord[]): WebArtifactItem[] {
                 run_id: run.run_id,
                 task_id: run.task_id,
                 machine_id: run.machine_id,
+                episode_id: run.episode_id ?? null,
                 label: run.label,
                 run_status: run.status,
                 started_at: run.started_at,
@@ -978,8 +1006,10 @@ function flattenArtifacts(root: string, runs: RunRecord[]): WebArtifactItem[] {
  * 产物列表。
  */
 export function listArtifacts(root: string, query: ArtifactQuery = {}): WebArtifactList {
-    // 全部 run
-    const runs = safeListRuns(root);
+    // 全部 run（可按集过滤）
+    const runs = safeListRuns(root).filter(
+        (r) => query.episode === undefined || query.episode === "" || r.episode_id === query.episode,
+    );
     // label 候选
     const labels = Array.from(new Set(runs.map((r) => r.label).filter((x): x is string => x !== null))).sort();
     // 全部产物
@@ -1044,6 +1074,15 @@ export function getRunDetail(root: string, runId: string): WebRunDetail | null {
 }
 
 /**
+ * run 列表（可按集过滤）。
+ */
+export function listRunsView(root: string, episodeId?: string): WebRunSummary[] {
+    return safeListRuns(root)
+        .filter((r) => episodeId === undefined || episodeId === "" || r.episode_id === episodeId)
+        .map((r) => runSummaryDto(root, r));
+}
+
+/**
  * 任务列表项。
  */
 function taskItem(rec: TaskRecord): WebTaskItem {
@@ -1053,6 +1092,7 @@ function taskItem(rec: TaskRecord): WebTaskItem {
         status: rec.status,
         mode: rec.mode,
         machine_id: rec.machine_id,
+        episode_id: rec.episode_id ?? null,
         request_id: rec.request_id,
         runs: rec.runs,
         command: rec.command,
@@ -1069,9 +1109,11 @@ function taskItem(rec: TaskRecord): WebTaskItem {
 /**
  * 任务列表。
  */
-export function listTasksView(root: string): { items: WebTaskItem[]; total: number } {
-    // 全部 task
-    const tasks = safeListTasks(root);
+export function listTasksView(root: string, episodeId?: string): { items: WebTaskItem[]; total: number } {
+    // 全部 task（可按集过滤）
+    const tasks = safeListTasks(root).filter(
+        (t) => episodeId === undefined || episodeId === "" || t.episode_id === episodeId,
+    );
     return { items: tasks.map(taskItem), total: tasks.length };
 }
 
@@ -1318,7 +1360,7 @@ function latestArtifactOf(root: string, run: RunRecord | null): WebArtifact | nu
 /**
  * 分镜视图。
  */
-export function buildShotsView(root: string, shots: ShotsFile | null): WebShotsView | null {
+export function buildShotsView(root: string, shots: ShotsFile | null, labelPrefix = "shot:"): WebShotsView | null {
     if (shots === null) return null;
     // meta 宽松视图
     const metaRecord = shots.meta as unknown as Record<string, unknown>;
@@ -1350,7 +1392,7 @@ export function buildShotsView(root: string, shots: ShotsFile | null): WebShotsV
     // 镜头列表
     const items = shots.shots.map((shot): WebShotItem => {
         // 该镜 run
-        const shotRuns = byLabel.get(`shot:${shot.id}`) ?? [];
+        const shotRuns = byLabel.get(`${labelPrefix}${shot.id}`) ?? [];
         // 最新 run
         const latest = shotRuns[0] ?? null;
         // 最新成功 run
@@ -1480,9 +1522,9 @@ export function buildShotsView(root: string, shots: ShotsFile | null): WebShotsV
 /**
  * 成片列表。
  */
-export function listFinals(root: string): WebFinalItem[] {
-    // final 目录
-    const dir = join(root, FINAL_DIR);
+export function listFinals(root: string, episodeId?: string): WebFinalItem[] {
+    // final 目录（story 模式按集）
+    const dir = episodeId !== undefined && episodeId !== "" ? join(root, FINAL_DIR, episodeId) : join(root, FINAL_DIR);
     if (!existsSync(dir)) return [];
     // 目录项
     const entries = readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile());
@@ -1503,7 +1545,7 @@ export function listFinals(root: string): WebFinalItem[] {
             // 文件状态
             const stat = statSync(join(dir, cut));
             // 媒体地址
-            const mediaUrl = finalMediaUrl(cut);
+            const mediaUrl = finalMediaUrl(cut, episodeId);
             // 片段列表
             const clips = Array.isArray(manifest.clips)
                 ? manifest.clips
@@ -1515,6 +1557,7 @@ export function listFinals(root: string): WebFinalItem[] {
                       }))
                 : [];
             out.push({
+                episode_id: episodeId !== undefined && episodeId !== "" ? episodeId : null,
                 name: cut,
                 manifest: entry.name,
                 media_url: mediaUrl,
@@ -1538,8 +1581,9 @@ export function listFinals(root: string): WebFinalItem[] {
             // 文件状态
             const stat = statSync(join(dir, entry.name));
             // 媒体地址
-            const mediaUrl = finalMediaUrl(entry.name);
+            const mediaUrl = finalMediaUrl(entry.name, episodeId);
             out.push({
+                episode_id: episodeId !== undefined && episodeId !== "" ? episodeId : null,
                 name: entry.name,
                 manifest: null,
                 media_url: mediaUrl,
@@ -1634,6 +1678,39 @@ function buildStats(
 }
 
 /**
+ * 把 story 计数并入概览统计。
+ */
+function withStoryStats(stats: Record<string, unknown>, story: SeriesStoryStatus): Record<string, unknown> {
+    return {
+        ...stats,
+        episodes_total: story.counts.episodes,
+        characters_total: story.counts.characters,
+        forms_total: story.counts.forms,
+        scenes_total: story.counts.scenes,
+        voices_total: story.counts.voices,
+        shots_total: story.counts.shots,
+        assets_total: story.counts.assets,
+    };
+}
+
+/**
+ * story 模式概览字段。
+ */
+function storyOverviewFields(
+    root: string,
+    project: ProjectConfig,
+): {
+    story: SeriesStoryStatus;
+    series: SeriesStoryStatus["series"];
+    episodes: SeriesStoryStatus["episodes"];
+} | null {
+    if (!storyEnabled(root)) return null;
+    // 系列状态
+    const story = computeSeriesStoryStatus(root, project);
+    return { story, series: story.series, episodes: story.episodes };
+}
+
+/**
  * 无本机配置时的共享数据概览。
  */
 function buildSharedOverview(root: string, project: ProjectConfig, shots: ShotsFile | null): Record<string, unknown> {
@@ -1641,8 +1718,12 @@ function buildSharedOverview(root: string, project: ProjectConfig, shots: ShotsF
     const runs = safeListRuns(root);
     // 全部 task
     const tasks = safeListTasks(root);
-    // 分镜视图
-    const storyboard = buildShotsView(root, shots);
+    // story 字段
+    const storyFields = storyOverviewFields(root, project);
+    // 分镜视图（story 模式由剧集页展示）
+    const storyboard = storyFields === null ? buildShotsView(root, shots) : null;
+    // 基础统计
+    const stats = buildStats(shots, runs, tasks, storyboard);
     return {
         project: { name: project.name, version: project.version },
         mode: null,
@@ -1656,10 +1737,14 @@ function buildSharedOverview(root: string, project: ProjectConfig, shots: ShotsF
         recent_tasks: tasks.slice(0, 10).map(taskItem),
         gpu: null,
         skill: null,
-        shots: shotProgress(root, shots),
+        shots: storyFields === null ? shotProgress(root, shots) : [],
         storyboard,
-        next_actions: ["init --mode=local", "init --mode=remote --url <url>"],
-        stats: buildStats(shots, runs, tasks, storyboard),
+        ...(storyFields !== null ? storyFields : {}),
+        next_actions:
+            storyFields !== null
+                ? ["story status --json", "story episode list --json"]
+                : ["init --mode=local", "init --mode=remote --url <url>"],
+        stats: storyFields !== null ? withStoryStats(stats, storyFields.story) : stats,
         recent_artifacts: flattenArtifacts(root, runs).slice(0, OVERVIEW_ARTIFACT_LIMIT),
         generated_at: nowIso(),
     };
@@ -1700,8 +1785,10 @@ export async function buildOverview(
     commands: readonly SkillCommand[] = [],
 ): Promise<Record<string, unknown>> {
     if (machine === null) return buildSharedOverview(root, project, shots);
-    // 复用 status 快照
-    const base = await buildStatusSnapshot(root, project, machine, shots, {
+    // story 字段
+    const storyFields = storyOverviewFields(root, project);
+    // 复用 status 快照（story 模式不使用根 shots）
+    const base = await buildStatusSnapshot(root, project, machine, storyFields === null ? shots : null, {
         commands,
         engineTimeoutMs: OVERVIEW_ENGINE_TIMEOUT_MS,
     });
@@ -1709,13 +1796,17 @@ export async function buildOverview(
     const runs = safeListRuns(root);
     // 全部 task
     const tasks = safeListTasks(root);
-    // 分镜视图
-    const storyboard = buildShotsView(root, shots);
+    // 分镜视图（story 模式由剧集页展示）
+    const storyboard = storyFields === null ? buildShotsView(root, shots) : null;
+    // 基础统计
+    const stats = buildStats(shots, runs, tasks, storyboard);
     return {
         ...base,
         machine: machineViewOf(base.machine),
         storyboard,
-        stats: buildStats(shots, runs, tasks, storyboard),
+        ...(storyFields !== null ? storyFields : {}),
+        next_actions: storyFields !== null ? storyFields.story.next_actions : base.next_actions,
+        stats: storyFields !== null ? withStoryStats(stats, storyFields.story) : stats,
         recent_artifacts: flattenArtifacts(root, runs).slice(0, OVERVIEW_ARTIFACT_LIMIT),
         recent_tasks: tasks.slice(0, 10).map(taskItem),
         generated_at: nowIso(),

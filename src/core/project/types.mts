@@ -7,6 +7,28 @@
 export const PROJECT_FILE = "project.json";
 // 共享：视频 recipe
 export const SHOTS_FILE = "shots.json";
+// 共享：系列级剧本与设定集
+export const STORY_DIR = "story";
+// 共享：系列元数据
+export const STORY_SERIES_FILE = "story/series.json";
+// 共享：全局角色
+export const STORY_CHARACTERS_FILE = "story/characters.json";
+// 共享：全局场景
+export const STORY_SCENES_FILE = "story/scenes.json";
+// 共享：全局音色
+export const STORY_VOICES_FILE = "story/voices.json";
+// 共享：设定资产根目录
+export const STORY_ASSETS_DIR = "story/assets";
+// 共享：分集根目录
+export const EPISODES_DIR = "episodes";
+// 分集：元数据文件名
+export const EPISODE_META_FILE = "episode.json";
+// 分集：剧本文本
+export const SCRIPT_TEXT_FILE = "script.md";
+// 分集：剧本元数据
+export const SCRIPT_FILE = "script.json";
+// 分集：拆解
+export const BREAKDOWN_FILE = "breakdown.json";
 // 共享：工作流目录
 export const WORKFLOWS_DIR = "workflows";
 // 共享：逻辑输入映射（<name>.bindings.json 与同目录）
@@ -85,6 +107,15 @@ export interface ProjectConfig {
      * 默认 workflow（相对项目根，如 workflows/t2v.json）。
      */
     default_workflow?: string;
+    /**
+     * 剧本 / 设定集门禁策略（story 模式）。
+     */
+    story?: {
+        /**
+         * strict（默认）/ warn / off。
+         */
+        enforce?: "strict" | "warn" | "off";
+    };
     /**
      * GPU 接管开关（项目级策略，remote 忽略）。
      */
@@ -197,15 +228,48 @@ export type FirstFrame = string | { relay: string } | undefined;
 /**
  * 角色 / 场景等可复用设定（仅展示与复用，不直接注入 workflow）。
  */
+/**
+ * 镜头台词（story 模式；音色引用可省略的前提是该角色只有一个音色）。
+ */
+export interface ShotDialogue {
+    /**
+     * 说话角色 id。
+     */
+    character: string;
+    /**
+     * 台词文本。
+     */
+    text: string;
+    /**
+     * 音色 id。
+     */
+    voice?: string;
+    /**
+     * 情绪 / 表演提示。
+     */
+    emotion?: string;
+    /**
+     * 允许扩展字段。
+     */
+    [k: string]: unknown;
+}
+
+/**
+ * 角色 / 场景等可复用设定（仅展示与复用，不直接注入 workflow）。
+ */
 export interface StoryEntity {
     /**
      * 稳定 id（镜头通过 id 引用）。
      */
     id?: string;
     /**
-     * 展示名。
+     * 展示名（老字段；story 模式引用可使用 id + form）。
      */
-    name: string;
+    name?: string;
+    /**
+     * 角色形态 id（仅角色引用使用）。
+     */
+    form?: string;
     /**
      * 设定描述。
      */
@@ -270,6 +334,18 @@ export interface ShotSpec {
      */
     notes?: string;
     /**
+     * 剧本 beat 引用（拆解提供 beats 时校验）。
+     */
+    script_refs?: string[];
+    /**
+     * 台词与音色引用。
+     */
+    dialogue?: ShotDialogue[];
+    /**
+     * 工作流资产槽位显式映射（slot -> owner 或 owner@asset）。
+     */
+    asset_slots?: Record<string, string>;
+    /**
      * 随机种子（通过 bindings 的 seed 注入）。
      */
     seed: number;
@@ -323,6 +399,18 @@ export interface ShotsMeta {
      * 片名（可选，仅展示用）。
      */
     title?: string;
+    /**
+     * 所属剧集 id（story 模式）。
+     */
+    episode_id?: string;
+    /**
+     * 本集剧本 revision（story 模式）。
+     */
+    script_revision?: number;
+    /**
+     * 本集剧本 sha256（story 模式）。
+     */
+    script_sha256?: string;
     /**
      * 剧情简介（展示用）。
      */
@@ -503,6 +591,14 @@ export interface TaskOptions {
      * 忽略已有成功 run（retake）。
      */
     force?: boolean;
+    /**
+     * 是否显式绕过了剧情门禁（--allow-incomplete）。
+     */
+    story_gate_bypassed?: boolean;
+    /**
+     * 门禁警告（warn 模式或绕过时写入 task）。
+     */
+    story_gate_warnings?: Array<{ code: string; message: string; ref?: string; shots?: string[] }>;
 }
 
 /**
@@ -521,6 +617,10 @@ export interface TaskRecord {
      * 机器标签（区分 Git 同步来的其他机器任务）。
      */
     machine_id: string;
+    /**
+     * 所属剧集 id；legacy / 系列级为 null。
+     */
+    episode_id?: string | null;
     /**
      * 幂等键（可空）。
      */
@@ -718,11 +818,15 @@ export interface RunRecord {
      */
     machine_id: string;
     /**
+     * 所属剧集 id；legacy / 系列级为 null。
+     */
+    episode_id?: string | null;
+    /**
      * 幂等键（可空）。
      */
     request_id: string | null;
     /**
-     * label（shot:<id> 或用户指定）。
+     * label（legacy: shot:<id>；多集: ep:<id>:shot:<id>）。
      */
     label: string | null;
     /**

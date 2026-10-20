@@ -195,6 +195,7 @@ export function makeTaskRecord(init: {
     taskId: string;
     kind: TaskRecord["kind"];
     machineId: string;
+    episodeId?: string | null;
     requestId: string | null;
     mode: TaskRecord["mode"];
     command: string;
@@ -204,6 +205,7 @@ export function makeTaskRecord(init: {
         task_id: init.taskId,
         kind: init.kind,
         machine_id: init.machineId,
+        episode_id: init.episodeId ?? null,
         request_id: init.requestId,
         status: "queued",
         mode: init.mode,
@@ -229,6 +231,7 @@ export function taskSummary(rec: TaskRecord): Record<string, unknown> {
         status: rec.status,
         mode: rec.mode,
         machine_id: rec.machine_id,
+        episode_id: rec.episode_id ?? null,
         request_id: rec.request_id,
         runs: rec.runs,
         command: rec.command,

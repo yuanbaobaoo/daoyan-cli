@@ -7,8 +7,9 @@ import { createReadStream, existsSync, realpathSync, statSync } from "node:fs";
 import { basename, extname, join, sep } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { pipeline } from "node:stream/promises";
-import { FINAL_DIR, RUNS_DIR } from "../project/types.mts";
+import { FINAL_DIR, RUNS_DIR, STORY_ASSETS_DIR } from "../project/types.mts";
 import { readRun, runDir } from "../run/store.mts";
+import { STORY_ID_RE } from "../story/paths.mts";
 
 /**
  * 可服务的媒体目标。
@@ -170,6 +171,58 @@ export function resolveFinalMedia(root: string, name: string): MediaTarget | nul
     const base = safeRealpath(dir);
     if (base === null || !isWithin(projectRoot, base)) return null;
     // 只允许 basename，杜绝路径分隔符
+    if (basename(name) !== name || name.includes("/") || name.includes("\\")) return null;
+    // 文件真实路径
+    const abs = safeRealpath(join(dir, name));
+    if (abs === null || !isWithin(base, abs)) return null;
+    try {
+        // 文件状态
+        const stat = statSync(abs);
+        if (!stat.isFile()) return null;
+        return makeTarget(abs, name, `"${stat.size}-${Math.floor(stat.mtimeMs)}"`);
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * 解析 story 资产文件（story/assets/...）。
+ */
+export function resolveStoryMedia(root: string, relPath: string): MediaTarget | null {
+    if (relPath === "" || relPath.startsWith("/") || relPath.includes("..") || relPath.includes("\\")) return null;
+    // 项目根真实路径
+    const projectRoot = safeRealpath(root);
+    if (projectRoot === null) return null;
+    // 资产根真实路径
+    const base = safeRealpath(join(root, STORY_ASSETS_DIR));
+    if (base === null || !isWithin(projectRoot, base)) return null;
+    // 文件真实路径
+    const abs = safeRealpath(join(root, STORY_ASSETS_DIR, relPath));
+    if (abs === null || !isWithin(base, abs)) return null;
+    try {
+        // 文件状态
+        const stat = statSync(abs);
+        if (!stat.isFile()) return null;
+        return makeTarget(abs, basename(abs), `"${stat.size}-${Math.floor(stat.mtimeMs)}"`);
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * 解析某集成片文件。
+ */
+export function resolveEpisodeFinalMedia(root: string, episodeId: string, name: string): MediaTarget | null {
+    if (!STORY_ID_RE.test(episodeId)) return null;
+    // 成片目录
+    const dir = join(root, FINAL_DIR, episodeId);
+    // 项目根真实路径
+    const projectRoot = safeRealpath(root);
+    if (projectRoot === null) return null;
+    // 目录真实路径
+    const base = safeRealpath(dir);
+    if (base === null || !isWithin(projectRoot, base)) return null;
+    // 只允许 basename
     if (basename(name) !== name || name.includes("/") || name.includes("\\")) return null;
     // 文件真实路径
     const abs = safeRealpath(join(dir, name));

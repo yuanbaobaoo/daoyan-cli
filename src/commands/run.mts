@@ -6,6 +6,7 @@ import type { CliContext } from "../shared/context.mts";
 import { parseJsonValue, splitInlineFlag, takeValue, usageError } from "../shared/args.mts";
 import { isHttpUrl } from "../shared/fs.mts";
 import { loadMachine, requireProject, resolveWorkflowRef } from "../core/project/config.mts";
+import { resolveEpisodeContext } from "../core/story/paths.mts";
 import type { JsonValue } from "../core/project/types.mts";
 import { planSingleRun } from "../core/task/plans.mts";
 import { cancelTask, createAndStartTask, taskExitCode, taskRuns, waitForTask } from "../core/task/create.mts";
@@ -49,6 +50,10 @@ interface RunFlags {
      * --timeout（小时）。
      */
     timeoutHours?: number;
+    /**
+     * --episode：把 run 归属到某集（可选）。
+     */
+    episode?: string;
 }
 
 /**
@@ -107,6 +112,13 @@ function parseRunArgs(args: string[]): RunFlags {
             i += v.skip;
             continue;
         }
+        if (name === "--episode") {
+            // --episode 取值
+            const v = takeValue(args, i, inline, "--episode");
+            out.episode = v.value;
+            i += v.skip;
+            continue;
+        }
         if (name.startsWith("-")) usageError(`未知参数 ${name}`);
         pos.push(name);
     }
@@ -145,6 +157,10 @@ export async function runRun(ctx: CliContext, args: string[]): Promise<number> {
     // 项目与本机配置
     const { root, config: project } = requireProject(ctx);
     const machine = loadMachine(root);
+    // 可选剧集归属
+    const episodeContext = flags.episode !== undefined ? resolveEpisodeContext(root, flags.episode) : null;
+    // 记录用剧集 id
+    const episodeId = episodeContext?.episode_id ?? null;
 
     // dry-run：只解析计划，不占锁、不启动引擎
     if (flags.dryRun) {
@@ -159,6 +175,7 @@ export async function runRun(ctx: CliContext, args: string[]): Promise<number> {
         const ref = resolveWorkflowRef(root, flags.workflow);
         const data = {
             mode: flags.engineUrl !== undefined ? "remote" : machine.engine.mode,
+            episode_id: episodeId,
             workflow: ref.rel,
             graph_sha256: graphSha256(plan.graph),
             inputs: plan.inputs,
@@ -190,6 +207,7 @@ export async function runRun(ctx: CliContext, args: string[]): Promise<number> {
         machine,
         kind: "run",
         command: `run ${flags.workflow}`,
+        episodeId,
         ...(flags.requestId !== undefined ? { requestId: flags.requestId } : {}),
         options: {
             workflow: flags.workflow,
@@ -291,6 +309,7 @@ export async function enqueueRunTask(opts: {
     machine: import("../core/project/types.mts").MachineConfig;
     command: string;
     kind: import("../core/project/types.mts").TaskKind;
+    episodeId?: string | null;
     requestId?: string;
     options: import("../core/project/types.mts").TaskOptions;
     wait: boolean;
@@ -300,6 +319,7 @@ export async function enqueueRunTask(opts: {
         project: opts.project,
         machine: opts.machine,
         kind: opts.kind,
+        episodeId: opts.episodeId ?? null,
         command: opts.command,
         ...(opts.requestId !== undefined ? { requestId: opts.requestId } : {}),
         options: opts.options,

@@ -27,6 +27,32 @@ logs/                        # 本机
 relay_frames/                # 本机：接力尾帧缓存
 ```
 
+## 1.1 story 模式（多集）
+
+`daoyan story init` 启用后，项目增加：
+
+```text
+story/series.json                 系列标题 / 简介 / 类型
+story/characters.json             全局角色、形态、音色关联
+story/scenes.json                 全局场景
+story/voices.json                 全局音色
+story/assets/**                   参考图 / 音频（LFS）
+episodes/<id>/episode.json        剧集元数据（id / number / title）
+episodes/<id>/script.md|json      单集剧本与 revision / 审批
+episodes/<id>/breakdown.json      单集拆解（制作范围与允许清单）
+episodes/<id>/shots.json          单集分镜
+final/<episode-id>/cut-*          单集成片
+```
+
+- 角色 / 场景 / 音色 / 资产是系列级，跨集共享；新形态加 `form`，新地点加 `scene`；
+- `breakdown.json` 的 `characters[].forms` / `scenes[]` / `voices[]` 是本集允许清单；
+- 分镜引用拆解内的对象；`characters` 支持 `"id"`、`"id/form"`、`{id,form}`；
+- 每个被使用的形态 / 场景 / 音色必须有显式 `reference_asset`；不存在自动取第一张；
+- 每集 `script.json.revision` 独立；`breakdown.source_revision` / `shots.meta.script_revision` 用于 stale 检测；
+- task/run 增加 `episode_id`（legacy / 系列级为 null）；多集 label 为 `ep:<id>:shot:<shot-id>`；
+- `run` 可选 `--episode` 归属；`shot` / `batch` / `retake` / `wrap` 多集必须显式；
+- 完整需求和契约见 [REQUIREMENTS.md](REQUIREMENTS.md)。
+
 ## 2. project.json（共享）
 
 ```json
@@ -49,6 +75,7 @@ relay_frames/                # 本机：接力尾帧缓存
 | `name` | 是 | 项目名（init 用目录名） |
 | `version` | 是 | 固定 `2` |
 | `default_workflow` | 否 | shot recipe 的兜底 workflow |
+| `story.enforce` | 否 | story 门禁策略：`strict`（默认）/ `warn` / `off` |
 | `gpu.takeover` | 否 | 项目级 GPU 接管开关，默认 false |
 | `comfyui.version` | 否 | local 部署/切换的 ComfyUI pin |
 | `comfyui.custom_nodes` | 否 | 安装到 `engine/ComfyUI/custom_nodes/` |
@@ -193,7 +220,9 @@ shot/batch 必须有 bindings，至少映射 `prompt` 与 `seed`；`run` 不强�
 - 镜头用 `characters: ["lin"]` / `scene: "city"` 引用 id 或名称；也支持 `cast` / `roles` 与 `location` 别名；
 - `title` / `summary` 用于展示，缺省回退到 `slug` 与 `prompt`；
 - `meta.fps` + 镜头 `length` 可推导时长；镜头也可用 `duration`（秒）显式覆盖；
-- 以上字段都是向后兼容的可选项，旧 `shots.json` 不受影响；`daoyan web` 会读取并展示这些信息。
+- 以上字段都是向后兼容的可选项，旧 `shots.json` 不受影响；`daoyan web` 会读取并展示这些信息；
+- story 模式下分镜位于 `episodes/<id>/shots.json`，并增加 `meta.episode_id` / `meta.script_revision` / `meta.script_sha256`；
+- story 分镜的 `characters` 使用 `{id, form}`；`dialogue[]` 引用音色；`script_refs[]` 引用拆解 beats；`asset_slots` 可显式映射工作流资产槽位。
 
 ## 6. task
 
@@ -227,6 +256,8 @@ shot/batch 必须有 bindings，至少映射 `prompt` 与 `seed`；`run` 不强�
   }
 }
 ```
+
+story 模式额外字段：`episode_id`（legacy / 系列级为 `null`）。多集 label 为 `ep:<episode-id>:shot:<shot-id>`。
 
 `tasks/<task_id>/events.jsonl` 每行：
 
@@ -287,6 +318,8 @@ shot/batch 必须有 bindings，至少映射 `prompt` 与 `seed`；`run` 不强�
 
 约束：
 
+- story 模式额外字段 `episode_id`；label 使用 `ep:<episode-id>:shot:<shot-id>`；
+- `inputs.assets` 记录工作流资产槽位实际使用的资产（slot / owner / path / sha256 / bytes）；
 - 不含绝对路径；
 - `workflow.json` 是上传/覆盖后、实际提交的图；
 - `inputs.json` 记录逻辑输入与输入文件哈希；

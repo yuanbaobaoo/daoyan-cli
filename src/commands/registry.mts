@@ -17,6 +17,7 @@ import { runWorkflow } from "./workflow.mts";
 import { runRun, runCancel } from "./run.mts";
 import { runSkill } from "./skill.mts";
 import { runWeb } from "./web.mts";
+import { runStory } from "./story.mts";
 
 /**
  * 位置参数说明。
@@ -129,6 +130,7 @@ export interface CommandMeta {
  */
 const TASK_START_SHAPE = {
     task_id: "string",
+    episode_id: "string|null",
     state: "queued|running|succeeded|failed|cancelled|interrupted",
     runs: "string[]",
     events_path: "tasks/<task_id>/events.jsonl",
@@ -242,6 +244,114 @@ export const COMMANDS: CommandMeta[] = [
         implemented: true,
         jsonShape: { path: "string", files: "number", hash: "string" },
         run: (ctx, args) => runSkill(ctx, args),
+    },
+
+    // ---- 剧本与设定 ----
+    {
+        name: "story init",
+        group: "story",
+        summary: "启用多集短剧模式：创建 story/、episodes/ep01、资产目录与 LFS 规则",
+        usage: "daoyan story init [--json]",
+        implemented: true,
+        jsonShape: { created: "string[]", episodes: "string[]" },
+        run: (ctx, args) => runStory(ctx, ["init", ...args]),
+    },
+    {
+        name: "story series",
+        group: "story",
+        summary: "查看 / 修改系列标题、简介与类型",
+        usage: "daoyan story series show|set [--title <t>] [--synopsis <s>] [--genre <g>] [--json]",
+        implemented: true,
+        run: (ctx, args) => runStory(ctx, ["series", ...args]),
+    },
+    {
+        name: "story episode",
+        group: "story",
+        summary: "新增 / 列出 / 查看 / 修改剧集（id 不可变，number 全系列唯一）",
+        usage:
+            "daoyan story episode add --id <id> --number <n> --title <t> [--summary <s>] [--json]\n" +
+            "daoyan story episode list|show|set ...",
+        implemented: true,
+        run: (ctx, args) => runStory(ctx, ["episode", ...args]),
+    },
+    {
+        name: "story script",
+        group: "story",
+        summary: "同步 / 查看 / 确认某一集剧本（独立 revision）",
+        usage:
+            "daoyan story script sync --episode <id> --file <script.md|-> [--summary <s>] [--source ai|user|import] [--json]\n" +
+            "daoyan story script show --episode <id> [--raw] [--json]\n" +
+            "daoyan story script approve --episode <id> [--json]",
+        implemented: true,
+        run: (ctx, args) => runStory(ctx, ["script", ...args]),
+    },
+    {
+        name: "story breakdown",
+        group: "story",
+        summary: "写入 / 查看单集拆解（本集角色、形态、场景、音色允许清单）",
+        usage: "daoyan story breakdown set|show --episode <id> [--file <breakdown.json|->] [--json]",
+        implemented: true,
+        run: (ctx, args) => runStory(ctx, ["breakdown", ...args]),
+    },
+    {
+        name: "story characters",
+        group: "story",
+        summary: "写入 / 查看全局角色与形态",
+        usage: "daoyan story characters set|show [--file <characters.json|->] [--id <id>] [--json]",
+        implemented: true,
+        run: (ctx, args) => runStory(ctx, ["characters", ...args]),
+    },
+    {
+        name: "story scenes",
+        group: "story",
+        summary: "写入 / 查看全局场景",
+        usage: "daoyan story scenes set|show [--file <scenes.json|->] [--id <id>] [--json]",
+        implemented: true,
+        run: (ctx, args) => runStory(ctx, ["scenes", ...args]),
+    },
+    {
+        name: "story voices",
+        group: "story",
+        summary: "写入 / 查看全局音色",
+        usage: "daoyan story voices set|show [--file <voices.json|->] [--id <id>] [--json]",
+        implemented: true,
+        run: (ctx, args) => runStory(ctx, ["voices", ...args]),
+    },
+    {
+        name: "story asset",
+        group: "story",
+        summary: "参考图 / 参考音频入库、显式指定主参考、删除与列表",
+        usage:
+            "daoyan story asset add --owner <character:id|scene:id|voice:id> [--form <form>] --id <asset> (--from <file>|--from-run <run> --output <name>) [--set-reference] [--json]\n" +
+            "daoyan story asset set-reference|remove|list ...",
+        implemented: true,
+        run: (ctx, args) => runStory(ctx, ["asset", ...args]),
+    },
+    {
+        name: "story shots",
+        group: "story",
+        summary: "校验并写入某一集 shots.json（记录剧本 revision）",
+        usage: "daoyan story shots set --episode <id> --file <shots.json|-> [--json]",
+        implemented: true,
+        run: (ctx, args) => runStory(ctx, ["shots", ...args]),
+    },
+    {
+        name: "story status",
+        group: "story",
+        summary: "系列概览；--episode 查看单集阶段、stale、blockers 与 next_actions",
+        usage: "daoyan story status [--episode <id>] [--json]",
+        implemented: true,
+        jsonShape: { enabled: "boolean", stage: "string", blockers: "object[]", episodes: "object[]" },
+        run: (ctx, args) => runStory(ctx, ["status", ...args]),
+    },
+    {
+        name: "story validate",
+        group: "story",
+        summary: "完整校验剧本、设定集、拆解、分镜、资产与引用",
+        usage: "daoyan story validate [--episode <id>] [--verify-hashes] [--json]",
+        implemented: true,
+        jsonShape: { ok: "boolean", issues: "object[]" },
+        run: (ctx, args) => runStory(ctx, ["validate", ...args]),
     },
 
     // ---- 工作流 ----
@@ -365,13 +475,14 @@ export const COMMANDS: CommandMeta[] = [
         group: "production",
         summary: "执行一个 workflow（默认异步 task；--wait 才阻塞）",
         usage:
-            "daoyan run <workflow.json|name> [--set nodeId.input=value ...] [--label <label>]\n" +
+            "daoyan run <workflow.json|name> [--set nodeId.input=value ...] [--label <label>] [--episode <id>]\n" +
             "                  [--engine <url>] [--request-id <id>] [--wait] [--dry-run]\n" +
             "                  [--timeout <小时>] [--json]",
         args: [{ name: "workflow", type: "string", required: true, description: "工作流短名或项目内相对路径" }],
         flags: [
             { name: "--set", type: "key=value", description: "覆盖节点输入或 bindings 逻辑名（可重复）" },
             { name: "--label", type: "string", description: "run label（如 shot:01）" },
+            { name: "--episode", type: "string", description: "可选：把 run 归属到某集（不参与剧情门禁）" },
             { name: "--engine", type: "url", description: "单次 remote 覆盖 URL" },
             { name: "--request-id", type: "string", description: "幂等键；重复调用返回同一 task" },
             { name: "--wait", type: "boolean", description: "前台等待到终态（SIGINT 只停止等待）" },
@@ -399,9 +510,21 @@ export const COMMANDS: CommandMeta[] = [
         name: "shot",
         group: "production",
         summary: "拍摄指定镜头（一个 task 多个 run；默认异步）",
-        usage: "daoyan shot <镜号...> [--steps N] [--request-id <id>] [--wait] [--timeout <小时>] [--json]",
-        args: [{ name: "镜号", type: "string", required: true, variadic: true, description: "shots.json 中的镜头 id" }],
+        usage:
+            "daoyan shot <镜号...> [--episode <id>] [--steps N] [--request-id <id>] [--allow-incomplete]\n" +
+            "                  [--wait] [--timeout <小时>] [--json]",
+        args: [
+            {
+                name: "镜号",
+                type: "string",
+                required: true,
+                variadic: true,
+                description: "剧集 shots.json 中的镜头 id",
+            },
+        ],
         flags: [
+            { name: "--episode", type: "string", description: "多集项目必填；单集可省略" },
+            { name: "--allow-incomplete", type: "boolean", description: "显式绕过剧情门禁（写入 task 记录）" },
             { name: "--steps", type: "integer", description: "覆盖采样步数" },
             { name: "--request-id", type: "string", description: "幂等键" },
             { name: "--wait", type: "boolean", description: "前台等待到终态" },
@@ -415,8 +538,25 @@ export const COMMANDS: CommandMeta[] = [
         name: "retake",
         group: "production",
         summary: "强制重拍指定镜头（忽略已有成功 run）",
-        usage: "daoyan retake <镜号...> [--steps N] [--request-id <id>] [--wait] [--json]",
-        args: [{ name: "镜号", type: "string", required: true, variadic: true, description: "shots.json 中的镜头 id" }],
+        usage:
+            "daoyan retake <镜号...> [--episode <id>] [--steps N] [--request-id <id>] [--allow-incomplete]\n" +
+            "                   [--wait] [--timeout <小时>] [--json]",
+        args: [
+            {
+                name: "镜号",
+                type: "string",
+                required: true,
+                variadic: true,
+                description: "剧集 shots.json 中的镜头 id",
+            },
+        ],
+        flags: [
+            { name: "--episode", type: "string", description: "多集项目必填；单集可省略" },
+            { name: "--allow-incomplete", type: "boolean", description: "显式绕过剧情门禁" },
+            { name: "--steps", type: "integer", description: "覆盖采样步数" },
+            { name: "--request-id", type: "string", description: "幂等键" },
+            { name: "--wait", type: "boolean", description: "前台等待到终态" },
+        ],
         implemented: true,
         jsonShape: TASK_START_SHAPE,
         run: (ctx, args) => runShot(ctx, args, true),
@@ -425,8 +565,12 @@ export const COMMANDS: CommandMeta[] = [
         name: "batch",
         group: "production",
         summary: "连拍全部未完成镜头（已有成功 run 跳过；默认异步）",
-        usage: "daoyan batch [--request-id <id>] [--wait] [--timeout <小时>] [--json]",
+        usage:
+            "daoyan batch [--episode <id>] [--request-id <id>] [--allow-incomplete] [--wait]\n" +
+            "             [--timeout <小时>] [--json]",
         flags: [
+            { name: "--episode", type: "string", description: "多集项目必填；单集可省略" },
+            { name: "--allow-incomplete", type: "boolean", description: "显式绕过剧情门禁" },
             { name: "--request-id", type: "string", description: "幂等键" },
             { name: "--wait", type: "boolean", description: "前台等待到终态" },
             { name: "--timeout", type: "number", description: "任务等待上限（小时）" },
@@ -438,11 +582,20 @@ export const COMMANDS: CommandMeta[] = [
     {
         name: "wrap",
         group: "production",
-        summary: "从 runs 选段合片，写 final/cut-*.mp4 与清单（不占机器锁）",
-        usage: "daoyan wrap [--select <镜号>=<run_id> ...] [--json]",
-        flags: [{ name: "--select", type: "镜号=run_id", description: "显式指定某镜使用的 run（可重复）" }],
+        summary: "按集从 runs 选段合片，写 final/<episode>/cut-*.mp4 与清单（不占机器锁）",
+        usage: "daoyan wrap [--episode <id>] [--select <镜号>=<run_id> ...] [--json]",
+        flags: [
+            { name: "--episode", type: "string", description: "多集项目必填；单集可省略" },
+            { name: "--select", type: "镜号=run_id", description: "显式指定某镜使用的 run（可重复）" },
+        ],
         implemented: true,
-        jsonShape: { output: "string", manifest: "string", clips: "object[]", missing: "string[]" },
+        jsonShape: {
+            episode_id: "string|null",
+            output: "string",
+            manifest: "string",
+            clips: "object[]",
+            missing: "string[]",
+        },
         run: (ctx, args) => runWrap(ctx, args),
     },
 
@@ -452,10 +605,11 @@ export const COMMANDS: CommandMeta[] = [
         group: "ops",
         summary: "被动状态快照；--task/--run 查看任务与运行详情",
         usage:
-            "daoyan status [--json]\n" +
+            "daoyan status [--episode <id>] [--json]\n" +
             "daoyan status --task <task_id> [--wait] [--timeout <秒>] [--json]\n" +
             "daoyan status --run <run_id> [--wait] [--timeout <秒>] [--json]",
         flags: [
+            { name: "--episode", type: "string", description: "story 模式：查看单集；省略 = 系列概览" },
             { name: "--task", type: "string", description: "查看任务" },
             { name: "--run", type: "string", description: "查看单 run" },
             { name: "--wait", type: "boolean", description: "等待到终态（SIGINT 只停止等待）" },

@@ -79,6 +79,49 @@ daoyan skill update --json
 
 按当前 registry 重新生成项目内 Skill 与 `AGENTS.md` 管理块；幂等，不覆盖用户内容。
 
+## 剧本与设定（story）
+
+多集短剧模式。一个项目 = 一部多集短剧；`story/` 是系列级全局设定集，`episodes/<id>/` 是单集剧本 / 拆解 / 分镜。
+
+```bash
+daoyan story init
+daoyan story series show|set [--title <t>] [--synopsis <s>] [--genre <g>]
+
+daoyan story episode add --id ep02 --number 2 --title "第二集" [--summary <s>]
+daoyan story episode list|show|set ...
+
+daoyan story script sync --episode <id> --file <script.md|-> [--summary <s>] [--source ai|user|import]
+daoyan story script show --episode <id> [--raw]
+daoyan story script approve --episode <id>
+
+daoyan story breakdown set --episode <id> --file <breakdown.json|->
+daoyan story breakdown show --episode <id>
+
+daoyan story characters set --file <characters.json|->
+daoyan story scenes set --file <scenes.json|->
+daoyan story voices set --file <voices.json|->
+
+daoyan story asset add --owner <character:id|scene:id|voice:id> [--form <form>] --id <asset> \
+    (--from <file>|--from-run <run> --output <name>) [--set-reference] [--replace]
+daoyan story asset set-reference --owner <owner> [--form <form>] --id <asset>
+daoyan story asset remove --owner <owner> [--form <form>] --id <asset> [--force]
+daoyan story asset list
+
+daoyan story shots set --episode <id> --file <shots.json|->
+daoyan story status [--episode <id>]
+daoyan story validate [--episode <id>] [--verify-hashes]
+```
+
+规则：
+
+- 每集剧本独立 `revision` / 审批；剧本变化只让该集 `breakdown` / `shots` stale；
+- 拆解是单集制作范围与允许清单；分镜只能使用拆解声明的角色 / 形态 / 场景 / 音色；
+- 参考图 / 音频必须显式指定主参考（`--set-reference` 或 `asset set-reference`），不会自动取第一张；
+- 多集项目 `script sync` / `breakdown set` / `shots set` / `script show` / `breakdown show` / `shot` / `retake` / `batch` / `wrap` 必须带 `--episode`；单集可省略；legacy 不接受；
+- `story status` 输出 stage / blockers / next_actions；`shot` / `batch` / `retake` 在 strict 模式按 blockers 阻断；
+- `run` 不受剧情门禁限制，可用 `--episode` 只做归属标记；
+- 工作流资产槽位见 `workflows/<name>.assets.json`，slot 的 `asset` 取 `reference` 或具体 asset id。
+
 ## 工作流
 
 ```bash
@@ -107,7 +150,7 @@ daoyan workflow validate <name>
 ```bash
 daoyan run <workflow.json|name>
   [--set nodeId.input=value | --set logical=value ...]
-  [--label <label>] [--engine <url>] [--request-id <id>]
+  [--label <label>] [--episode <id>] [--engine <url>] [--request-id <id>]
   [--wait] [--dry-run] [--timeout <小时>]
 ```
 
@@ -128,11 +171,12 @@ worker 执行 `/interrupt` → `/free` → local 停止 → GPU 恢复，写 `ca
 ### shot / retake / batch
 
 ```bash
-daoyan shot <镜号...> [--steps N] [--request-id <id>] [--wait] [--timeout <小时>]
-daoyan retake <镜号...> [--steps N] [--request-id <id>] [--wait]
-daoyan batch [--request-id <id>] [--wait] [--timeout <小时>]
+daoyan shot <镜号...> [--episode <id>] [--steps N] [--request-id <id>] [--allow-incomplete] [--wait] [--timeout <小时>]
+daoyan retake <镜号...> [--episode <id>] [--steps N] [--request-id <id>] [--allow-incomplete] [--wait]
+daoyan batch [--episode <id>] [--request-id <id>] [--allow-incomplete] [--wait] [--timeout <小时>]
 ```
 
+- story 模式：多集必须显式 `--episode`；单集可省略；`shot/batch/retake` 先过剧情门禁；
 - 一个 task 多个 run，共享一次引擎会话与一把机器锁；
 - 已有成功 run 的镜头跳过；`retake` 强制；
 - 需要 `workflows/<name>.bindings.json`（至少映射 `prompt`、`seed`）；
@@ -142,22 +186,22 @@ daoyan batch [--request-id <id>] [--wait] [--timeout <小时>]
 ### wrap
 
 ```bash
-daoyan wrap [--select <镜号>=<run_id> ...]
+daoyan wrap [--episode <id>] [--select <镜号>=<run_id> ...]
 ```
 
-按镜头顺序选最新成功 run（或显式 `--select`），ffmpeg concat 到 `final/cut-<timestamp>.mp4`，并写 `cut-<timestamp>.json` 清单。不占 machine lock。
+按镜头顺序选最新成功 run（或显式 `--select`），ffmpeg concat 到 `final/<episode>/cut-<timestamp>.mp4`（legacy 为 `final/cut-*`），并写 manifest。不占 machine lock。
 
 ## 运维
 
 ### status
 
 ```bash
-daoyan status [--json]
+daoyan status [--episode <id>] [--json]
 daoyan status --task <id> [--wait] [--timeout <秒>] [--json]
 daoyan status --run <id> [--wait] [--timeout <秒>] [--json]
 ```
 
-默认快照（不启动引擎）：mode、引擎探测、queue、machine lock owner、active task（本机）、`synced_running_tasks`（其他机器）、最近任务、GPU/租约、Skill stale、镜头进度。
+默认快照（不启动引擎）：mode、引擎探测、queue、machine lock owner、active task（本机）、`synced_running_tasks`（其他机器）、最近任务、GPU/租约、Skill stale、镜头进度。story 模式额外返回 `series` / `episodes`；`--episode` 返回单集 status / blockers / shots。
 
 ### logs
 
@@ -176,12 +220,13 @@ daoyan web [--port <n>] [--host <addr>] [--open] [--json]
 
 启动临时只读 Web UI（默认 `127.0.0.1` + 系统随机端口），查看项目档案、分镜、人物/场景、任务、工作流、run 产出物与 final 成片；视频支持拖动进度。
 
-- 概览展示镜头/人物/场景/产出统计、剧情简介与分镜一览；
+- story 模式：系列概览、剧集切换、单集剧本/拆解/分镜/成片、全局角色/场景/音色/资产；
+- legacy 模式：镜头/人物/场景/产出统计、剧情简介与分镜一览；
 - 分镜页展示每镜内容、人物、场景、生成参数、全部历史产物与 run 历史，并支持筛选；
 - 不启动引擎、不占 machine lock、不写项目文件；
 - `Ctrl+C` / `SIGTERM` 优雅关闭；`--json` 输出一次启动信封后继续驻留；
 - `.dycli/machine.json` 缺失时仍可查看共享数据；
-- 媒体仅从 `run.outputs` 与 `final/` 白名单读取，支持 HTTP Range；
+- 媒体仅从 `run.outputs`、`final/` 与 `story/assets/` 白名单读取，支持 HTTP Range；
 - 详细 API/安全说明见 [WEB.md](WEB.md)。
 
 ## 引擎

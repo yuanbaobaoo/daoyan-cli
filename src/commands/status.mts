@@ -16,6 +16,10 @@ import { readEvents } from "../core/task/events.mts";
 import { taskDir } from "../core/task/store.mts";
 import { taskExitCode, taskRuns, waitForTask } from "../core/task/create.mts";
 import { buildStatusSnapshot } from "../core/status/snapshot.mts";
+import { resolveEpisodeContext, storyEnabled } from "../core/story/paths.mts";
+import { loadContextShots } from "../core/story/production.mts";
+import { computeEpisodeStoryStatus, computeSeriesStoryStatus } from "../core/story/validate.mts";
+import type { EpisodeContext, EpisodeStoryStatus, SeriesStoryStatus } from "../core/story/types.mts";
 
 /**
  * status 解析结果。
@@ -37,6 +41,10 @@ interface StatusFlags {
      * --timeout（秒）。
      */
     timeoutSec?: number;
+    /**
+     * --episode。
+     */
+    episode?: string;
 }
 
 /**
@@ -70,6 +78,13 @@ function parseArgs(args: string[]): StatusFlags {
             i += v.skip;
             continue;
         }
+        if (name === "--episode") {
+            // --episode 取值
+            const v = takeValue(args, i, inline, "--episode");
+            out.episode = v.value;
+            i += v.skip;
+            continue;
+        }
         usageError(`未知参数 ${name}`);
     }
     if (out.taskId !== undefined && out.runId !== undefined) usageError("--task 与 --run 只能二选一");
@@ -83,7 +98,8 @@ export async function runStatus(ctx: CliContext, args: string[]): Promise<number
     const flags = parseArgs(args);
     const { root, config: project } = requireProject(ctx);
     const machine = loadMachine(root);
-    const shots = loadShotsIfExists(root);
+    // 分镜（story 模式在 --task/--run 分支之后再解析）
+    let shots = loadShotsIfExists(root);
 
     // --task
     if (flags.taskId !== undefined) {
@@ -175,10 +191,48 @@ export async function runStatus(ctx: CliContext, args: string[]): Promise<number
         return flags.wait ? (run.status === "succeeded" ? 0 : 1) : 0;
     }
 
+    // story 模式：系列概览或单集视图
+    const storyOn = storyEnabled(root);
+    // 单集上下文
+    let episodeContext: EpisodeContext | null = null;
+    // 单集剧情状态
+    let episodeStatus: EpisodeStoryStatus | null = null;
+    // 系列剧情概览
+    let seriesStatus: SeriesStoryStatus | null = null;
+    if (storyOn) {
+        if (flags.episode !== undefined) {
+            episodeContext = resolveEpisodeContext(root, flags.episode);
+            shots = loadContextShots(root, episodeContext);
+            episodeStatus = computeEpisodeStoryStatus(root, flags.episode, project);
+        } else {
+            shots = null;
+            seriesStatus = computeSeriesStoryStatus(root, project);
+        }
+    } else if (flags.episode !== undefined) {
+        // legacy 不接受 --episode
+        resolveEpisodeContext(root, flags.episode);
+    }
+
     // 当前命令注册表（Skill stale 判定）
     const { COMMANDS } = await import("./registry.mts");
     // 默认快照
-    const data = await buildStatusSnapshot(root, project, machine, shots, { commands: COMMANDS });
+    const data = await buildStatusSnapshot(root, project, machine, shots, {
+        commands: COMMANDS,
+        ...(episodeContext !== null
+            ? { labelPrefix: episodeContext.label_prefix, episodeId: episodeContext.episode_id }
+            : {}),
+    });
+    if (seriesStatus !== null) {
+        data.story = seriesStatus;
+        data.series = seriesStatus.series;
+        data.episodes = seriesStatus.episodes;
+        data.next_actions = seriesStatus.next_actions;
+    }
+    if (episodeStatus !== null) {
+        data.story = episodeStatus;
+        data.episode = episodeStatus.episode;
+        data.next_actions = episodeStatus.next_actions;
+    }
     if (ctx.json) {
         emitData(data);
         return 0;
@@ -223,12 +277,27 @@ export async function runStatus(ctx: CliContext, args: string[]): Promise<number
     if (skill.present !== true) say("Skill：缺失（daoyan skill update）");
     else if (skill.stale === true) say("Skill：需要更新（daoyan skill update）");
     else say("Skill：已就绪");
-    // 镜头
-    const shotsData = data.shots as Array<Record<string, unknown>>;
-    if (shotsData.length > 0) {
-        const done = shotsData.filter((s) => s.done === true).length;
-        say(`镜头进度：${done}/${shotsData.length}`);
-        for (const s of shotsData) say(`  ${s.done === true ? "✅" : "⬜"} ${String(s.id)} ${String(s.slug ?? "")}`);
+    // 剧情 / 镜头
+    if (episodeStatus !== null) {
+        say(
+            `剧集 ${episodeStatus.episode.id} 第 ${episodeStatus.episode.number} 集：${episodeStatus.episode.title}（${episodeStatus.stage}）`,
+        );
+        for (const b of episodeStatus.blockers) say(`  ! [${b.code}] ${b.message}`);
+        for (const a of episodeStatus.next_actions) say(`  next: ${a}`);
+    } else if (seriesStatus !== null) {
+        say(
+            `系列 ${seriesStatus.series.title}：${seriesStatus.series.episodes_total} 集，可拍 ${seriesStatus.series.episodes_ready}，阻断 ${seriesStatus.series.episodes_blocked}`,
+        );
+        for (const e of seriesStatus.episodes) say(`  ${e.id} 第 ${e.number} 集 ${e.title}：${e.stage}`);
+    } else {
+        // 镜头
+        const shotsData = data.shots as Array<Record<string, unknown>>;
+        if (shotsData.length > 0) {
+            const done = shotsData.filter((s) => s.done === true).length;
+            say(`镜头进度：${done}/${shotsData.length}`);
+            for (const s of shotsData)
+                say(`  ${s.done === true ? "✅" : "⬜"} ${String(s.id)} ${String(s.slug ?? "")}`);
+        }
     }
     return 0;
 }

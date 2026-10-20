@@ -49,13 +49,17 @@ task（可调度执行单元，异步）
 ## 5. 数据与目录
 
 ```text
-project.json                 共享（name/version/default_workflow/gpu.takeover/comfyui pin）
+project.json                 共享（name/version/default_workflow/story/gpu.takeover/comfyui pin）
 workflows/*.json             共享（ComfyUI API JSON）
 workflows/*.bindings.json    共享（逻辑输入 -> nodeId.input，shot recipe 用）
-shots.json                   共享（recipe）
+workflows/*.assets.json      共享（剧情资产槽位，可选）
+shots.json                   共享（legacy recipe）
+story/                       共享（多集：系列设定集 / 角色 / 场景 / 音色 / 资产）
+episodes/<id>/               共享（单集剧本 / 拆解 / 分镜）
 tasks/<task_id>/             共享（task.json + events.jsonl）
 runs/<run_id>/               共享（run.json/workflow.json/inputs.json/inputs/outputs）
-final/                       共享（cut-*.mp4 + manifest）
+final/                       共享（legacy cut-*.mp4 + manifest）
+final/<episode-id>/          共享（单集成片）
 .agents/skills/daoyan/       共享（Agent Skill）
 AGENTS.md                    共享（管理块）
 .dycli/machine.json          本机（模式/模型路径/端口/覆盖）
@@ -66,8 +70,9 @@ engine/ logs/                本机
 
 ```text
 init / validate / skill update
+story init|series|episode|script|breakdown|characters|scenes|voices|asset|shots|status|validate
 workflow new|import|list|show|nodes|node|apply|set|validate
-run / run cancel / shot / retake / batch / wrap
+run / run cancel / shot / retake / batch / wrap（story 模式支持 --episode）
 status / logs
 web
 engine ls|install|use

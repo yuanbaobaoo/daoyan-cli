@@ -56,6 +56,35 @@ daoyan web · demo · local
 
 ## 2. 页面
 
+### story 模式（多集）
+
+`story/series.json` 存在时，Web 切换为系列 / 剧集视图：
+
+| 页面 | 内容 |
+|---|---|
+| 概览 | 系列标题、剧集卡片（stage / 剧本 revision / blockers / 下一步） |
+| 剧集详情 | 单集剧本、拆解、分镜、本集任务与成片；hash 路由 `#/episode/<id>` |
+| 角色 | 全局角色、形态、主参考图与其它资产 |
+| 场景 | 全局场景与参考图 |
+| 音色 | 音色档案、参考音频与试听 |
+| 设定资产 | 全部参考图 / 音频，`*` 标记当前主参考 |
+| 分镜 / 产出物 / 任务 / 成片 / 工作流 | 继续提供跨集或全局视图 |
+
+story API：
+
+```text
+GET /api/episodes                     剧集列表
+GET /api/episodes/:id                 单集完整视图
+GET /api/episodes/:id/{script,breakdown,shots,tasks,runs,artifacts,finals}
+GET /api/story/{characters,scenes,voices,assets}
+GET /media/story/<owner-relative-path>   参考图 / 音频
+GET /media/final/<episode>/<name>        单集成片
+```
+
+legacy 项目继续使用原有 `/api/shots`、`/api/finals`、`/media/final/<name>`。
+
+### legacy
+
 | 页面 | 内容 |
 |---|---|
 | 概览 | 镜头/人物/场景/产出统计、剧情简介、项目档案、人物设定、场景设定、分镜一览、引擎/机器状态、最近产出与任务 |

@@ -39,6 +39,7 @@ import {
     validateGraphWithCatalog,
 } from "../core/workflow/load.mts";
 import { applyOps, parseOpsPayload, type GraphOp } from "../core/workflow/ops.mts";
+import { loadWorkflowAssets, validateWorkflowAssetsGraph } from "../core/story/workflow-assets.mts";
 import { ComfyClient } from "../core/comfy/client.mts";
 import { createEngineSession } from "../core/engine/session.mts";
 import { acquireMachineLock, type AcquiredLock } from "../core/machine/lock.mts";
@@ -508,6 +509,20 @@ export async function runWorkflow(ctx: CliContext, args: string[]): Promise<void
         // bindings
         const bindings = loadBindings(ref.abs);
         const issues = [...parsed.issues, ...validateBindings(parsed.graph, bindings, `${ref.rel}.bindings`)];
+        // 剧情资产槽位
+        try {
+            // 工作流资产槽位
+            const assets = loadWorkflowAssets(ref.abs);
+            if (assets !== null) issues.push(...validateWorkflowAssetsGraph(assets, parsed.graph, `${ref.rel}.assets`));
+        } catch (e) {
+            issues.push({
+                path: `${ref.rel}.assets`,
+                code: e instanceof DaoyanCliError ? e.code : "asset_slot_invalid",
+                severity: "error",
+                message: e instanceof Error ? e.message : String(e),
+                hint: "修正 workflows/<name>.assets.json。",
+            });
+        }
         // machine overrides（未绑定本机时跳过）
         const machine = loadMachineIfExists(root);
         if (machine !== null) {

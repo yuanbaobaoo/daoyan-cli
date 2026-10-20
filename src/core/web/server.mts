@@ -18,7 +18,22 @@ import {
     listTasksView,
     listWorkflows,
 } from "./data.mts";
-import { resolveFinalMedia, resolveRunMedia, serveMedia } from "./media.mts";
+import {
+    resolveEpisodeFinalMedia,
+    resolveFinalMedia,
+    resolveRunMedia,
+    resolveStoryMedia,
+    serveMedia,
+} from "./media.mts";
+import {
+    buildStoryEpisodeView,
+    buildStorySeriesView,
+    listStoryAssetsView,
+    listStoryCharactersView,
+    listStoryScenesView,
+    listStoryVoicesView,
+} from "./story-data.mts";
+import { listEpisodeMetas, storyEnabled } from "../story/paths.mts";
 
 /**
  * 内嵌前端资源。
@@ -410,8 +425,85 @@ async function handleRequest(
             return;
         }
 
+        // 系列 / 剧集（story 模式）
+        if (pathname === "/api/episodes") {
+            if (!storyEnabled(ctx.root)) {
+                sendJson(res, 200, { episodes: [] }, headOnly);
+                return;
+            }
+            // 系列视图
+            const view = buildStorySeriesView(ctx.root, ctx.project);
+            sendJson(res, 200, { episodes: view.episodes, series: view.series, status: view.status }, headOnly);
+            return;
+        }
+        if (pathname.startsWith("/api/episodes/")) {
+            if (!storyEnabled(ctx.root)) {
+                sendJsonError(res, 404, "not_found", "story 模式未启用", headOnly);
+                return;
+            }
+            // 路径段
+            const segments = pathname.split("/");
+            // 剧集 id
+            const episodeId = decodeSegment(segments[3] ?? "");
+            if (episodeId === null) {
+                sendJsonError(res, 400, "bad_request", "剧集 id 非法", headOnly);
+                return;
+            }
+            // 剧集视图
+            const view = buildStoryEpisodeView(ctx.root, episodeId, ctx.project);
+            if (view === null) {
+                sendJsonError(res, 404, "not_found", `未找到剧集 ${episodeId}`, headOnly);
+                return;
+            }
+            // 子资源
+            const action = segments[4];
+            if (action === undefined) {
+                sendJson(res, 200, view, headOnly);
+                return;
+            }
+            // 子资源字段
+            const fields: Record<string, unknown> = {
+                script: view.script,
+                breakdown: view.breakdown,
+                shots: view.shots,
+                tasks: view.tasks,
+                runs: view.runs,
+                artifacts: view.artifacts,
+                finals: view.finals,
+                status: view.status,
+            };
+            if (!(action in fields)) {
+                sendJsonError(res, 404, "not_found", "接口不存在", headOnly);
+                return;
+            }
+            sendJson(res, 200, fields[action], headOnly);
+            return;
+        }
+
+        // 全局设定 / 资产（story 模式）
+        if (pathname === "/api/story/characters") {
+            sendJson(res, 200, { items: listStoryCharactersView(ctx.root) }, headOnly);
+            return;
+        }
+        if (pathname === "/api/story/scenes") {
+            sendJson(res, 200, { items: listStoryScenesView(ctx.root) }, headOnly);
+            return;
+        }
+        if (pathname === "/api/story/voices") {
+            sendJson(res, 200, { items: listStoryVoicesView(ctx.root) }, headOnly);
+            return;
+        }
+        if (pathname === "/api/story/assets") {
+            sendJson(res, 200, { items: listStoryAssetsView(ctx.root) }, headOnly);
+            return;
+        }
+
         // 分镜
         if (pathname === "/api/shots") {
+            if (storyEnabled(ctx.root)) {
+                sendJsonError(res, 410, "use_episode_api", "story 模式请使用 /api/episodes/<id>/shots", headOnly);
+                return;
+            }
             sendJson(res, 200, buildShotsView(ctx.root, ctx.shots), headOnly);
             return;
         }
@@ -426,6 +518,7 @@ async function handleRequest(
                     status: url.searchParams.get("status") ?? undefined,
                     kind: url.searchParams.get("kind") ?? undefined,
                     search: url.searchParams.get("search") ?? undefined,
+                    episode: url.searchParams.get("episode") ?? undefined,
                     limit: intQuery(url.searchParams.get("limit"), 200),
                 }),
                 headOnly,
@@ -459,7 +552,7 @@ async function handleRequest(
 
         // 任务列表
         if (pathname === "/api/tasks") {
-            sendJson(res, 200, listTasksView(ctx.root), headOnly);
+            sendJson(res, 200, listTasksView(ctx.root, url.searchParams.get("episode") ?? undefined), headOnly);
             return;
         }
 
@@ -489,7 +582,15 @@ async function handleRequest(
 
         // 成片
         if (pathname === "/api/finals") {
-            sendJson(res, 200, listFinals(ctx.root), headOnly);
+            // 指定剧集
+            const episode = url.searchParams.get("episode") ?? undefined;
+            if (episode === undefined && storyEnabled(ctx.root)) {
+                // story 模式聚合每集成片
+                const items = listEpisodeMetas(ctx.root).flatMap((meta) => listFinals(ctx.root, meta.id));
+                sendJson(res, 200, items, headOnly);
+                return;
+            }
+            sendJson(res, 200, listFinals(ctx.root, episode), headOnly);
             return;
         }
 
@@ -525,10 +626,53 @@ async function handleRequest(
             return;
         }
 
-        // 成片媒体
+        // story 资产媒体
+        if (pathname.startsWith(`${MEDIA_PREFIX}/story/`)) {
+            // 路径段
+            const segments = pathname.split("/").slice(3);
+            // 相对路径
+            const decoded: string[] = [];
+            for (const segment of segments) {
+                // 解码后的路径段
+                const value = decodeSegment(segment);
+                if (value === null) {
+                    sendJsonError(res, 400, "bad_request", "媒体路径非法", headOnly);
+                    return;
+                }
+                decoded.push(value);
+            }
+            // 媒体目标
+            const target = resolveStoryMedia(ctx.root, decoded.join("/"));
+            if (target === null) {
+                sendJsonError(res, 404, "not_found", "媒体不存在", headOnly);
+                return;
+            }
+            await serveMedia(req, res, target, url.searchParams.get("download") === "1");
+            return;
+        }
+
+        // 成片媒体（按集 / legacy）
         if (pathname.startsWith(`${MEDIA_PREFIX}/final/`)) {
             // 路径段
             const segments = pathname.split("/");
+            if (segments.length === 5) {
+                // 剧集 id / 文件名
+                const episodeId = decodeSegment(segments[3] ?? "");
+                // 文件名
+                const name = decodeSegment(segments[4] ?? "");
+                if (episodeId === null || name === null) {
+                    sendJsonError(res, 400, "bad_request", "媒体路径非法", headOnly);
+                    return;
+                }
+                // 媒体目标
+                const target = resolveEpisodeFinalMedia(ctx.root, episodeId, name);
+                if (target === null) {
+                    sendJsonError(res, 404, "not_found", "媒体不存在", headOnly);
+                    return;
+                }
+                await serveMedia(req, res, target, url.searchParams.get("download") === "1");
+                return;
+            }
             if (segments.length !== 4) {
                 sendJsonError(res, 404, "not_found", "媒体不存在", headOnly);
                 return;

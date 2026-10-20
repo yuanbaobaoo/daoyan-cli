@@ -46,6 +46,15 @@
 | `provision_failed` | 是 | — | 引擎部署失败；看 `details.stage`（ensurepip/venv/torch/requirements/pip_check/smoke），不要手工猜 torch |
 | `artifact_download_failed` | 是 | — | `/view` 下载失败；引擎 scratch 保留 |
 | `web_start_failed` | 否 | — | Web 服务监听失败；检查端口占用与 `--host`，省略 `--port` 让系统分配 |
+| `story_not_found` | 否 | — | 未启用 story 模式；`daoyan story init` |
+| `episode_not_found` | 否 | — | 剧集不存在；`story episode list` |
+| `episode_required` | 否 | — | 多集项目缺少 `--episode`；`details.episodes` 列出可用集 |
+| `story_conflict` | 是 | 0 | `--base-revision` / `--base-sha256` 不匹配；重新读取后重试 |
+| `story_invalid` | 否 | — | 剧本/设定集/拆解/分镜结构或引用错误；看 `details.issues` / `details.references` |
+| `story_stale` | 否 | — | 单集拆解/分镜基于旧剧本；重新拆解或更新分镜 |
+| `story_gate_failed` | 否 | — | 拍摄门禁未通过；看 `details.blockers` / `details.stage` |
+| `asset_not_found` | 否 | — | owner / 资产 / run 产物不存在 |
+| `asset_invalid` | 否 | — | 资产类型、大小、路径、哈希或 LFS 状态不合法 |
 | `engine_not_ready` | 是 | 5000 | 引擎未就绪 |
 | `engine_start_failed` | 否 | — | local 启动失败/就绪超时；看 `logs/engine-*.log` |
 | `engine_stop_failed` | 是 | 10000 | local 停止失败；下次任务回收 |

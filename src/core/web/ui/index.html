@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="color-scheme" content="light dark" />
+        <title>daoyan web</title>
+        <link rel="stylesheet" href="/assets/style.css" />
+    </head>
+    <body>
+        <div id="app"></div>
+        <div id="modal" class="modal" hidden>
+            <div class="modal-backdrop" data-modal-close="1"></div>
+            <section class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+                <header class="modal-head">
+                    <div class="modal-heading">
+                        <p class="eyebrow">产出物预览</p>
+                        <h2 id="modal-title">预览</h2>
+                    </div>
+                    <button id="modal-close" class="icon-button" type="button" aria-label="关闭">×</button>
+                </header>
+                <div id="modal-content" class="modal-content"></div>
+                <footer class="modal-foot">
+                    <button id="modal-prev" class="button ghost" type="button">上一个</button>
+                    <span id="modal-counter" class="muted"></span>
+                    <button id="modal-next" class="button ghost" type="button">下一个</button>
+                </footer>
+            </section>
+        </div>
+        <div id="toast" class="toast" role="status" hidden></div>
+        <script src="/assets/app.js" defer></script>
+    </body>
+</html>

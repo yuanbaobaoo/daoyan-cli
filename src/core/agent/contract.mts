@@ -39,6 +39,7 @@ export function capabilities(): Record<string, unknown> {
         bindings: true,
         git_friendly_records: true,
         project_skill: true,
+        web_ui: "read-only",
         user_level_skill: false,
         http_api: [
             "/system_stats",

@@ -14,5 +14,5 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["src/**/*.mts"]
+  "include": ["src/**/*.mts", "src/**/*.d.ts"]
 }

@@ -2,36 +2,20 @@
  *  - 默认：项目/模式/引擎探测/机器锁/active task/同步来的其他机器任务/队列/GPU/租约/Skill/镜头进度；
  *  - --task <id> [--wait]：任务详情、run 列表、最近事件；
  *  - --run <id> [--wait]：单个 run 详情。 */
-import { existsSync } from "node:fs";
-import { join } from "node:path";
 import { DaoyanCliError } from "../shared/errors.mts";
 import { emitData } from "../shared/json.mts";
 import { say } from "../shared/log.mts";
 import type { CliContext } from "../shared/context.mts";
 import { splitInlineFlag, takeValue, usageError } from "../shared/args.mts";
 import { loadMachine, loadShotsIfExists, requireProject } from "../core/project/config.mts";
-import {
-    RUNS_DIR,
-    isTerminalStatus,
-    type MachineConfig,
-    type ProjectConfig,
-    type RunRecord,
-    type ShotsFile,
-    type TaskRecord,
-} from "../core/project/types.mts";
-import { ComfyClient, probeComfy } from "../core/comfy/client.mts";
-import { pidAlive, readEnginePid } from "../core/engine/local-session.mts";
-import { inspectMachineLock } from "../core/machine/lock.mts";
-import { latestSucceededRun, listRuns, readRun } from "../core/run/store.mts";
+import { isTerminalStatus, type RunRecord, type TaskRecord } from "../core/project/types.mts";
+import { listRuns, readRun } from "../core/run/store.mts";
 import { runSummary } from "../core/run/summary.mts";
 import { listTasks, readTask, taskSummary } from "../core/task/store.mts";
 import { readEvents } from "../core/task/events.mts";
 import { taskDir } from "../core/task/store.mts";
 import { taskExitCode, taskRuns, waitForTask } from "../core/task/create.mts";
-import { gpuSnapshot } from "../core/gpu/detect.mts";
-import { inspectLease } from "../core/gpu/lease.mts";
-import { skillState } from "../core/agent/skill.mts";
-import { VERSION } from "../shared/version.mts";
+import { buildStatusSnapshot } from "../core/status/snapshot.mts";
 
 /**
  * status 解析结果。
@@ -90,166 +74,6 @@ function parseArgs(args: string[]): StatusFlags {
     }
     if (out.taskId !== undefined && out.runId !== undefined) usageError("--task 与 --run 只能二选一");
     return out;
-}
-
-/**
- * 探测引擎（不启动）。
- */
-async function probeEngine(root: string, machine: MachineConfig): Promise<Record<string, unknown>> {
-    if (machine.engine.mode === "remote") {
-        // remote
-        const url = machine.engine.url;
-        const up = await probeComfy(url, 3_000);
-        const queue = up ? await safeQueue(new ComfyClient(url)) : null;
-        return { mode: "remote", url, up, pid: null, queue };
-    }
-    // local
-    const pidRec = readEnginePid(root);
-    const pid = pidRec !== null && pidAlive(pidRec.pid) ? pidRec.pid : null;
-    const url = `http://127.0.0.1:${machine.engine.port}`;
-    const up = await probeComfy(url, 3_000);
-    const queue = up ? await safeQueue(new ComfyClient(url)) : null;
-    return {
-        mode: "local",
-        url,
-        up,
-        pid,
-        queue,
-        log: pid !== null ? `logs/engine-${pidRec?.task_id ?? "*"}.log` : null,
-    };
-}
-
-/**
- * 队列快照（失败返回 null）。
- */
-async function safeQueue(client: ComfyClient): Promise<Record<string, number> | null> {
-    try {
-        const q = await client.queue();
-        return { running: q.queue_running.length, pending: q.queue_pending.length };
-    } catch {
-        return null;
-    }
-}
-
-/**
- * 镜头进度（从 runs 推导）。
- */
-function shotProgress(root: string, shots: ShotsFile | null): Array<Record<string, unknown>> {
-    if (shots === null) return [];
-    return shots.shots.map((s) => {
-        // 最新成功 run
-        const rec = latestSucceededRun(root, `shot:${s.id}`);
-        // 第一个产物是否存在
-        const present = rec !== null && rec.outputs.some((o) => existsSync(join(root, RUNS_DIR, rec.run_id, o.path)));
-        return {
-            id: s.id,
-            slug: s.slug ?? null,
-            done: rec !== null,
-            latest_run: rec?.run_id ?? null,
-            artifact_present: present,
-        };
-    });
-}
-
-/**
- * 默认快照。
- */
-async function snapshot(
-    root: string,
-    project: ProjectConfig,
-    machine: MachineConfig,
-    shots: ShotsFile | null,
-): Promise<Record<string, unknown>> {
-    // 引擎探测
-    const engine = await probeEngine(root, machine);
-    // 机器锁
-    const lock = inspectMachineLock();
-    // 任务列表
-    const tasks = listTasks(root);
-    // 本机 active task
-    const active = tasks.filter((t) => !isTerminalStatus(t.status) && t.machine_id === machine.machine_id);
-    // 其他机器同步来的运行中任务
-    const synced = tasks.filter((t) => !isTerminalStatus(t.status) && t.machine_id !== machine.machine_id);
-    // GPU
-    const gpu = await gpuSnapshot();
-    const lease = inspectLease();
-    // Skill
-    const { COMMANDS } = await import("./registry.mts");
-    const skill = skillState(root, VERSION, COMMANDS);
-    // 镜头
-    const shot = shotProgress(root, shots);
-    return {
-        project: { name: project.name, version: project.version },
-        mode: machine.engine.mode,
-        machine_id: machine.machine_id,
-        machine: {
-            id: machine.machine_id,
-            engine:
-                machine.engine.mode === "local"
-                    ? {
-                          mode: "local",
-                          port: machine.engine.port,
-                          modelpath: machine.engine.modelpath ?? null,
-                          models_config: machine.engine.models_config ?? null,
-                          launch_extra: machine.engine.launch_extra ?? [],
-                          comfyui_version: machine.engine.comfyui_version ?? null,
-                          comfyui_dir: machine.engine.comfyui_dir ?? "engine/ComfyUI",
-                          venv_dir: machine.engine.venv_dir ?? "engine/.venv",
-                      }
-                    : {
-                          mode: "remote",
-                          url: machine.engine.url,
-                          free_after_task: machine.engine.free_after_task ?? "when_idle",
-                      },
-            override_workflows: Object.keys(machine.overrides ?? {}),
-        },
-        engine,
-        machine_lock:
-            lock.status === "ok"
-                ? {
-                      status: pidAlive(lock.record.pid) ? "held" : "stale",
-                      owner_alive: pidAlive(lock.record.pid),
-                      owner: {
-                          task_id: lock.record.task_id,
-                          pid: lock.record.pid,
-                          mode: lock.record.mode,
-                          command: lock.record.command,
-                          kind: lock.record.kind,
-                          started_at: lock.record.started_at,
-                      },
-                  }
-                : { status: lock.status },
-        active_task: active[0] !== undefined ? taskSummary(active[0]) : null,
-        active_tasks: active.map(taskSummary),
-        synced_running_tasks: synced.map(taskSummary),
-        recent_tasks: tasks.slice(0, 10).map(taskSummary),
-        gpu: {
-            supported: gpu.supported,
-            ...(gpu.reason !== undefined ? { reason: gpu.reason } : {}),
-            devices: gpu.devices,
-            lease:
-                lease.status === "ok"
-                    ? {
-                          status: "held",
-                          task_id: lease.lease.task_id,
-                          entries: lease.lease.entries.length,
-                          created_at: lease.lease.created_at,
-                      }
-                    : { status: lease.status },
-        },
-        skill: {
-            present: skill.present,
-            version: skill.version,
-            generated_at: skill.generated_at,
-            stale: skill.stale,
-            path: skill.path,
-        },
-        shots: shot,
-        next_actions:
-            active.length > 0
-                ? [`status --task ${active[0]?.task_id} --wait`, `run cancel ${active[0]?.task_id}`]
-                : ["workflow nodes --refresh --json", "run <workflow> --json"],
-    };
 }
 
 /**
@@ -351,8 +175,10 @@ export async function runStatus(ctx: CliContext, args: string[]): Promise<number
         return flags.wait ? (run.status === "succeeded" ? 0 : 1) : 0;
     }
 
+    // 当前命令注册表（Skill stale 判定）
+    const { COMMANDS } = await import("./registry.mts");
     // 默认快照
-    const data = await snapshot(root, project, machine, shots);
+    const data = await buildStatusSnapshot(root, project, machine, shots, { commands: COMMANDS });
     if (ctx.json) {
         emitData(data);
         return 0;

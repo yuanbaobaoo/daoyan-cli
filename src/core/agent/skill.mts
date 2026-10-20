@@ -870,15 +870,41 @@ function recipesMd(): string {
 \`\`\`json
 {
   "workflow": "t2v",
-  "meta": { "width": 768, "height": 1344, "anchors": { "S1": "anchors/scene.png" } },
-  "defaults": { "steps": 30, "cfg": 4.0, "negative": "低质量" },
+  "meta": {
+    "title": "短片名",
+    "synopsis": "一句话剧情简介",
+    "width": 768,
+    "height": 1344,
+    "fps": 24,
+    "anchors": { "S1": "anchors/scene.png" },
+    "characters": [
+      { "id": "lin", "name": "林默", "description": "调查员" }
+    ],
+    "scenes": [
+      { "id": "city", "name": "雨夜城市", "description": "霓虹与积水" }
+    ]
+  },
+  "defaults": { "length": 48, "steps": 30, "cfg": 4.0, "negative": "低质量" },
   "style_prefix": "电影感",
   "shots": [
-    { "id": "01", "seed": 1101, "first_frame": "S1", "prompt": "..." },
-    { "id": "02", "seed": 1102, "first_frame": { "relay": "01" }, "prompt": "..." }
+    {
+      "id": "01", "slug": "opening", "title": "雨夜信号",
+      "summary": "林默在雨夜发现线索",
+      "seed": 1101, "first_frame": "S1",
+      "characters": ["lin"], "scene": "city", "length": 48,
+      "prompt": "..."
+    },
+    {
+      "id": "02", "seed": 1102, "first_frame": { "relay": "01" },
+      "characters": ["lin"], "scene": "city", "prompt": "..."
+    }
   ]
 }
 \`\`\`
+
+- \`title\` / \`summary\` / \`characters\` / \`scene\` / \`fps\` 是展示字段，不参与执行；\`daoyan web\` 会用来生成项目档案、人物/场景和分镜页；
+- 人物和场景可在镜头里用 id 或名称引用；没有登记时 web 显示“未标注”，不影响 shot/batch；
+- 旧 \`shots.json\` 可以不加这些字段，完全向后兼容。
 
 ## 拍摄
 

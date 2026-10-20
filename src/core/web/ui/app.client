@@ -1,0 +1,2147 @@
+/* daoyan web 客户端 —— 原生 JS 单页应用，无构建依赖。
+ * 所有数据来自同源只读 API；DOM 文本统一用 textContent，避免提示词等字段注入 HTML。 */
+
+// 页面视图
+const VIEWS = [
+    { id: "overview", label: "概览", hint: "项目与引擎状态" },
+    { id: "shots", label: "分镜", hint: "镜头进度与提示词" },
+    { id: "artifacts", label: "产出物", hint: "播放与下载" },
+    { id: "tasks", label: "任务", hint: "任务与事件" },
+    { id: "finals", label: "成片", hint: "合片结果" },
+    { id: "workflows", label: "工作流", hint: "图与 bindings" },
+];
+// 合法视图集合
+const VIEW_IDS = new Set(VIEWS.map((view) => view.id));
+// 默认视图
+const DEFAULT_VIEW = "overview";
+// 接口路径
+const API = {
+    overview: "/api/overview",
+    shots: "/api/shots",
+    artifacts: "/api/artifacts?limit=500",
+    tasks: "/api/tasks",
+    finals: "/api/finals",
+    workflows: "/api/workflows",
+};
+// 各视图轮询间隔（毫秒）
+const POLL_MS = {
+    overview: 3000,
+    shots: 5000,
+    artifacts: 5000,
+    tasks: 3000,
+    finals: 8000,
+    workflows: 15000,
+};
+// 状态文案
+const STATUS_LABEL = {
+    queued: "排队",
+    running: "运行中",
+    succeeded: "成功",
+    failed: "失败",
+    cancelled: "已取消",
+    interrupted: "已中断",
+    held: "持有",
+    stale: "陈旧",
+    absent: "空闲",
+    corrupt: "损坏",
+};
+// 产物类型文案
+const KIND_LABEL = {
+    video: "视频",
+    image: "图片",
+    audio: "音频",
+    json: "JSON",
+    text: "文本",
+    other: "文件",
+};
+// 产物类型图标
+const KIND_ICON = {
+    video: "▶",
+    image: "▧",
+    audio: "♪",
+    json: "{}",
+    text: "TXT",
+    other: "↓",
+};
+// 任务类型文案
+const TASK_KIND_LABEL = {
+    run: "单次",
+    shot: "镜头",
+    retake: "重拍",
+    batch: "批量",
+    metadata: "元数据",
+};
+// 最大播放列表长度
+const MAX_PLAYLIST = 200;
+// 文本预览上限
+const TEXT_PREVIEW_LIMIT = 200_000;
+// 任务详情缓存时间（毫秒）
+const TASK_DETAIL_CACHE_MS = 2000;
+// 时间格式器
+const TIME_FORMATTER = new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+});
+// 字节单位
+const BYTE_UNITS = ["B", "KB", "MB", "GB", "TB"];
+// hash 前缀
+const HASH_PREFIX = "#/";
+// 可播放类型
+const PLAYABLE_KINDS = new Set(["video", "audio"]);
+// 可预览类型
+const PREVIEW_KINDS = new Set(["video", "audio", "image", "json", "text"]);
+
+// 应用根节点
+const appRoot = document.querySelector("#app");
+// 模态框根节点
+const modalRoot = document.querySelector("#modal");
+// 模态标题
+const modalTitle = document.querySelector("#modal-title");
+// 模态内容
+const modalContent = document.querySelector("#modal-content");
+// 模态计数
+const modalCounter = document.querySelector("#modal-counter");
+// 上一个按钮
+const modalPrev = document.querySelector("#modal-prev");
+// 下一个按钮
+const modalNext = document.querySelector("#modal-next");
+// 关闭按钮
+const modalClose = document.querySelector("#modal-close");
+// Toast 根节点
+const toastRoot = document.querySelector("#toast");
+
+// 当前视图
+let currentView = DEFAULT_VIEW;
+// 当前视图是否已成功加载
+let loaded = false;
+// 上次渲染的数据签名（避免轮询重复重建 DOM）
+let lastSignature = "";
+// 当前请求控制器
+let requestController = null;
+// 轮询定时器
+let pollTimer = null;
+// 当前产物筛选
+let artifactFilters = { label: "", status: "", kind: "", search: "" };
+// 当前分镜筛选
+let shotFilters = { character: "", scene: "", status: "", search: "" };
+// 当前展开的 task id
+let openTaskId = null;
+// 任务详情缓存
+const taskDetailCache = new Map();
+// 播放列表
+let playerItems = [];
+// 播放索引
+let playerIndex = 0;
+// Toast 定时器
+let toastTimer = null;
+// 最后更新时间
+let lastUpdatedAt = "";
+
+// 侧边导航容器
+let navRoot = null;
+// 主内容容器
+let viewRoot = null;
+// 项目名元素
+let projectNameEl = null;
+// 模式元素
+let modeEl = null;
+// 连接状态元素
+let connectionEl = null;
+// 更新时间元素
+let updatedEl = null;
+
+/**
+ * 创建元素并设置文本。
+ */
+function createElement(tag, className, text) {
+    // 新元素
+    const node = document.createElement(tag);
+    if (className !== undefined && className !== "") node.className = className;
+    if (text !== undefined && text !== null) node.textContent = String(text);
+    return node;
+}
+
+/**
+ * 清空子节点。
+ */
+function clearNode(node) {
+    while (node.firstChild !== null) node.removeChild(node.firstChild);
+}
+
+/**
+ * 格式化字节。
+ */
+function formatBytes(bytes) {
+    // 兜底数值
+    const value = Number(bytes);
+    if (!Number.isFinite(value) || value <= 0) return "0 B";
+    // 单位指数
+    let index = 0;
+    // 当前数值
+    let current = value;
+    while (current >= 1024 && index < BYTE_UNITS.length - 1) {
+        current /= 1024;
+        index += 1;
+    }
+    // 小数位
+    const digits = index === 0 ? 0 : current >= 10 ? 1 : 2;
+    return `${current.toFixed(digits)} ${BYTE_UNITS[index]}`;
+}
+
+/**
+ * 格式化时间。
+ */
+function formatTime(iso) {
+    if (typeof iso !== "string" || iso === "") return "—";
+    // 时间对象
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) return "—";
+    return TIME_FORMATTER.format(date);
+}
+
+/**
+ * 格式化耗时。
+ */
+function formatDuration(ms) {
+    // 毫秒值
+    const value = Number(ms);
+    if (!Number.isFinite(value) || value <= 0) return "0 秒";
+    if (value < 1000) return `${Math.round(value)} 毫秒`;
+    // 秒
+    const seconds = Math.round(value / 1000);
+    if (seconds < 60) return `${seconds} 秒`;
+    // 分钟/秒
+    const minutes = Math.floor(seconds / 60);
+    // 余数秒
+    const rest = seconds % 60;
+    return rest === 0 ? `${minutes} 分` : `${minutes} 分 ${rest} 秒`;
+}
+
+/**
+ * 短 id。
+ */
+function shortId(id) {
+    if (typeof id !== "string") return "—";
+    return id.length > 20 ? `${id.slice(0, 20)}…` : id;
+}
+
+/**
+ * 文本兜底。
+ */
+function textOrDash(value) {
+    if (value === undefined || value === null || value === "") return "—";
+    return String(value);
+}
+
+/**
+ * 通用徽标。
+ */
+function badge(text, className) {
+    return createElement("span", `badge ${className ?? ""}`.trim(), text);
+}
+
+/**
+ * 状态徽标。
+ */
+function statusBadge(status, text) {
+    // 状态键
+    const key = typeof status === "string" && status !== "" ? status : "queued";
+    return badge(text ?? STATUS_LABEL[key] ?? key, `status-${key}`);
+}
+
+/**
+ * 类型徽标。
+ */
+function kindBadge(kind) {
+    // 类型键
+    const key = typeof kind === "string" && kind !== "" ? kind : "other";
+    return badge(KIND_LABEL[key] ?? key, `kind-${key}`);
+}
+
+/**
+ * 追加键值行。
+ */
+function appendKv(dl, key, value) {
+    dl.append(createElement("dt", "", key));
+    dl.append(createElement("dd", "", textOrDash(value)));
+}
+
+/**
+ * 人物 / 场景去重键。
+ */
+function entityKey(entity) {
+    return entity.id !== null && entity.id !== undefined ? `id:${entity.id}` : `name:${entity.name}`;
+}
+
+/**
+ * 格式化秒数。
+ */
+function formatSeconds(seconds) {
+    // 数值兜底
+    const value = Number(seconds);
+    if (!Number.isFinite(value) || value < 0) return "—";
+    if (value < 60) return Number.isInteger(value) ? `${value} 秒` : `${value.toFixed(1)} 秒`;
+    // 分钟与余秒
+    const minutes = Math.floor(value / 60);
+    const rest = Math.round(value % 60);
+    return rest === 0 ? `${minutes} 分` : `${minutes} 分 ${rest} 秒`;
+}
+
+/**
+ * 人物 / 场景 chip。
+ */
+function entityChip(entity, className) {
+    // chip
+    const chip = createElement("span", `chip ${className ?? ""}`.trim(), entity.name);
+    if (entity.description) chip.title = entity.description;
+    return chip;
+}
+
+/**
+ * 一组人物 / 场景 chip。
+ */
+function entityChips(entities, className) {
+    // chip 容器
+    const row = createElement("div", "chip-row");
+    if (!Array.isArray(entities) || entities.length === 0) {
+        row.append(createElement("span", "muted", "未标注"));
+        return row;
+    }
+    for (const entity of entities) row.append(entityChip(entity, className));
+    return row;
+}
+
+/**
+ * 分镜状态徽标。
+ */
+function shotStatusBadge(shot) {
+    if (shot.done === true) return statusBadge("succeeded", "已完成");
+    if (shot.latest_status === "failed") return statusBadge("failed");
+    if (shot.latest_status === "running" || shot.latest_status === "queued") {
+        return statusBadge(shot.latest_status);
+    }
+    return statusBadge("queued", "未完成");
+}
+
+/**
+ * 请求 JSON 并解包信封。
+ */
+async function requestJson(path, signal) {
+    // 响应
+    const response = await fetch(path, { headers: { Accept: "application/json" }, signal });
+    // 响应体
+    const payload = await response.json();
+    if (payload.ok !== true) {
+        throw new Error(payload.error !== undefined ? payload.error.message : `请求失败（HTTP ${response.status}）`);
+    }
+    return payload.data;
+}
+
+/**
+ * 当前视图请求（可被下一次导航中止）。
+ */
+async function fetchJson(path) {
+    // 请求控制器
+    const controller = new AbortController();
+    requestController = controller;
+    try {
+        return await requestJson(path, controller.signal);
+    } finally {
+        if (requestController === controller) requestController = null;
+    }
+}
+
+/**
+ * 渲染页面骨架。
+ */
+function renderShell() {
+    appRoot.innerHTML = `
+        <div class="app-shell">
+            <aside class="sidebar">
+                <div class="brand">
+                    <div class="brand-mark"><span class="brand-dot"></span>daoyan web</div>
+                    <p class="brand-sub">临时只读项目查看器</p>
+                </div>
+                <nav id="nav" class="nav" aria-label="页面导航"></nav>
+                <div class="sidebar-foot">
+                    <code>Ctrl+C</code> 停止服务<br />
+                    数据来自当前项目目录，只读。
+                </div>
+            </aside>
+            <main class="main">
+                <header class="topbar">
+                    <div class="topbar-left">
+                        <h1 id="project-name" class="project-name">项目</h1>
+                        <span id="project-mode" class="project-mode">—</span>
+                    </div>
+                    <div class="topbar-right">
+                        <span id="connection" class="connection">
+                            <span class="connection-dot"></span>
+                            <span id="connection-text">连接中</span>
+                        </span>
+                        <span id="updated-at" class="muted">—</span>
+                    </div>
+                </header>
+                <section id="view" class="content" aria-live="polite"></section>
+            </main>
+        </div>
+    `;
+    navRoot = document.querySelector("#nav");
+    viewRoot = document.querySelector("#view");
+    projectNameEl = document.querySelector("#project-name");
+    modeEl = document.querySelector("#project-mode");
+    connectionEl = document.querySelector("#connection");
+    updatedEl = document.querySelector("#updated-at");
+}
+
+/**
+ * 渲染导航。
+ */
+function renderNav() {
+    clearNode(navRoot);
+    for (const view of VIEWS) {
+        // 导航按钮
+        const button = createElement("button", "nav-item");
+        button.type = "button";
+        button.dataset.view = view.id;
+        button.append(createElement("span", "nav-label", view.label));
+        button.append(createElement("span", "nav-hint", view.hint));
+        button.addEventListener("click", () => {
+            window.location.hash = `${HASH_PREFIX}${view.id}`;
+        });
+        navRoot.append(button);
+    }
+}
+
+/**
+ * 高亮当前导航。
+ */
+function setActiveNav() {
+    if (navRoot === null) return;
+    for (const button of navRoot.querySelectorAll(".nav-item")) {
+        button.classList.toggle("active", button.dataset.view === currentView);
+    }
+}
+
+/**
+ * 更新连接状态。
+ */
+function setConnection(state, text) {
+    if (connectionEl === null) return;
+    connectionEl.classList.remove("ok", "error");
+    if (state === "ok") connectionEl.classList.add("ok");
+    if (state === "error") connectionEl.classList.add("error");
+    // 状态文本
+    const textEl = connectionEl.querySelector("#connection-text");
+    if (textEl !== null) textEl.textContent = text;
+}
+
+/**
+ * 加载顶栏项目信息（不探测引擎）。
+ */
+async function loadHeader() {
+    try {
+        // 健康检查数据
+        const data = await requestJson("/api/health");
+        if (projectNameEl !== null && typeof data.project === "string") projectNameEl.textContent = data.project;
+        if (modeEl !== null) modeEl.textContent = data.mode === null ? "未绑定本机" : data.mode;
+    } catch {
+        // 顶栏失败不影响页面主体
+    }
+}
+
+/**
+ * 更新顶栏项目信息。
+ */
+function updateHeader(data) {
+    if (projectNameEl !== null && data !== null && data.project !== undefined && data.project.name !== undefined) {
+        projectNameEl.textContent = data.project.name;
+    }
+    if (modeEl !== null && data !== null && data.mode !== undefined) {
+        modeEl.textContent = data.mode === null ? "未绑定本机" : data.mode;
+    }
+    if (updatedEl !== null) {
+        updatedEl.textContent = lastUpdatedAt === "" ? "—" : `更新于 ${formatTime(lastUpdatedAt)}`;
+    }
+}
+
+/**
+ * 显示错误条。
+ */
+function showError(message) {
+    if (viewRoot === null) return;
+    // 现有错误条
+    let banner = viewRoot.querySelector(".error-banner");
+    if (banner === null) {
+        banner = createElement("div", "error-banner");
+        viewRoot.prepend(banner);
+    }
+    banner.textContent = message;
+}
+
+/**
+ * 清除错误条。
+ */
+function clearError() {
+    if (viewRoot === null) return;
+    // 现有错误条
+    const banner = viewRoot.querySelector(".error-banner");
+    if (banner !== null) banner.remove();
+}
+
+/**
+ * 显示 Toast。
+ */
+function showToast(message, isError) {
+    toastRoot.textContent = message;
+    toastRoot.classList.toggle("error", isError === true);
+    toastRoot.hidden = false;
+    if (toastTimer !== null) window.clearTimeout(toastTimer);
+    toastTimer = window.setTimeout(() => {
+        toastRoot.hidden = true;
+    }, 2600);
+}
+
+/**
+ * 空状态节点。
+ */
+function emptyNode(title, body) {
+    // 容器
+    const box = createElement("div", "empty");
+    box.append(createElement("p", "empty-title", title));
+    box.append(createElement("p", "empty-body", body));
+    return box;
+}
+
+/**
+ * 加载状态。
+ */
+function renderLoading() {
+    if (viewRoot === null) return;
+    clearNode(viewRoot);
+    // 加载容器
+    const box = createElement("div", "loading");
+    box.append(createElement("span", "spinner"));
+    box.append(createElement("span", "", "加载中…"));
+    viewRoot.append(box);
+}
+
+/**
+ * 计算用于跳过重复渲染的数据签名（忽略概览的生成时间）。
+ */
+function signatureOf(data) {
+    if (data !== null && typeof data === "object" && Object.prototype.hasOwnProperty.call(data, "generated_at")) {
+        // 去掉时间戳后的副本
+        const copy = { ...data };
+        delete copy.generated_at;
+        return JSON.stringify(copy);
+    }
+    return JSON.stringify(data);
+}
+
+/**
+ * 加载当前视图。
+ */
+async function loadCurrent() {
+    if (requestController !== null) requestController.abort();
+    // 目标视图
+    const view = currentView;
+    if (!loaded) renderLoading();
+    try {
+        // 接口数据
+        const data = await fetchJson(API[view]);
+        if (view !== currentView) return;
+        // 数据签名（稳定页面不重复重建 DOM）
+        const signature = signatureOf(data);
+        lastUpdatedAt = new Date().toISOString();
+        updateHeader(data);
+        setConnection("ok", "已连接");
+        if (loaded && signature === lastSignature) return;
+        loaded = true;
+        lastSignature = signature;
+        renderView(view, data);
+    } catch (error) {
+        if (error !== null && error !== undefined && error.name === "AbortError") return;
+        setConnection("error", "连接失败");
+        if (!loaded) {
+            clearNode(viewRoot);
+            viewRoot.append(emptyNode("无法加载", "请确认服务仍在运行，或刷新页面重试。"));
+        }
+        showError(error instanceof Error ? error.message : "加载失败");
+    }
+}
+
+/**
+ * 切换视图。
+ */
+function onHashChange() {
+    // 原始 hash
+    const raw = window.location.hash.replace(/^#\/?/, "");
+    // 目标视图
+    const view = VIEW_IDS.has(raw) ? raw : DEFAULT_VIEW;
+    currentView = view;
+    loaded = false;
+    lastSignature = "";
+    openTaskId = null;
+    setActiveNav();
+    renderLoading();
+    void loadCurrent();
+    schedulePoll();
+}
+
+/**
+ * 安排轮询。
+ */
+function schedulePoll() {
+    if (pollTimer !== null) window.clearInterval(pollTimer);
+    // 当前间隔
+    const interval = POLL_MS[currentView] ?? 5000;
+    pollTimer = window.setInterval(() => {
+        if (document.hidden) return;
+        void loadCurrent();
+    }, interval);
+}
+
+/**
+ * 分发视图渲染。
+ */
+function renderView(view, data) {
+    if (viewRoot === null) return;
+    clearNode(viewRoot);
+    if (view === "overview") renderOverview(data);
+    else if (view === "shots") renderShots(data);
+    else if (view === "artifacts") renderArtifacts(data);
+    else if (view === "tasks") renderTasks(data);
+    else if (view === "finals") renderFinals(data);
+    else if (view === "workflows") renderWorkflows(data);
+    clearError();
+}
+
+/**
+ * 状态卡片。
+ */
+function statCard(label, value, hint) {
+    // 卡片
+    const card = createElement("div", "stat-card");
+    card.append(createElement("p", "stat-label", label));
+    card.append(createElement("p", "stat-value", value));
+    if (hint !== undefined) card.append(createElement("p", "stat-hint", hint));
+    return card;
+}
+
+/**
+ * 概览页。
+ */
+function renderOverview(data) {
+    // 统计
+    const stats = data.stats ?? {};
+    // 分镜视图
+    const storyboard = data.storyboard !== undefined ? data.storyboard : null;
+    // 页头
+    const head = createElement("div", "view-head");
+    // 页头文本
+    const headText = createElement("div");
+    headText.append(createElement("p", "eyebrow", "Overview"));
+    headText.append(createElement("h2", "page-title", data.project !== undefined ? data.project.name : "项目概览"));
+    // 项目摘要
+    const subtitle = [`${data.mode ?? "未绑定本机"} · ${data.machine_id ?? "本机未初始化"}`];
+    if (storyboard !== null && storyboard.summary !== undefined) {
+        subtitle.push(
+            `${storyboard.summary.shots_total} 镜 · ${storyboard.summary.characters_total} 角色 · ${storyboard.summary.scenes_total} 场景`,
+        );
+    }
+    headText.append(createElement("p", "page-subtitle", subtitle.join(" · ")));
+    head.append(headText);
+    viewRoot.append(head);
+
+    if (data.machine === null) {
+        // 未初始化提示
+        const callout = createElement("div", "callout");
+        callout.append(createElement("strong", "", "本机尚未初始化。"));
+        callout.append(document.createTextNode(" 当前仅展示共享数据；运行 "));
+        callout.append(createElement("code", "mono", "daoyan init --mode=local|remote"));
+        callout.append(document.createTextNode(" 绑定本机后即可看到引擎与机器状态。"));
+        viewRoot.append(callout);
+    }
+
+    // 统计网格
+    const statsGrid = createElement("div", "stats-grid");
+    statsGrid.append(statCard("镜头", `${stats.shots_done ?? 0}/${stats.shots_total ?? 0}`, "已完成 / 总数"));
+    statsGrid.append(statCard("人物", stats.characters_total ?? 0, "已登记角色"));
+    statsGrid.append(statCard("场景", stats.scenes_total ?? 0, "已登记场景"));
+    statsGrid.append(statCard("产出物", stats.outputs_total ?? 0, formatBytes(stats.outputs_bytes ?? 0)));
+    statsGrid.append(
+        statCard("成功 run", `${stats.runs_succeeded ?? 0}/${stats.runs_total ?? 0}`, `失败 ${stats.runs_failed ?? 0}`),
+    );
+    statsGrid.append(statCard("运行中任务", stats.tasks_active ?? 0, `共 ${stats.tasks_total ?? 0} 个任务`));
+    viewRoot.append(statsGrid);
+
+    if (storyboard !== null) {
+        viewRoot.append(renderProjectProfile(storyboard));
+        viewRoot.append(renderEntitySection("character", storyboard.characters));
+        viewRoot.append(renderEntitySection("scene", storyboard.scenes));
+        viewRoot.append(renderStoryboardPanel(storyboard));
+    } else {
+        viewRoot.append(emptyNode("还没有分镜设定", "创建 shots.json 后，这里会展示镜头、人物、场景和逐镜产出。"));
+    }
+
+    // 两列信息
+    const layout = createElement("div", "layout-two");
+    layout.append(renderEnginePanel(data));
+    layout.append(renderEnvironmentPanel(data));
+    viewRoot.append(layout);
+
+    // 最近产物
+    const artifacts = Array.isArray(data.recent_artifacts) ? data.recent_artifacts : [];
+    // 产物区块头
+    const artifactHead = createElement("div", "section-head");
+    artifactHead.append(createElement("h3", "section-title", "最近产出物"));
+    artifactHead.append(createElement("span", "section-meta", `${artifacts.length} 个`));
+    viewRoot.append(artifactHead);
+    if (artifacts.length === 0) {
+        viewRoot.append(emptyNode("还没有产出物", "执行 shot / run 后，视频与图片会出现在这里。"));
+    } else {
+        // 产物网格
+        const grid = createElement("div", "grid");
+        renderArtifactCards(grid, artifacts);
+        viewRoot.append(grid);
+    }
+
+    // 最近任务
+    const tasks = Array.isArray(data.recent_tasks) ? data.recent_tasks : [];
+    // 任务区块头
+    const taskHead = createElement("div", "section-head");
+    taskHead.append(createElement("h3", "section-title", "最近任务"));
+    taskHead.append(createElement("span", "section-meta", `${tasks.length} 个`));
+    viewRoot.append(taskHead);
+    if (tasks.length === 0) {
+        viewRoot.append(emptyNode("还没有任务", "daoyan shot / batch 创建的任务会在这里出现。"));
+    } else {
+        viewRoot.append(renderTaskList(tasks));
+    }
+}
+
+/**
+ * 项目档案面板。
+ */
+function renderProjectProfile(storyboard) {
+    // 面板
+    const panel = createElement("section", "panel profile-panel");
+    // 面板头
+    const head = createElement("div", "panel-head");
+    // 标题容器
+    const titles = createElement("div");
+    titles.append(createElement("h3", "panel-title", "项目档案"));
+    titles.append(createElement("p", "panel-sub", "剧情、画面与生成参数"));
+    head.append(titles);
+    panel.append(head);
+
+    if (storyboard.synopsis !== null && storyboard.synopsis !== undefined) {
+        panel.append(createElement("p", "profile-synopsis", storyboard.synopsis));
+    }
+
+    // 摘要
+    const summary = storyboard.summary ?? {};
+    // 默认参数
+    const defaults = storyboard.defaults ?? {};
+    // 键值列表
+    const kv = createElement("dl", "kv");
+    appendKv(kv, "片名", storyboard.title ?? "未命名");
+    appendKv(kv, "分辨率", summary.resolution ?? "—");
+    appendKv(kv, "帧率", summary.fps !== null && summary.fps !== undefined ? `${summary.fps} fps` : "未设置");
+    appendKv(kv, "总帧数", summary.total_frames ?? 0);
+    appendKv(
+        kv,
+        "总时长",
+        summary.total_duration_seconds !== null && summary.total_duration_seconds !== undefined
+            ? formatSeconds(summary.total_duration_seconds)
+            : "部分镜头未知",
+    );
+    appendKv(kv, "风格", storyboard.style_prefix ?? "—");
+    appendKv(kv, "workflow", storyboard.workflow ?? "—");
+    if (defaults.steps !== undefined) appendKv(kv, "默认 steps", defaults.steps);
+    if (defaults.cfg !== undefined) appendKv(kv, "默认 cfg", defaults.cfg);
+    if (defaults.negative !== undefined) appendKv(kv, "负向提示词", defaults.negative);
+    panel.append(kv);
+    return panel;
+}
+
+/**
+ * 人物 / 场景区块。
+ */
+function renderEntitySection(kind, entities) {
+    // 是否人物
+    const isCharacter = kind === "character";
+    // 区块
+    const section = createElement("section", "entity-section");
+    // 区块头
+    const head = createElement("div", "section-head");
+    head.append(createElement("h3", "section-title", isCharacter ? "人物设定" : "场景设定"));
+    head.append(createElement("span", "section-meta", `${Array.isArray(entities) ? entities.length : 0} 个`));
+    section.append(head);
+    if (!Array.isArray(entities) || entities.length === 0) {
+        section.append(
+            emptyNode(
+                isCharacter ? "还没有人物设定" : "还没有场景设定",
+                isCharacter
+                    ? "在 shots.json 的 meta.characters 登记人物，并在镜头的 characters 字段引用。"
+                    : "在 shots.json 的 meta.scenes 登记场景，并在镜头的 scene 字段引用。",
+            ),
+        );
+        return section;
+    }
+    // 卡片网格
+    const grid = createElement("div", "entity-grid");
+    for (const entity of entities) {
+        // 实体卡片
+        const card = createElement("article", "entity-card");
+        // 卡片头
+        const cardHead = createElement("div", "entity-head");
+        cardHead.append(createElement("h4", "entity-name", entity.name));
+        cardHead.append(
+            entity.count > 0
+                ? badge(`出场 ${entity.count} 镜`, isCharacter ? "kind-image" : "kind-video")
+                : badge("未出场", ""),
+        );
+        card.append(cardHead);
+        if (entity.description) card.append(createElement("p", "entity-desc", entity.description));
+        if (entity.reference) card.append(createElement("p", "entity-ref mono", entity.reference));
+        // 出场镜号
+        const shots = createElement("div", "chip-row");
+        if (Array.isArray(entity.shots) && entity.shots.length > 0) {
+            for (const shotId of entity.shots) shots.append(createElement("span", "chip chip-small", `镜 ${shotId}`));
+        } else {
+            shots.append(createElement("span", "muted", "暂无出场镜头"));
+        }
+        card.append(shots);
+        grid.append(card);
+    }
+    section.append(grid);
+    return section;
+}
+
+/**
+ * 分镜一览面板。
+ */
+function renderStoryboardPanel(storyboard) {
+    // 镜头
+    const shots = Array.isArray(storyboard.shots) ? storyboard.shots : [];
+    // 区块
+    const section = createElement("section", "storyboard-section");
+    // 区块头
+    const head = createElement("div", "section-head");
+    head.append(createElement("h3", "section-title", "分镜一览"));
+    head.append(createElement("span", "section-meta", `${shots.length} 镜`));
+    // 查看全部
+    const more = createElement("button", "button ghost", "查看分镜详情");
+    more.type = "button";
+    more.addEventListener("click", () => {
+        window.location.hash = `${HASH_PREFIX}shots`;
+    });
+    head.append(more);
+    section.append(head);
+    if (shots.length === 0) {
+        section.append(emptyNode("还没有镜头", "在 shots.json 的 shots 数组里添加镜头。"));
+        return section;
+    }
+    // 分镜列表
+    const list = createElement("div", "storyboard-list");
+    // 表头
+    const header = createElement("div", "storyboard-row storyboard-header");
+    for (const label of ["镜号", "内容", "场景", "人物", "产出"]) header.append(createElement("span", "", label));
+    list.append(header);
+    for (const shot of shots) {
+        // 数据行
+        const row = createElement("div", "storyboard-row");
+        // 镜号
+        const idCell = createElement("div", "storyboard-id-cell");
+        idCell.append(createElement("span", "storyboard-id", shot.id));
+        idCell.append(shotStatusBadge(shot));
+        row.append(idCell);
+        // 内容
+        const content = createElement("div", "storyboard-content");
+        content.append(createElement("div", "storyboard-title", shot.title ?? shot.slug ?? `镜头 ${shot.id}`));
+        content.append(createElement("p", "storyboard-summary", shot.summary));
+        row.append(content);
+        // 场景
+        row.append(
+            shot.scene !== null && shot.scene !== undefined
+                ? entityChip(shot.scene, "chip-scene")
+                : createElement("span", "muted", "—"),
+        );
+        // 人物
+        const cast = createElement("div", "chip-row");
+        if (Array.isArray(shot.characters) && shot.characters.length > 0) {
+            for (const character of shot.characters) cast.append(entityChip(character, "chip-character"));
+        } else {
+            cast.append(createElement("span", "muted", "—"));
+        }
+        row.append(cast);
+        // 产出
+        const artifacts = Array.isArray(shot.artifacts) ? shot.artifacts : [];
+        const artifactCell = createElement("div", "storyboard-artifacts");
+        artifactCell.append(createElement("span", "muted", `${artifacts.length} 个`));
+        // 可播放产物
+        const playable = artifacts.find(
+            (item) =>
+                item.output.present === true && item.output.lfs_pointer !== true && PREVIEW_KINDS.has(item.output.kind),
+        );
+        if (playable !== undefined) {
+            // 播放按钮
+            const play = createElement("button", "button ghost", "播放");
+            play.type = "button";
+            play.addEventListener("click", () => openArtifact(playable, artifacts));
+            artifactCell.append(play);
+        }
+        row.append(artifactCell);
+        list.append(row);
+    }
+    section.append(list);
+    return section;
+}
+
+/**
+ * 引擎面板。
+ */
+function renderEnginePanel(data) {
+    // 面板
+    const panel = createElement("section", "panel");
+    // 面板头
+    const head = createElement("div", "panel-head");
+    // 标题容器
+    const titles = createElement("div");
+    titles.append(createElement("h3", "panel-title", "引擎"));
+    titles.append(createElement("p", "panel-sub", data.engine === null ? "未绑定本机" : data.engine.mode));
+    head.append(titles);
+    if (data.engine !== null) {
+        head.append(data.engine.up === true ? badge("可达", "status-succeeded") : badge("不可达", "status-failed"));
+    }
+    panel.append(head);
+    if (data.engine === null) {
+        panel.append(createElement("p", "muted", "运行 init 绑定本机后显示引擎状态。"));
+        return panel;
+    }
+    // 键值列表
+    const kv = createElement("dl", "kv");
+    appendKv(kv, "地址", data.engine.url);
+    appendKv(kv, "PID", data.engine.pid);
+    if (data.engine.queue !== null && data.engine.queue !== undefined) {
+        appendKv(kv, "队列", `执行中 ${data.engine.queue.running} / 等待 ${data.engine.queue.pending}`);
+    }
+    appendKv(kv, "模式", data.mode);
+    panel.append(kv);
+    return panel;
+}
+
+/**
+ * 机器 / GPU / Skill 面板。
+ */
+function renderEnvironmentPanel(data) {
+    // 面板
+    const panel = createElement("section", "panel");
+    // 面板头
+    const head = createElement("div", "panel-head");
+    // 标题容器
+    const titles = createElement("div");
+    titles.append(createElement("h3", "panel-title", "机器与运行环境"));
+    titles.append(createElement("p", "panel-sub", data.machine_id ?? "本机未初始化"));
+    head.append(titles);
+    panel.append(head);
+
+    // 键值列表
+    const kv = createElement("dl", "kv");
+    // 机器锁状态
+    const lock = data.machine_lock;
+    if (lock === null || lock === undefined) {
+        appendKv(kv, "机器锁", "—");
+    } else if (lock.status === "held" && lock.owner !== undefined) {
+        appendKv(kv, "机器锁", `${lock.owner.command}（task ${lock.owner.task_id}，pid ${lock.owner.pid}）`);
+    } else {
+        appendKv(kv, "机器锁", STATUS_LABEL[lock.status] ?? lock.status);
+    }
+
+    // GPU 状态
+    const gpu = data.gpu;
+    if (gpu === null || gpu === undefined) {
+        appendKv(kv, "GPU", "—");
+    } else if (gpu.supported === true && Array.isArray(gpu.devices) && gpu.devices.length > 0) {
+        appendKv(kv, "GPU", `${gpu.devices[0].usedMb} MiB / ${gpu.devices[0].totalMb} MiB`);
+    } else {
+        appendKv(kv, "GPU", gpu.reason ?? "不可用");
+    }
+
+    // Skill 状态
+    const skill = data.skill;
+    if (skill === null || skill === undefined) {
+        appendKv(kv, "Skill", "—");
+    } else if (skill.present !== true) {
+        appendKv(kv, "Skill", "缺失（运行 daoyan skill update）");
+    } else {
+        appendKv(kv, "Skill", skill.stale === true ? "需要更新" : "已就绪");
+    }
+    panel.append(kv);
+
+    // 下一步动作
+    const actions = Array.isArray(data.next_actions) ? data.next_actions : [];
+    if (actions.length > 0) {
+        // 下一步
+        const next = createElement("div", "card-actions");
+        for (const action of actions) next.append(createElement("code", "mono", action));
+        panel.append(next);
+    }
+    return panel;
+}
+
+/**
+ * 分镜页。
+ */
+function renderShots(data) {
+    if (data === null) {
+        // 页头
+        const head = createElement("div", "view-head");
+        head.append(createElement("h2", "page-title", "分镜"));
+        viewRoot.append(head);
+        viewRoot.append(emptyNode("未配置 shots.json", "在项目根创建 shots.json 后刷新。"));
+        return;
+    }
+    // 页面标题
+    const title = data.title !== null && data.title !== undefined ? data.title : "分镜";
+    // 统计
+    const stats = data.summary ?? {};
+    // 页头
+    const head = createElement("div", "view-head");
+    // 页头文本
+    const headText = createElement("div");
+    headText.append(createElement("p", "eyebrow", "Storyboard"));
+    headText.append(createElement("h2", "page-title", title));
+    // 页头副标题
+    const subtitle = [];
+    if (data.style_prefix) subtitle.push(`风格 ${data.style_prefix}`);
+    if (data.workflow) subtitle.push(`workflow ${data.workflow}`);
+    if (stats.resolution) subtitle.push(stats.resolution);
+    if (stats.fps) subtitle.push(`${stats.fps} fps`);
+    headText.append(createElement("p", "page-subtitle", subtitle.join(" · ") || "按镜头查看内容、人物、场景与产出"));
+    head.append(headText);
+    viewRoot.append(head);
+
+    if (data.synopsis !== null && data.synopsis !== undefined) {
+        viewRoot.append(createElement("p", "profile-synopsis", data.synopsis));
+    }
+
+    // 统计卡片
+    const statsGrid = createElement("div", "stats-grid");
+    statsGrid.append(statCard("镜头", `${stats.shots_done ?? 0}/${stats.shots_total ?? 0}`, "已完成 / 总数"));
+    statsGrid.append(statCard("人物", stats.characters_total ?? 0, "全片角色"));
+    statsGrid.append(statCard("场景", stats.scenes_total ?? 0, "全片场景"));
+    statsGrid.append(
+        statCard(
+            "产出物",
+            stats.artifacts_total ?? 0,
+            `${stats.total_frames ?? 0} 帧 · ${
+                stats.total_duration_seconds !== null && stats.total_duration_seconds !== undefined
+                    ? formatSeconds(stats.total_duration_seconds)
+                    : "部分镜头未知"
+            }`,
+        ),
+    );
+    viewRoot.append(statsGrid);
+
+    // 镜头列表
+    const shots = Array.isArray(data.shots) ? data.shots : [];
+    if (shots.length === 0) {
+        viewRoot.append(emptyNode("还没有镜头", "在 shots.json 的 shots 数组里添加镜头。"));
+        return;
+    }
+
+    // 人物筛选值 -> 名称
+    const characterOptions = {};
+    for (const entity of Array.isArray(data.characters) ? data.characters : []) {
+        characterOptions[entityKey(entity)] = entity.name;
+    }
+    // 场景筛选值 -> 名称
+    const sceneOptions = {};
+    for (const entity of Array.isArray(data.scenes) ? data.scenes : []) {
+        sceneOptions[entityKey(entity)] = entity.name;
+    }
+    // 状态文案
+    const statusLabels = { done: "已完成", pending: "未完成", failed: "失败", running: "运行中" };
+
+    // 筛选栏
+    const filters = createElement("div", "filter-bar");
+    filters.append(
+        buildSelect(
+            "人物",
+            Object.keys(characterOptions),
+            shotFilters.character,
+            (value) => {
+                shotFilters.character = value;
+                refresh();
+            },
+            "全部人物",
+            characterOptions,
+        ),
+    );
+    filters.append(
+        buildSelect(
+            "场景",
+            Object.keys(sceneOptions),
+            shotFilters.scene,
+            (value) => {
+                shotFilters.scene = value;
+                refresh();
+            },
+            "全部场景",
+            sceneOptions,
+        ),
+    );
+    filters.append(
+        buildSelect(
+            "状态",
+            ["done", "pending", "failed", "running"],
+            shotFilters.status,
+            (value) => {
+                shotFilters.status = value;
+                refresh();
+            },
+            "全部状态",
+            statusLabels,
+        ),
+    );
+    // 搜索框
+    const search = createElement("input", "input search");
+    search.type = "search";
+    search.placeholder = "搜索镜号 / 内容 / 人物 / 场景";
+    search.value = shotFilters.search;
+    search.addEventListener("input", () => {
+        shotFilters.search = search.value;
+        refresh();
+    });
+    filters.append(search);
+    viewRoot.append(filters);
+
+    // 结果头
+    const listHead = createElement("div", "section-head");
+    listHead.append(createElement("h3", "section-title", "分镜列表"));
+    // 结果摘要
+    const resultMeta = createElement("span", "section-meta", "");
+    listHead.append(resultMeta);
+    viewRoot.append(listHead);
+
+    // 镜头网格
+    const grid = createElement("div", "grid shot-grid");
+    viewRoot.append(grid);
+
+    /**
+     * 按筛选条件刷新镜头卡片。
+     */
+    function refresh() {
+        // 过滤结果
+        const filtered = filterShots(shots);
+        resultMeta.textContent = `显示 ${filtered.length} / ${shots.length}`;
+        clearNode(grid);
+        if (filtered.length === 0) {
+            grid.append(emptyNode("没有匹配的镜头", "调整人物、场景、状态或搜索条件。"));
+            return;
+        }
+        for (const shot of filtered) grid.append(renderShotCard(shot));
+    }
+
+    refresh();
+}
+
+/**
+ * 按当前筛选条件过滤镜头。
+ */
+function filterShots(shots) {
+    // 搜索词
+    const search = shotFilters.search.trim().toLowerCase();
+    return shots.filter((shot) => {
+        if (
+            shotFilters.character !== "" &&
+            !(
+                Array.isArray(shot.characters) &&
+                shot.characters.some((entity) => entityKey(entity) === shotFilters.character)
+            )
+        ) {
+            return false;
+        }
+        if (
+            shotFilters.scene !== "" &&
+            (shot.scene === null || shot.scene === undefined || entityKey(shot.scene) !== shotFilters.scene)
+        ) {
+            return false;
+        }
+        if (shotFilters.status === "done" && shot.done !== true) return false;
+        if (shotFilters.status === "pending" && shot.done === true) return false;
+        if (shotFilters.status === "failed" && shot.latest_status !== "failed") return false;
+        if (shotFilters.status === "running" && shot.latest_status !== "running" && shot.latest_status !== "queued") {
+            return false;
+        }
+        if (search !== "") {
+            // 搜索文本
+            const haystack = `${shot.id} ${shot.title ?? ""} ${shot.slug ?? ""} ${shot.summary} ${shot.prompt} ${(
+                shot.characters ?? []
+            )
+                .map((entity) => entity.name)
+                .join(" ")} ${shot.scene !== null && shot.scene !== undefined ? shot.scene.name : ""}`.toLowerCase();
+            if (!haystack.includes(search)) return false;
+        }
+        return true;
+    });
+}
+
+/**
+ * 单个分镜卡片。
+ */
+function renderShotCard(shot) {
+    // 卡片
+    const card = createElement("article", "card shot-card shot-card-rich");
+    // 卡片头
+    const cardHead = createElement("div", "shot-head");
+    // 标题容器
+    const titles = createElement("div", "shot-title");
+    titles.append(createElement("span", "shot-id", shot.id));
+    titles.append(createElement("span", "shot-title-text", shot.title ?? shot.slug ?? `镜头 ${shot.id}`));
+    if (shot.slug && shot.title) titles.append(createElement("span", "shot-slug", shot.slug));
+    cardHead.append(titles);
+    // 状态与场景
+    const headBadges = createElement("div", "chip-row");
+    headBadges.append(shotStatusBadge(shot));
+    if (shot.scene !== null && shot.scene !== undefined) headBadges.append(entityChip(shot.scene, "chip-scene"));
+    cardHead.append(headBadges);
+    card.append(cardHead);
+
+    // 内容摘要
+    const summary = createElement("p", "shot-summary", shot.summary);
+    card.append(summary);
+
+    // 人物
+    const cast = createElement("div", "shot-line");
+    cast.append(createElement("span", "shot-line-label", "人物"));
+    cast.append(entityChips(shot.characters, "chip-character"));
+    card.append(cast);
+
+    // 制作参数
+    const meta = createElement("div", "shot-meta-grid");
+    meta.append(createElement("span", "", `seed ${shot.seed}`));
+    meta.append(createElement("span", "", shot.length !== null ? `${shot.length} 帧` : "帧数未知"));
+    meta.append(
+        createElement("span", "", shot.duration_seconds !== null ? formatSeconds(shot.duration_seconds) : "时长未知"),
+    );
+    meta.append(createElement("span", "", `${shot.width}x${shot.height}`));
+    meta.append(createElement("span", "", shot.steps !== null ? `steps ${shot.steps}` : "steps 默认"));
+    meta.append(createElement("span", "", shot.cfg !== null ? `cfg ${shot.cfg}` : "cfg 默认"));
+    meta.append(createElement("span", "", `首帧 ${shot.first_frame ?? "无"}`));
+    meta.append(createElement("span", "", shot.workflow ?? "默认 workflow"));
+    meta.append(createElement("span", "", `${shot.runs_count} run / ${shot.succeeded_count} 成功`));
+    card.append(meta);
+
+    // 完整提示词
+    const promptDetails = createElement("details", "shot-prompt");
+    promptDetails.append(createElement("summary", "", "完整提示词"));
+    promptDetails.append(createElement("p", "", shot.prompt));
+    card.append(promptDetails);
+
+    if (shot.notes) card.append(createElement("p", "shot-notes", `备注：${shot.notes}`));
+
+    // 产物区块
+    const artifacts = Array.isArray(shot.artifacts) ? shot.artifacts : [];
+    const artifactHead = createElement("div", "shot-section-head");
+    artifactHead.append(createElement("h4", "", `产出物（${artifacts.length}）`));
+    artifactHead.append(createElement("span", "muted", `${shot.runs_count} run / ${shot.succeeded_count} 成功`));
+    card.append(artifactHead);
+    if (artifacts.length === 0) {
+        card.append(createElement("p", "muted", "还没有产出物。"));
+    } else {
+        // 产物列表
+        const list = createElement("div", "artifact-list");
+        for (const item of artifacts) list.append(renderShotArtifactRow(item, artifacts));
+        card.append(list);
+    }
+
+    card.append(renderShotRunHistory(shot));
+    return card;
+}
+
+/**
+ * 分镜产物的单行展示。
+ */
+function renderShotArtifactRow(item, all) {
+    // 产物
+    const output = item.output;
+    // 行
+    const row = createElement("div", "artifact-row");
+    // 缩略图
+    const thumb = createElement("div", "artifact-thumb");
+    // 是否可用
+    const available = output.present === true && output.lfs_pointer !== true;
+    if (available && output.kind === "video") {
+        // 视频首帧
+        const video = document.createElement("video");
+        video.src = `${output.media_url}#t=0.1`;
+        video.muted = true;
+        video.playsInline = true;
+        video.preload = "metadata";
+        thumb.append(video);
+    } else if (available && output.kind === "image") {
+        // 图片缩略图
+        const image = document.createElement("img");
+        image.src = output.media_url;
+        image.alt = output.name;
+        image.loading = "lazy";
+        thumb.append(image);
+    } else {
+        thumb.append(createElement("span", "artifact-thumb-icon", KIND_ICON[output.kind] ?? "↓"));
+    }
+    if (!output.present) thumb.append(createElement("span", "artifact-thumb-note", "缺失"));
+    else if (output.lfs_pointer) thumb.append(createElement("span", "artifact-thumb-note", "LFS"));
+    row.append(thumb);
+
+    // 信息
+    const info = createElement("div", "artifact-info");
+    info.append(createElement("div", "artifact-name", output.name));
+    // 元信息
+    const meta = createElement("div", "artifact-meta");
+    meta.append(kindBadge(output.kind));
+    meta.append(statusBadge(item.run_status));
+    meta.append(createElement("span", "", shortId(item.run_id)));
+    meta.append(createElement("span", "", formatTime(item.started_at)));
+    meta.append(createElement("span", "", formatBytes(output.bytes)));
+    info.append(meta);
+    row.append(info);
+
+    // 操作
+    const actions = createElement("div", "artifact-row-actions");
+    if (available && PREVIEW_KINDS.has(output.kind)) {
+        // 预览按钮
+        const preview = createElement("button", "button ghost", output.kind === "video" ? "播放" : "查看");
+        preview.type = "button";
+        preview.addEventListener("click", () => openArtifact(item, all));
+        actions.append(preview);
+    }
+    // 下载链接
+    const download = createElement("a", "button ghost", "下载");
+    download.href = output.download_url;
+    actions.append(download);
+    row.append(actions);
+    return row;
+}
+
+/**
+ * 历史 run 折叠区。
+ */
+function renderShotRunHistory(shot) {
+    // run 列表
+    const runs = Array.isArray(shot.runs) ? shot.runs : [];
+    // 折叠区
+    const details = createElement("details", "shot-runs");
+    details.append(createElement("summary", "", `历史 run（${runs.length}）`));
+    if (runs.length === 0) {
+        details.append(createElement("p", "muted", "还没有 run。"));
+        return details;
+    }
+    // 列表
+    const list = createElement("ul", "run-list");
+    for (const run of runs) {
+        // run 行
+        const item = createElement("li", "run-item");
+        // 主信息
+        const main = createElement("div", "run-main");
+        main.append(statusBadge(run.status));
+        main.append(createElement("code", "mono", shortId(run.run_id)));
+        main.append(createElement("span", "", `${run.outputs.length} 个产物`));
+        main.append(
+            createElement("span", "muted", `${formatDuration(run.duration_ms)} · ${formatTime(run.started_at)}`),
+        );
+        item.append(main);
+        list.append(item);
+    }
+    details.append(list);
+    return details;
+}
+
+/**
+ * 产出物页。
+ */
+function renderArtifacts(data) {
+    // 全部条目
+    const items = Array.isArray(data.items) ? data.items : [];
+    // label 候选
+    const labels = Array.isArray(data.labels) ? data.labels : [];
+    // 类型候选
+    const kinds = Array.isArray(data.kinds) ? data.kinds : [];
+    // 总数
+    const total = Number(data.total ?? items.length);
+
+    // 页头
+    const head = createElement("div", "view-head");
+    // 页头文本
+    const headText = createElement("div");
+    headText.append(createElement("p", "eyebrow", "Artifacts"));
+    headText.append(createElement("h2", "page-title", "产出物"));
+    headText.append(createElement("p", "page-subtitle", "点击视频或图片预览；支持拖动进度条播放。"));
+    head.append(headText);
+    viewRoot.append(head);
+
+    // 筛选栏
+    const filters = createElement("div", "filter-bar");
+    filters.append(
+        buildSelect(
+            "镜头",
+            labels,
+            artifactFilters.label,
+            (value) => {
+                artifactFilters.label = value;
+                refresh();
+            },
+            "全部镜头",
+        ),
+    );
+    filters.append(
+        buildSelect(
+            "状态",
+            ["queued", "running", "succeeded", "failed", "cancelled", "interrupted"],
+            artifactFilters.status,
+            (value) => {
+                artifactFilters.status = value;
+                refresh();
+            },
+            "全部状态",
+            STATUS_LABEL,
+        ),
+    );
+    filters.append(
+        buildSelect(
+            "类型",
+            kinds,
+            artifactFilters.kind,
+            (value) => {
+                artifactFilters.kind = value;
+                refresh();
+            },
+            "全部类型",
+            KIND_LABEL,
+        ),
+    );
+    // 搜索框
+    const search = createElement("input", "input search");
+    search.type = "search";
+    search.placeholder = "搜索 run / label / prompt / 文件名";
+    search.value = artifactFilters.search;
+    search.addEventListener("input", () => {
+        artifactFilters.search = search.value;
+        refresh();
+    });
+    filters.append(search);
+    viewRoot.append(filters);
+
+    // 结果摘要
+    const summaryHead = createElement("div", "section-head");
+    summaryHead.append(createElement("h3", "section-title", "全部产出物"));
+    // 摘要
+    const summary = createElement("span", "section-meta", "");
+    summaryHead.append(summary);
+    viewRoot.append(summaryHead);
+
+    // 网格
+    const grid = createElement("div", "grid");
+    viewRoot.append(grid);
+
+    /**
+     * 按当前筛选刷新网格。
+     */
+    function refresh() {
+        // 过滤结果
+        const filtered = filterArtifacts(items);
+        summary.textContent = `显示 ${filtered.length} / ${total}`;
+        clearNode(grid);
+        if (filtered.length === 0) {
+            grid.append(emptyNode("没有匹配的产出物", "调整筛选条件或先执行生成任务。"));
+            return;
+        }
+        renderArtifactCards(grid, filtered);
+    }
+
+    refresh();
+}
+
+/**
+ * 构造下拉筛选。
+ */
+function buildSelect(label, options, value, onChange, allLabel, labels) {
+    // 字段容器
+    const field = createElement("label", "field");
+    field.append(createElement("span", "field-label", label));
+    // 下拉框
+    const select = createElement("select", "select");
+    select.append(new Option(allLabel, ""));
+    for (const option of options) {
+        // 选项文案
+        const text = labels !== undefined ? (labels[option] ?? option) : option;
+        select.append(new Option(text, option));
+    }
+    select.value = value;
+    select.addEventListener("change", () => onChange(select.value));
+    field.append(select);
+    return field;
+}
+
+/**
+ * 按筛选条件过滤产物。
+ */
+function filterArtifacts(items) {
+    // 搜索词
+    const search = artifactFilters.search.trim().toLowerCase();
+    return items.filter((item) => {
+        if (artifactFilters.label !== "" && item.label !== artifactFilters.label) return false;
+        if (artifactFilters.status !== "" && item.run_status !== artifactFilters.status) return false;
+        if (artifactFilters.kind !== "" && item.output.kind !== artifactFilters.kind) return false;
+        if (search !== "") {
+            // 搜索文本
+            const haystack =
+                `${item.run_id} ${item.label ?? ""} ${item.prompt ?? ""} ${item.output.name}`.toLowerCase();
+            if (!haystack.includes(search)) return false;
+        }
+        return true;
+    });
+}
+
+/**
+ * 渲染产物卡片列表。
+ */
+function renderArtifactCards(container, items) {
+    for (const item of items) container.append(renderArtifactCard(item, items));
+}
+
+/**
+ * 单个产物卡片。
+ */
+function renderArtifactCard(item, items) {
+    // 产物
+    const output = item.output;
+    // 卡片
+    const card = createElement("article", "card artifact-card");
+    // 预览区
+    const preview = createElement("div", "artifact-preview");
+    // 是否可预览
+    const available = output.present === true && output.lfs_pointer !== true;
+    if (available && (output.kind === "video" || output.kind === "image")) {
+        if (output.kind === "video") {
+            // 视频首帧
+            const video = document.createElement("video");
+            video.src = `${output.media_url}#t=0.1`;
+            video.muted = true;
+            video.playsInline = true;
+            video.preload = "metadata";
+            preview.append(video);
+        } else {
+            // 图片缩略图
+            const image = document.createElement("img");
+            image.src = output.media_url;
+            image.alt = output.name;
+            image.loading = "lazy";
+            preview.append(image);
+        }
+    } else {
+        preview.append(createElement("span", "preview-icon", KIND_ICON[output.kind] ?? "↓"));
+    }
+    if (!output.present) preview.append(createElement("span", "preview-note", "文件缺失"));
+    else if (output.lfs_pointer) preview.append(createElement("span", "preview-note", "LFS 未拉取"));
+    if (available && PREVIEW_KINDS.has(output.kind)) {
+        // 播放/预览按钮
+        const open = createElement("button", "play-button", output.kind === "video" ? "▶" : "⌕");
+        open.type = "button";
+        open.title = output.kind === "video" ? "播放" : "预览";
+        open.addEventListener("click", (event) => {
+            event.stopPropagation();
+            openArtifact(item, items);
+        });
+        preview.append(open);
+    }
+    card.append(preview);
+
+    // 卡片内容
+    const body = createElement("div", "card-body");
+    // 标题行
+    const titleRow = createElement("div", "card-meta");
+    titleRow.append(createElement("h3", "card-title", output.name));
+    titleRow.append(kindBadge(output.kind));
+    body.append(titleRow);
+
+    // 元信息
+    const meta = createElement("div", "card-meta");
+    meta.append(createElement("span", "", item.label ?? shortId(item.run_id)));
+    meta.append(createElement("span", "", formatTime(item.started_at)));
+    meta.append(createElement("span", "", formatBytes(output.bytes)));
+    body.append(meta);
+
+    // 操作区
+    const actions = createElement("div", "card-actions");
+    if (available && PREVIEW_KINDS.has(output.kind)) {
+        // 打开按钮
+        const open = createElement(
+            "button",
+            "button",
+            output.kind === "video" ? "播放" : output.kind === "image" ? "查看" : "预览",
+        );
+        open.type = "button";
+        open.addEventListener("click", () => openArtifact(item, items));
+        actions.append(open);
+    }
+    // 下载链接
+    const download = createElement("a", "button ghost", "下载");
+    download.href = output.download_url;
+    actions.append(download);
+    body.append(actions);
+    card.append(body);
+    return card;
+}
+
+/**
+ * 打开产物。
+ */
+function openArtifact(item, list) {
+    // 产物
+    const output = item.output;
+    if (output.present !== true) {
+        showToast("文件不存在，可能尚未从 Git LFS 拉取", true);
+        return;
+    }
+    if (output.lfs_pointer === true) {
+        showToast("这是 Git LFS pointer，请先执行 git lfs pull", true);
+        return;
+    }
+    if (output.kind === "video" || output.kind === "audio") {
+        // 可播放条目
+        const playable = playableItems(list ?? [item]);
+        // 当前索引
+        const index = playable.findIndex((entry) => entry.url === output.media_url);
+        openPlayer(playable, Math.max(index, 0));
+        return;
+    }
+    if (output.kind === "image") {
+        openImage(item);
+        return;
+    }
+    if (output.kind === "json" || output.kind === "text") {
+        void openText(item);
+        return;
+    }
+    window.location.href = output.download_url;
+}
+
+/**
+ * 可播放列表。
+ */
+function playableItems(items) {
+    // 结果
+    const out = [];
+    for (const item of items) {
+        // 产物
+        const output = item.output;
+        if (output === undefined || output.present !== true || output.lfs_pointer === true) continue;
+        if (!PLAYABLE_KINDS.has(output.kind)) continue;
+        out.push({
+            title: `${item.label ?? item.run_id} · ${output.name}`,
+            url: output.media_url,
+            kind: output.kind,
+        });
+    }
+    return out;
+}
+
+/**
+ * 任务页。
+ */
+function renderTasks(data) {
+    // 任务列表
+    const tasks = Array.isArray(data.items) ? data.items : [];
+    // 页头
+    const head = createElement("div", "view-head");
+    // 页头文本
+    const headText = createElement("div");
+    headText.append(createElement("p", "eyebrow", "Tasks"));
+    headText.append(createElement("h2", "page-title", "任务"));
+    headText.append(
+        createElement("p", "page-subtitle", `共 ${data.total ?? tasks.length} 个任务；点击详情查看 run 与事件。`),
+    );
+    head.append(headText);
+    viewRoot.append(head);
+    if (tasks.length === 0) {
+        viewRoot.append(emptyNode("还没有任务", "daoyan run / shot / batch 创建的任务会在这里出现。"));
+        return;
+    }
+    viewRoot.append(renderTaskList(tasks));
+}
+
+/**
+ * 渲染任务列表。
+ */
+function renderTaskList(tasks) {
+    // 容器
+    const list = createElement("div", "task-list");
+    for (const task of tasks) {
+        // 任务卡片
+        const card = renderTaskCard(task);
+        list.append(card);
+        if (openTaskId === task.task_id) {
+            // 详情容器
+            const detail = card.querySelector(".task-detail");
+            void loadTaskDetail(task.task_id, detail);
+        }
+    }
+    return list;
+}
+
+/**
+ * 单个任务卡片。
+ */
+function renderTaskCard(task) {
+    // 卡片
+    const card = createElement("article", "task-card");
+    // 头部
+    const head = createElement("div", "task-head");
+    // 标题区
+    const title = createElement("div", "task-title");
+    title.append(statusBadge(task.status));
+    title.append(createElement("h3", "task-command", task.command));
+    title.append(badge(TASK_KIND_LABEL[task.kind] ?? task.kind, ""));
+    head.append(title);
+
+    // 详情按钮
+    const toggle = createElement("button", "button ghost task-toggle", openTaskId === task.task_id ? "收起" : "详情");
+    toggle.type = "button";
+    head.append(toggle);
+    card.append(head);
+
+    // 元信息
+    const meta = createElement("div", "task-meta");
+    meta.append(createElement("span", "", `task ${shortId(task.task_id)}`));
+    meta.append(createElement("span", "", `machine ${task.machine_id}`));
+    meta.append(createElement("span", "", `${task.run_count ?? 0} run`));
+    meta.append(createElement("span", "", formatTime(task.created_at)));
+    if (task.error !== null && task.error !== undefined) {
+        meta.append(createElement("span", "", `${task.error.code}: ${task.error.message}`));
+    }
+    card.append(meta);
+
+    // 详情容器
+    const detail = createElement("div", "task-detail");
+    detail.hidden = openTaskId !== task.task_id;
+    card.append(detail);
+    toggle.addEventListener("click", () => {
+        if (openTaskId === task.task_id) {
+            openTaskId = null;
+            detail.hidden = true;
+            toggle.textContent = "详情";
+            return;
+        }
+        openTaskId = task.task_id;
+        for (const other of viewRoot.querySelectorAll(".task-detail")) other.hidden = true;
+        for (const button of viewRoot.querySelectorAll(".task-toggle")) button.textContent = "详情";
+        detail.hidden = false;
+        toggle.textContent = "收起";
+        void loadTaskDetail(task.task_id, detail);
+    });
+    return card;
+}
+
+/**
+ * 加载任务详情。
+ */
+async function loadTaskDetail(taskId, container) {
+    if (container === null) return;
+    container.hidden = false;
+    container.textContent = "加载中…";
+    // 缓存项
+    const cached = taskDetailCache.get(taskId);
+    if (cached !== undefined && Date.now() - cached.at < TASK_DETAIL_CACHE_MS) {
+        renderTaskDetail(container, cached.data);
+        return;
+    }
+    try {
+        // 详情数据
+        const data = await requestJson(`/api/tasks/${encodeURIComponent(taskId)}`);
+        taskDetailCache.set(taskId, { at: Date.now(), data });
+        renderTaskDetail(container, data);
+    } catch (error) {
+        container.textContent = `加载失败：${error instanceof Error ? error.message : String(error)}`;
+    }
+}
+
+/**
+ * 渲染任务详情。
+ */
+function renderTaskDetail(container, data) {
+    clearNode(container);
+    // run 列表
+    const runs = Array.isArray(data.runs_detail) ? data.runs_detail : [];
+    container.append(createElement("h4", "", `Runs（${runs.length}）`));
+    if (runs.length === 0) {
+        container.append(createElement("p", "muted", "还没有 run。"));
+    } else {
+        // run 列表节点
+        const list = createElement("ul", "run-list");
+        for (const run of runs) {
+            // run 行
+            const item = createElement("li", "run-item");
+            // run 主信息
+            const main = createElement("div", "run-main");
+            main.append(statusBadge(run.status));
+            main.append(createElement("code", "mono", shortId(run.run_id)));
+            main.append(createElement("span", "", run.label ?? "无 label"));
+            main.append(
+                createElement("span", "muted", `${run.outputs.length} 个产物 · ${formatDuration(run.duration_ms)}`),
+            );
+            item.append(main);
+
+            // run 操作
+            const actions = createElement("div", "card-actions");
+            // 首个产物
+            const firstOutput = run.outputs[0];
+            if (
+                firstOutput !== undefined &&
+                firstOutput.present === true &&
+                firstOutput.lfs_pointer !== true &&
+                PREVIEW_KINDS.has(firstOutput.kind)
+            ) {
+                // 预览按钮
+                const preview = createElement("button", "button ghost", "预览");
+                preview.type = "button";
+                preview.addEventListener("click", () => {
+                    openArtifact(artifactItemFromRun(run, firstOutput));
+                });
+                actions.append(preview);
+            }
+            item.append(actions);
+            list.append(item);
+        }
+        container.append(list);
+    }
+
+    // 事件
+    const events = Array.isArray(data.events) ? data.events : [];
+    container.append(createElement("h4", "", `事件（${events.length}）`));
+    if (events.length === 0) {
+        container.append(createElement("p", "muted", "暂无事件。"));
+        return;
+    }
+    // 事件列表
+    const eventList = createElement("ul", "events");
+    for (const event of events) {
+        // 事件行
+        const item = createElement("li", "event");
+        item.append(createElement("span", "event-time", event.ts.slice(11, 19)));
+        item.append(createElement("span", "event-type", event.type));
+        // 事件数据文本
+        const dataText = JSON.stringify(event.data ?? {});
+        item.append(
+            createElement("span", "event-data", dataText.length > 220 ? `${dataText.slice(0, 220)}…` : dataText),
+        );
+        eventList.append(item);
+    }
+    container.append(eventList);
+}
+
+/**
+ * 用 run 信息构造产物条目。
+ */
+function artifactItemFromRun(run, output) {
+    return {
+        run_id: run.run_id,
+        task_id: run.task_id,
+        machine_id: run.machine_id,
+        label: run.label,
+        run_status: run.status,
+        started_at: run.started_at,
+        finished_at: run.finished_at,
+        workflow: run.workflow.path,
+        prompt: run.prompt,
+        output,
+    };
+}
+
+/**
+ * 成片页。
+ */
+function renderFinals(data) {
+    // 成片列表
+    const items = Array.isArray(data) ? data : [];
+    // 页头
+    const head = createElement("div", "view-head");
+    // 页头文本
+    const headText = createElement("div");
+    headText.append(createElement("p", "eyebrow", "Final cuts"));
+    headText.append(createElement("h2", "page-title", "成片"));
+    headText.append(createElement("p", "page-subtitle", "daoyan wrap 生成的 final/cut-* 文件。"));
+    head.append(headText);
+    viewRoot.append(head);
+    if (items.length === 0) {
+        viewRoot.append(emptyNode("还没有成片", "完成至少两个镜头后运行 daoyan wrap。"));
+        return;
+    }
+    // 网格
+    const grid = createElement("div", "grid");
+    for (const item of items) {
+        // 卡片
+        const card = createElement("article", "card final-card");
+        // 预览区
+        const preview = createElement("div", "artifact-preview");
+        if (item.present === true && item.lfs_pointer !== true) {
+            // 视频首帧
+            const video = document.createElement("video");
+            video.src = `${item.media_url}#t=0.1`;
+            video.muted = true;
+            video.playsInline = true;
+            video.preload = "metadata";
+            preview.append(video);
+            // 播放按钮
+            const play = createElement("button", "play-button", "▶");
+            play.type = "button";
+            play.title = "播放成片";
+            play.addEventListener("click", () => {
+                openPlayer([{ title: item.name, url: item.media_url, kind: "video" }], 0);
+            });
+            preview.append(play);
+        } else {
+            preview.append(createElement("span", "preview-icon", "▶"));
+            preview.append(
+                createElement("span", "preview-note", item.lfs_pointer === true ? "LFS 未拉取" : "文件缺失"),
+            );
+        }
+        card.append(preview);
+
+        // 卡片内容
+        const body = createElement("div", "card-body");
+        body.append(createElement("h3", "card-title", item.name));
+        // 元信息
+        const meta = createElement("div", "card-meta");
+        meta.append(createElement("span", "", item.created_at !== null ? formatTime(item.created_at) : "无 manifest"));
+        meta.append(createElement("span", "", formatBytes(item.bytes)));
+        meta.append(createElement("span", "", `${item.clips.length} 段`));
+        if (item.missing.length > 0) meta.append(createElement("span", "", `缺 ${item.missing.length} 镜`));
+        body.append(meta);
+
+        // 操作区
+        const actions = createElement("div", "card-actions");
+        if (item.present === true && item.lfs_pointer !== true) {
+            // 播放按钮
+            const play = createElement("button", "button", "播放");
+            play.type = "button";
+            play.addEventListener("click", () => {
+                openPlayer([{ title: item.name, url: item.media_url, kind: "video" }], 0);
+            });
+            actions.append(play);
+        }
+        // 下载链接
+        const download = createElement("a", "button ghost", "下载");
+        download.href = item.download_url;
+        actions.append(download);
+        body.append(actions);
+        card.append(body);
+        grid.append(card);
+    }
+    viewRoot.append(grid);
+}
+
+/**
+ * 工作流页。
+ */
+function renderWorkflows(data) {
+    // 工作流列表
+    const items = Array.isArray(data) ? data : [];
+    // 页头
+    const head = createElement("div", "view-head");
+    // 页头文本
+    const headText = createElement("div");
+    headText.append(createElement("p", "eyebrow", "Workflows"));
+    headText.append(createElement("h2", "page-title", "工作流"));
+    headText.append(createElement("p", "page-subtitle", "workflows/ 下的 ComfyUI API 图与 bindings。"));
+    head.append(headText);
+    viewRoot.append(head);
+    if (items.length === 0) {
+        viewRoot.append(emptyNode("还没有工作流", "运行 daoyan workflow new / import 创建工作流。"));
+        return;
+    }
+    // 表格
+    const list = createElement("div", "table-list");
+    // 表头
+    const header = createElement("div", "table-row header");
+    for (const label of ["工作流", "节点", "bindings", "默认", "状态"]) header.append(createElement("span", "", label));
+    list.append(header);
+    for (const item of items) {
+        // 数据行
+        const row = createElement("div", "table-row");
+        // 名称区
+        const name = createElement("div");
+        name.append(createElement("div", "workflow-name", item.name));
+        name.append(createElement("div", "muted mono", item.path));
+        row.append(name);
+        row.append(createElement("span", "", item.nodes));
+        row.append(createElement("span", "", item.bindings ? "有" : "无"));
+        row.append(createElement("span", "", item.default ? "是" : "—"));
+        row.append(createElement("span", "", item.valid ? "可解析" : "JSON 损坏"));
+        list.append(row);
+    }
+    viewRoot.append(list);
+}
+
+/**
+ * 打开播放器。
+ */
+function openPlayer(items, index) {
+    if (items.length === 0) {
+        showToast("没有可播放的产物", true);
+        return;
+    }
+    playerItems = items.slice(0, MAX_PLAYLIST);
+    playerIndex = Math.max(0, Math.min(index, playerItems.length - 1));
+    renderPlayerItem();
+}
+
+/**
+ * 渲染当前播放项。
+ */
+function renderPlayerItem() {
+    // 当前项
+    const item = playerItems[playerIndex];
+    if (item === undefined) {
+        closeModal();
+        return;
+    }
+    // 媒体元素
+    const media = document.createElement(item.kind === "video" ? "video" : "audio");
+    media.controls = true;
+    media.autoplay = true;
+    media.playsInline = true;
+    media.src = item.url;
+    setModal(item.title, media, `${playerIndex + 1} / ${playerItems.length}`);
+    modalPrev.disabled = playerIndex <= 0;
+    modalNext.disabled = playerIndex >= playerItems.length - 1;
+}
+
+/**
+ * 打开图片。
+ */
+function openImage(item) {
+    // 图片元素
+    const image = document.createElement("img");
+    image.src = item.output.media_url;
+    image.alt = item.output.name;
+    setModal(item.output.name, image, "图片");
+    modalPrev.disabled = true;
+    modalNext.disabled = true;
+}
+
+/**
+ * 打开文本预览。
+ */
+async function openText(item) {
+    // 预览节点
+    const pre = createElement("pre", "", "加载中…");
+    setModal(item.output.name, pre, "文本预览");
+    modalPrev.disabled = true;
+    modalNext.disabled = true;
+    try {
+        // 文本响应
+        const response = await fetch(item.output.media_url);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        // 原始文本
+        const raw = await response.text();
+        // 展示文本
+        let text = raw;
+        if (item.output.kind === "json") {
+            try {
+                text = JSON.stringify(JSON.parse(raw), null, 2);
+            } catch {
+                text = raw;
+            }
+        }
+        pre.textContent =
+            text.length > TEXT_PREVIEW_LIMIT
+                ? `${text.slice(0, TEXT_PREVIEW_LIMIT)}\n\n…（已截断，完整内容请下载）`
+                : text;
+    } catch (error) {
+        pre.textContent = `读取失败：${error instanceof Error ? error.message : String(error)}`;
+    }
+}
+
+/**
+ * 设置模态框内容。
+ */
+function setModal(title, content, counter) {
+    modalTitle.textContent = title;
+    clearNode(modalContent);
+    modalContent.append(content);
+    modalCounter.textContent = counter ?? "";
+    modalRoot.hidden = false;
+}
+
+/**
+ * 关闭模态框。
+ */
+function closeModal() {
+    modalRoot.hidden = true;
+    clearNode(modalContent);
+    modalTitle.textContent = "预览";
+    modalCounter.textContent = "";
+    playerItems = [];
+    playerIndex = 0;
+}
+
+/**
+ * 上一个播放项。
+ */
+function modalPrevStep() {
+    if (playerItems.length === 0 || playerIndex <= 0) return;
+    playerIndex -= 1;
+    renderPlayerItem();
+}
+
+/**
+ * 下一个播放项。
+ */
+function modalNextStep() {
+    if (playerItems.length === 0 || playerIndex >= playerItems.length - 1) return;
+    playerIndex += 1;
+    renderPlayerItem();
+}
+
+/**
+ * 键盘操作。
+ */
+function handleKeydown(event) {
+    if (modalRoot.hidden) return;
+    if (event.key === "Escape") closeModal();
+    else if (event.key === "ArrowLeft") modalPrevStep();
+    else if (event.key === "ArrowRight") modalNextStep();
+}
+
+/**
+ * 启动应用。
+ */
+function start() {
+    renderShell();
+    renderNav();
+    setActiveNav();
+    modalClose.addEventListener("click", closeModal);
+    modalPrev.addEventListener("click", modalPrevStep);
+    modalNext.addEventListener("click", modalNextStep);
+    // 遮罩层
+    const backdrop = document.querySelector(".modal-backdrop");
+    if (backdrop !== null) backdrop.addEventListener("click", closeModal);
+    window.addEventListener("hashchange", onHashChange);
+    window.addEventListener("keydown", handleKeydown);
+    document.addEventListener("visibilitychange", () => {
+        if (!document.hidden) void loadCurrent();
+    });
+    void loadHeader();
+    onHashChange();
+}
+
+start();

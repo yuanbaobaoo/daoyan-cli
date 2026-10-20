@@ -145,7 +145,22 @@ shot/batch 必须有 bindings，至少映射 `prompt` 与 `seed`；`run` 不强�
 ```json
 {
   "workflow": "t2v",
-  "meta": { "width": 768, "height": 1344, "anchors": { "S1": "anchors/scene.png" } },
+  "meta": {
+    "title": "星河短片",
+    "synopsis": "调查员林默在雨夜追踪一段来自云层之上的信号。",
+    "width": 768,
+    "height": 1344,
+    "fps": 24,
+    "anchors": { "S1": "anchors/city.png" },
+    "characters": [
+      { "id": "lin", "name": "林默", "description": "28 岁调查员", "reference": "anchors/lin.png" },
+      { "id": "lan", "name": "阿岚", "description": "飞行员" }
+    ],
+    "scenes": [
+      { "id": "city", "name": "雨夜城市", "description": "霓虹、积水与高架桥", "reference": "anchors/city.png" },
+      { "id": "observatory", "name": "山顶天文台", "description": "废弃圆顶与射电望远镜" }
+    ]
+  },
   "defaults": {
     "length": 241, "steps": 30, "cfg": 4.0,
     "sampler_name": "euler", "scheduler": "simple",
@@ -154,15 +169,31 @@ shot/batch 必须有 bindings，至少映射 `prompt` 与 `seed`；`run` 不强�
   },
   "style_prefix": "电影感",
   "shots": [
-    { "id": "01", "slug": "opening", "seed": 1101, "first_frame": "S1", "prompt": "..." },
-    { "id": "02", "seed": 1102, "first_frame": { "relay": "01" }, "prompt": "..." }
+    {
+      "id": "01", "slug": "opening", "title": "雨夜信号",
+      "summary": "林默在雨夜发现线索",
+      "seed": 1101, "first_frame": "S1",
+      "characters": ["lin"], "scene": "city", "length": 48,
+      "prompt": "..."
+    },
+    {
+      "id": "02", "seed": 1102, "first_frame": { "relay": "01" },
+      "characters": ["lin", "lan"], "scene": "city", "length": 72,
+      "prompt": "..."
+    }
   ]
 }
 ```
 
 - workflow 选择：单镜 `workflow` > 文件级 `workflow` > `project.default_workflow`；
 - 逻辑值（prompt/seed/width/height/...）通过 bindings 注入；镜头可覆盖 `steps/cfg/length/width/height`，`params` 可追加逻辑输入；
-- 首帧：锚点 key 或接力（取上游最新成功 run 的尾帧）。
+- 首帧：锚点 key 或接力（取上游最新成功 run 的尾帧）；
+- `meta.characters` / `meta.scenes` 是可选的故事设定，仅用于展示与复用，不注入 workflow；
+- 人物/场景可以是字符串或对象；对象支持 `id`、`name`、`description`、`reference`（项目内相对路径）；
+- 镜头用 `characters: ["lin"]` / `scene: "city"` 引用 id 或名称；也支持 `cast` / `roles` 与 `location` 别名；
+- `title` / `summary` 用于展示，缺省回退到 `slug` 与 `prompt`；
+- `meta.fps` + 镜头 `length` 可推导时长；镜头也可用 `duration`（秒）显式覆盖；
+- 以上字段都是向后兼容的可选项，旧 `shots.json` 不受影响；`daoyan web` 会读取并展示这些信息。
 
 ## 6. task
 

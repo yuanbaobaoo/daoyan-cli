@@ -16,6 +16,7 @@ import { runEngine } from "./engine.mts";
 import { runWorkflow } from "./workflow.mts";
 import { runRun, runCancel } from "./run.mts";
 import { runSkill } from "./skill.mts";
+import { runWeb } from "./web.mts";
 
 /**
  * 位置参数说明。
@@ -496,6 +497,47 @@ export const COMMANDS: CommandMeta[] = [
         ],
         implemented: true,
         run: (ctx, args) => runLogs(ctx, args),
+    },
+    {
+        name: "web",
+        group: "ops",
+        summary: "启动临时只读 Web UI，查看项目、分镜、任务与产出物（Ctrl+C 停止）",
+        usage: "daoyan web [--port <n>] [--host <addr>] [--open] [--json]",
+        flags: [
+            {
+                name: "--port",
+                type: "integer",
+                default: 0,
+                description: "监听端口；0 表示由系统分配可用端口",
+            },
+            {
+                name: "--host",
+                type: "string",
+                default: "127.0.0.1",
+                description: "监听地址；默认仅本机访问",
+            },
+            {
+                name: "--open",
+                type: "boolean",
+                default: false,
+                description: "启动后尝试用系统默认浏览器打开",
+            },
+        ],
+        examples: ["daoyan web", "daoyan web --port 8080 --open", "daoyan web --json"],
+        detail: [
+            "只读查看器；不启动 ComfyUI、不占 machine lock、不写项目文件。",
+            "支持项目概览、分镜、任务、工作流、run 产出物与 final 成片；视频支持拖动进度。",
+            "--json 输出一次启动信封后继续驻留；Ctrl+C / SIGTERM 优雅关闭。",
+        ],
+        implemented: true,
+        jsonShape: {
+            url: "string",
+            host: "string",
+            port: "number",
+            project: "string",
+            mode: "local|remote|null",
+        },
+        run: (ctx, args) => runWeb(ctx, args),
     },
 
     // ---- 引擎 ----

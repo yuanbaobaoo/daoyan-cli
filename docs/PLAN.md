@@ -69,6 +69,7 @@ init / validate / skill update
 workflow new|import|list|show|nodes|node|apply|set|validate
 run / run cancel / shot / retake / batch / wrap
 status / logs
+web
 engine ls|install|use
 help / update
 ```

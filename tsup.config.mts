@@ -12,6 +12,12 @@ export default defineConfig({
     // 单入口单文件：动态 import 内联，避免多 chunk 在 CI 重建时产生 dist 差异。
     splitting: false,
     sourcemap: true,
+    // Web UI 资源以文本内嵌，保持 dist/cli.mjs 单文件分发。
+    loader: {
+        ".html": "text",
+        ".css": "text",
+        ".client": "text",
+    },
     // tsup 默认把 .mts 入口输出为 .js；显式指定 .mjs 以对齐 package.json 的 bin。
     outExtension: () => ({ js: ".mjs" }),
     banner: { js: "#!/usr/bin/env node" },

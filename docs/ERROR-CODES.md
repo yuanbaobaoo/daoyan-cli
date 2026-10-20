@@ -45,6 +45,7 @@
 | `update_failed` | 是 | — | 自升级失败 |
 | `provision_failed` | 是 | — | 引擎部署失败；看 `details.stage`（ensurepip/venv/torch/requirements/pip_check/smoke），不要手工猜 torch |
 | `artifact_download_failed` | 是 | — | `/view` 下载失败；引擎 scratch 保留 |
+| `web_start_failed` | 否 | — | Web 服务监听失败；检查端口占用与 `--host`，省略 `--port` 让系统分配 |
 | `engine_not_ready` | 是 | 5000 | 引擎未就绪 |
 | `engine_start_failed` | 否 | — | local 启动失败/就绪超时；看 `logs/engine-*.log` |
 | `engine_stop_failed` | 是 | 10000 | local 停止失败；下次任务回收 |

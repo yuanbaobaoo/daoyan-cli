@@ -168,6 +168,22 @@ daoyan logs [-f] [-n N] [--src daoyan-cli|engine|worker|all]
 
 任务模式读 `tasks/<id>/events.jsonl`；文件模式读 `logs/` 下最新 engine/worker/工具日志。`-f` 跟随到 task 终态。
 
+### web
+
+```bash
+daoyan web [--port <n>] [--host <addr>] [--open] [--json]
+```
+
+启动临时只读 Web UI（默认 `127.0.0.1` + 系统随机端口），查看项目档案、分镜、人物/场景、任务、工作流、run 产出物与 final 成片；视频支持拖动进度。
+
+- 概览展示镜头/人物/场景/产出统计、剧情简介与分镜一览；
+- 分镜页展示每镜内容、人物、场景、生成参数、全部历史产物与 run 历史，并支持筛选；
+- 不启动引擎、不占 machine lock、不写项目文件；
+- `Ctrl+C` / `SIGTERM` 优雅关闭；`--json` 输出一次启动信封后继续驻留；
+- `.dycli/machine.json` 缺失时仍可查看共享数据；
+- 媒体仅从 `run.outputs` 与 `final/` 白名单读取，支持 HTTP Range；
+- 详细 API/安全说明见 [WEB.md](WEB.md)。
+
 ## 引擎
 
 ```bash

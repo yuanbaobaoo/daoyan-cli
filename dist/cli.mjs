@@ -62,6 +62,7 @@ var init_errors = __esm({
       "update_failed",
       "provision_failed",
       "artifact_download_failed",
+      "web_start_failed",
       // 引擎
       "engine_not_ready",
       "engine_start_failed",
@@ -116,6 +117,10 @@ var init_errors = __esm({
       artifact_download_failed: {
         retryable: true,
         hint: "\u5F15\u64CE\u4EA7\u7269\u4ECD\u5728 scratch \u4E2D\uFF1B\u68C0\u67E5 /view \u53EF\u8FBE\u6027\u540E\u91CD\u8BD5\uFF0C\u6216\u624B\u52A8\u53D6\u56DE\u3002"
+      },
+      web_start_failed: {
+        retryable: false,
+        hint: "\u68C0\u67E5\u76D1\u542C\u5730\u5740\u4E0E\u7AEF\u53E3\u5360\u7528\uFF1B\u7AEF\u53E3\u51B2\u7A81\u65F6\u7701\u7565 --port \u8BA9\u7CFB\u7EDF\u5206\u914D\uFF0C\u6216\u6539\u7528 --port <n>\u3002"
       },
       engine_not_ready: { retryable: true, retryAfterMs: 5e3, hint: "\u786E\u8BA4\u5F15\u64CE\u53EF\u8FBE\u540E\u518D\u6267\u884C\u4EFB\u52A1\u3002" },
       engine_start_failed: {
@@ -629,6 +634,7 @@ function capabilities() {
     bindings: true,
     git_friendly_records: true,
     project_skill: true,
+    web_ui: "read-only",
     user_level_skill: false,
     http_api: [
       "/system_stats",
@@ -1628,15 +1634,41 @@ function recipesMd() {
 \`\`\`json
 {
   "workflow": "t2v",
-  "meta": { "width": 768, "height": 1344, "anchors": { "S1": "anchors/scene.png" } },
-  "defaults": { "steps": 30, "cfg": 4.0, "negative": "\u4F4E\u8D28\u91CF" },
+  "meta": {
+    "title": "\u77ED\u7247\u540D",
+    "synopsis": "\u4E00\u53E5\u8BDD\u5267\u60C5\u7B80\u4ECB",
+    "width": 768,
+    "height": 1344,
+    "fps": 24,
+    "anchors": { "S1": "anchors/scene.png" },
+    "characters": [
+      { "id": "lin", "name": "\u6797\u9ED8", "description": "\u8C03\u67E5\u5458" }
+    ],
+    "scenes": [
+      { "id": "city", "name": "\u96E8\u591C\u57CE\u5E02", "description": "\u9713\u8679\u4E0E\u79EF\u6C34" }
+    ]
+  },
+  "defaults": { "length": 48, "steps": 30, "cfg": 4.0, "negative": "\u4F4E\u8D28\u91CF" },
   "style_prefix": "\u7535\u5F71\u611F",
   "shots": [
-    { "id": "01", "seed": 1101, "first_frame": "S1", "prompt": "..." },
-    { "id": "02", "seed": 1102, "first_frame": { "relay": "01" }, "prompt": "..." }
+    {
+      "id": "01", "slug": "opening", "title": "\u96E8\u591C\u4FE1\u53F7",
+      "summary": "\u6797\u9ED8\u5728\u96E8\u591C\u53D1\u73B0\u7EBF\u7D22",
+      "seed": 1101, "first_frame": "S1",
+      "characters": ["lin"], "scene": "city", "length": 48,
+      "prompt": "..."
+    },
+    {
+      "id": "02", "seed": 1102, "first_frame": { "relay": "01" },
+      "characters": ["lin"], "scene": "city", "prompt": "..."
+    }
   ]
 }
 \`\`\`
+
+- \`title\` / \`summary\` / \`characters\` / \`scene\` / \`fps\` \u662F\u5C55\u793A\u5B57\u6BB5\uFF0C\u4E0D\u53C2\u4E0E\u6267\u884C\uFF1B\`daoyan web\` \u4F1A\u7528\u6765\u751F\u6210\u9879\u76EE\u6863\u6848\u3001\u4EBA\u7269/\u573A\u666F\u548C\u5206\u955C\u9875\uFF1B
+- \u4EBA\u7269\u548C\u573A\u666F\u53EF\u5728\u955C\u5934\u91CC\u7528 id \u6216\u540D\u79F0\u5F15\u7528\uFF1B\u6CA1\u6709\u767B\u8BB0\u65F6 web \u663E\u793A\u201C\u672A\u6807\u6CE8\u201D\uFF0C\u4E0D\u5F71\u54CD shot/batch\uFF1B
+- \u65E7 \`shots.json\` \u53EF\u4EE5\u4E0D\u52A0\u8FD9\u4E9B\u5B57\u6BB5\uFF0C\u5B8C\u5168\u5411\u540E\u517C\u5BB9\u3002
 
 ## \u62CD\u6444
 
@@ -5333,8 +5365,8 @@ async function gpuSnapshot() {
   }
   return { supported: true, devices };
 }
-function totalVram(snapshot2) {
-  return snapshot2.devices.reduce(
+function totalVram(snapshot) {
+  return snapshot.devices.reduce(
     (acc, d) => ({
       usedMb: acc.usedMb + d.usedMb,
       totalMb: acc.totalMb + d.totalMb,
@@ -6714,20 +6746,20 @@ async function takeoverGpu(opts) {
       issues: []
     };
   }
-  const snapshot2 = await gpuSnapshot();
-  if (!snapshot2.supported) {
+  const snapshot = await gpuSnapshot();
+  if (!snapshot.supported) {
     return {
       enabled: false,
       record: { takeover: false, evicted: [], restored: [], errors: [] },
       issues: [
         {
           code: "gpu_unsupported",
-          message: `GPU \u63A5\u7BA1\u4E0D\u53EF\u7528\uFF08${snapshot2.reason ?? "\u672A\u77E5\u539F\u56E0"}\uFF09\uFF1B\u4EFB\u52A1\u7EE7\u7EED\uFF0C\u672A\u9A71\u9010\u4EFB\u4F55\u8FDB\u7A0B`
+          message: `GPU \u63A5\u7BA1\u4E0D\u53EF\u7528\uFF08${snapshot.reason ?? "\u672A\u77E5\u539F\u56E0"}\uFF09\uFF1B\u4EFB\u52A1\u7EE7\u7EED\uFF0C\u672A\u9A71\u9010\u4EFB\u4F55\u8FDB\u7A0B`
         }
       ]
     };
   }
-  const before = totalVram(snapshot2);
+  const before = totalVram(snapshot);
   const entries = [];
   const lease = newLease(opts.taskId, opts.projectRoot);
   writeLease(lease);
@@ -11176,52 +11208,20 @@ var init_logs = __esm({
   }
 });
 
-// src/commands/status.mts
+// src/core/status/snapshot.mts
 import { existsSync as existsSync25 } from "fs";
 import { join as join23 } from "path";
-function parseArgs3(args) {
-  const out = { wait: false };
-  for (let i = 0; i < args.length; i++) {
-    const { name, inline } = splitInlineFlag(args[i] ?? "");
-    if (name === "--task") {
-      const v = takeValue(args, i, inline, "--task");
-      out.taskId = v.value;
-      i += v.skip;
-      continue;
-    }
-    if (name === "--run") {
-      const v = takeValue(args, i, inline, "--run");
-      out.runId = v.value;
-      i += v.skip;
-      continue;
-    }
-    if (name === "--wait") {
-      out.wait = true;
-      continue;
-    }
-    if (name === "--timeout") {
-      const v = takeValue(args, i, inline, "--timeout");
-      out.timeoutSec = Number(v.value);
-      if (!Number.isFinite(out.timeoutSec) || out.timeoutSec <= 0) usageError("--timeout \u9700\u8981\u6B63\u6570\uFF08\u79D2\uFF09");
-      i += v.skip;
-      continue;
-    }
-    usageError(`\u672A\u77E5\u53C2\u6570 ${name}`);
-  }
-  if (out.taskId !== void 0 && out.runId !== void 0) usageError("--task \u4E0E --run \u53EA\u80FD\u4E8C\u9009\u4E00");
-  return out;
-}
-async function probeEngine(root, machine) {
+async function probeEngine(root, machine, engineTimeoutMs = 3e3) {
   if (machine.engine.mode === "remote") {
     const url2 = machine.engine.url;
-    const up2 = await probeComfy(url2, 3e3);
+    const up2 = await probeComfy(url2, engineTimeoutMs);
     const queue2 = up2 ? await safeQueue(new ComfyClient(url2)) : null;
     return { mode: "remote", url: url2, up: up2, pid: null, queue: queue2 };
   }
   const pidRec = readEnginePid(root);
   const pid = pidRec !== null && pidAlive(pidRec.pid) ? pidRec.pid : null;
   const url = `http://127.0.0.1:${machine.engine.port}`;
-  const up = await probeComfy(url, 3e3);
+  const up = await probeComfy(url, engineTimeoutMs);
   const queue = up ? await safeQueue(new ComfyClient(url)) : null;
   return {
     mode: "local",
@@ -11254,17 +11254,21 @@ function shotProgress(root, shots) {
     };
   });
 }
-async function snapshot(root, project, machine, shots) {
-  const engine = await probeEngine(root, machine);
-  const lock = inspectMachineLock();
-  const tasks = listTasks(root);
+function splitActiveTasks(tasks, machine) {
   const active = tasks.filter((t) => !isTerminalStatus(t.status) && t.machine_id === machine.machine_id);
   const synced = tasks.filter((t) => !isTerminalStatus(t.status) && t.machine_id !== machine.machine_id);
+  return { active, synced };
+}
+async function buildStatusSnapshot(root, project, machine, shots, options = {}) {
+  const engine = await probeEngine(root, machine, options.engineTimeoutMs);
+  const lock = inspectMachineLock();
+  const tasks = listTasks(root);
+  const { active, synced } = splitActiveTasks(tasks, machine);
   const gpu = await gpuSnapshot();
   const lease = inspectLease();
-  const { COMMANDS: COMMANDS2 } = await Promise.resolve().then(() => (init_registry(), registry_exports));
-  const skill = skillState(root, VERSION, COMMANDS2);
+  const skill = skillState(root, VERSION, options.commands ?? []);
   const shot = shotProgress(root, shots);
+  const recentTasks = tasks.slice(0, 10).map(taskSummary);
   return {
     project: { name: project.name, version: project.version },
     mode: machine.engine.mode,
@@ -11303,7 +11307,7 @@ async function snapshot(root, project, machine, shots) {
     active_task: active[0] !== void 0 ? taskSummary(active[0]) : null,
     active_tasks: active.map(taskSummary),
     synced_running_tasks: synced.map(taskSummary),
-    recent_tasks: tasks.slice(0, 10).map(taskSummary),
+    recent_tasks: recentTasks,
     gpu: {
       supported: gpu.supported,
       ...gpu.reason !== void 0 ? { reason: gpu.reason } : {},
@@ -11325,6 +11329,55 @@ async function snapshot(root, project, machine, shots) {
     shots: shot,
     next_actions: active.length > 0 ? [`status --task ${active[0]?.task_id} --wait`, `run cancel ${active[0]?.task_id}`] : ["workflow nodes --refresh --json", "run <workflow> --json"]
   };
+}
+var init_snapshot = __esm({
+  "src/core/status/snapshot.mts"() {
+    "use strict";
+    init_client();
+    init_types();
+    init_local_session();
+    init_lock();
+    init_store2();
+    init_store();
+    init_detect();
+    init_lease();
+    init_skill();
+    init_version();
+  }
+});
+
+// src/commands/status.mts
+function parseArgs3(args) {
+  const out = { wait: false };
+  for (let i = 0; i < args.length; i++) {
+    const { name, inline } = splitInlineFlag(args[i] ?? "");
+    if (name === "--task") {
+      const v = takeValue(args, i, inline, "--task");
+      out.taskId = v.value;
+      i += v.skip;
+      continue;
+    }
+    if (name === "--run") {
+      const v = takeValue(args, i, inline, "--run");
+      out.runId = v.value;
+      i += v.skip;
+      continue;
+    }
+    if (name === "--wait") {
+      out.wait = true;
+      continue;
+    }
+    if (name === "--timeout") {
+      const v = takeValue(args, i, inline, "--timeout");
+      out.timeoutSec = Number(v.value);
+      if (!Number.isFinite(out.timeoutSec) || out.timeoutSec <= 0) usageError("--timeout \u9700\u8981\u6B63\u6570\uFF08\u79D2\uFF09");
+      i += v.skip;
+      continue;
+    }
+    usageError(`\u672A\u77E5\u53C2\u6570 ${name}`);
+  }
+  if (out.taskId !== void 0 && out.runId !== void 0) usageError("--task \u4E0E --run \u53EA\u80FD\u4E8C\u9009\u4E00");
+  return out;
 }
 async function runStatus(ctx2, args) {
   const flags = parseArgs3(args);
@@ -11412,7 +11465,8 @@ async function runStatus(ctx2, args) {
     }
     return flags.wait ? run2.status === "succeeded" ? 0 : 1 : 0;
   }
-  const data = await snapshot(root, project, machine, shots);
+  const { COMMANDS: COMMANDS2 } = await Promise.resolve().then(() => (init_registry(), registry_exports));
+  const data = await buildStatusSnapshot(root, project, machine, shots, { commands: COMMANDS2 });
   if (ctx2.json) {
     emitData(data);
     return 0;
@@ -11467,19 +11521,13 @@ var init_status = __esm({
     init_args();
     init_config();
     init_types();
-    init_client();
-    init_local_session();
-    init_lock();
     init_store2();
     init_summary();
     init_store();
     init_events();
     init_store();
     init_create();
-    init_detect();
-    init_lease();
-    init_skill();
-    init_version();
+    init_snapshot();
   }
 });
 
@@ -12471,6 +12519,1401 @@ var init_skill2 = __esm({
   }
 });
 
+// src/core/web/data.mts
+import { existsSync as existsSync28, readdirSync as readdirSync10, readFileSync as readFileSync19, statSync as statSync7 } from "fs";
+import { basename as basename8, join as join26, resolve as resolve7, sep as sep2 } from "path";
+function extensionOf(name) {
+  const dot = name.lastIndexOf(EXTENSION_SEPARATOR);
+  return dot >= 0 ? name.slice(dot).toLowerCase() : "";
+}
+function classifyArtifact(name) {
+  const ext = extensionOf(name);
+  if (VIDEO_EXTENSIONS.has(ext)) return "video";
+  if (IMAGE_EXTENSIONS.has(ext)) return "image";
+  if (AUDIO_EXTENSIONS.has(ext)) return "audio";
+  if (JSON_EXTENSIONS.has(ext)) return "json";
+  if (TEXT_EXTENSIONS.has(ext)) return "text";
+  return "other";
+}
+function isLfsPointer(file, size) {
+  if (size > 1024) return false;
+  try {
+    return readFileSync19(file, "utf8").startsWith(LFS_POINTER_PREFIX);
+  } catch {
+    return false;
+  }
+}
+function runMediaUrl(runId, name) {
+  return `${MEDIA_PREFIX}/run/${encodeURIComponent(runId)}/${encodeURIComponent(name)}`;
+}
+function finalMediaUrl(name) {
+  return `${MEDIA_PREFIX}/final/${encodeURIComponent(name)}`;
+}
+function artifactOf(root, run2, output) {
+  const base = runDir(root, run2.run_id);
+  const abs = resolve7(base, output.path);
+  const within = abs !== base && abs.startsWith(base + sep2);
+  const present = within && existsSync28(abs);
+  let bytes = output.bytes;
+  let lfsPointer = false;
+  if (present) {
+    try {
+      const stat = statSync7(abs);
+      bytes = stat.size;
+      lfsPointer = isLfsPointer(abs, stat.size);
+    } catch {
+    }
+  }
+  const mediaUrl = runMediaUrl(run2.run_id, output.name);
+  return {
+    run_id: run2.run_id,
+    name: output.name,
+    path: output.path,
+    kind: classifyArtifact(output.name),
+    bytes,
+    sha256: output.sha256,
+    present,
+    lfs_pointer: lfsPointer,
+    media_url: mediaUrl,
+    download_url: `${mediaUrl}?download=1`
+  };
+}
+function safeReadRun(root, runId) {
+  if (basename8(runId) !== runId || runId.includes("/") || runId.includes("\\") || runId === "." || runId === "..") {
+    return null;
+  }
+  try {
+    return readJsonIfExists(join26(runDir(root, runId), RUN_FILE));
+  } catch {
+    return null;
+  }
+}
+function safeListRuns(root) {
+  const dir = join26(root, RUNS_DIR);
+  if (!existsSync28(dir)) return [];
+  const out = [];
+  for (const ent of readdirSync10(dir, { withFileTypes: true })) {
+    if (!ent.isDirectory()) continue;
+    const rec = safeReadRun(root, ent.name);
+    if (rec !== null) out.push(rec);
+  }
+  return out.sort((a, b) => b.started_at.localeCompare(a.started_at) || b.run_id.localeCompare(a.run_id));
+}
+function safeReadTask(root, taskId) {
+  if (basename8(taskId) !== taskId || taskId.includes("/") || taskId.includes("\\") || taskId === "." || taskId === "..") {
+    return null;
+  }
+  try {
+    return readJsonIfExists(join26(taskDir(root, taskId), TASK_FILE));
+  } catch {
+    return null;
+  }
+}
+function safeListTasks(root) {
+  const dir = join26(root, TASKS_DIR);
+  if (!existsSync28(dir)) return [];
+  const out = [];
+  for (const ent of readdirSync10(dir, { withFileTypes: true })) {
+    if (!ent.isDirectory()) continue;
+    const rec = safeReadTask(root, ent.name);
+    if (rec !== null) out.push(rec);
+  }
+  return out.sort((a, b) => b.created_at.localeCompare(a.created_at));
+}
+function durationMs(startedAt, finishedAt) {
+  const start = Date.parse(startedAt);
+  const end = Date.parse(finishedAt);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return 0;
+  return end - start;
+}
+function promptOf(run2) {
+  const value = run2.inputs.prompt;
+  return typeof value === "string" ? value : null;
+}
+function runSummaryDto(root, run2) {
+  return {
+    run_id: run2.run_id,
+    task_id: run2.task_id,
+    machine_id: run2.machine_id,
+    request_id: run2.request_id,
+    label: run2.label,
+    status: run2.status,
+    workflow: run2.workflow,
+    prompt: promptOf(run2),
+    prompt_id: run2.prompt_id,
+    engine: run2.engine,
+    ...run2.gpu !== void 0 ? { gpu: run2.gpu } : {},
+    started_at: run2.started_at,
+    finished_at: run2.finished_at,
+    duration_ms: durationMs(run2.started_at, run2.finished_at),
+    error: run2.error,
+    outputs: run2.outputs.map((o) => artifactOf(root, run2, o))
+  };
+}
+function flattenArtifacts(root, runs) {
+  const out = [];
+  for (const run2 of runs) {
+    for (const output of run2.outputs) {
+      out.push({
+        run_id: run2.run_id,
+        task_id: run2.task_id,
+        machine_id: run2.machine_id,
+        label: run2.label,
+        run_status: run2.status,
+        started_at: run2.started_at,
+        finished_at: run2.finished_at,
+        workflow: run2.workflow.path,
+        prompt: promptOf(run2),
+        output: artifactOf(root, run2, output)
+      });
+    }
+  }
+  return out;
+}
+function listArtifacts(root, query = {}) {
+  const runs = safeListRuns(root);
+  const labels = Array.from(new Set(runs.map((r) => r.label).filter((x) => x !== null))).sort();
+  const all = flattenArtifacts(root, runs);
+  const kinds = Array.from(new Set(all.map((x) => x.output.kind))).sort();
+  const search = (query.search ?? "").trim().toLowerCase();
+  const filtered = all.filter((item) => {
+    if (query.label !== void 0 && query.label !== "" && item.label !== query.label) return false;
+    if (query.status !== void 0 && query.status !== "" && item.run_status !== query.status) return false;
+    if (query.kind !== void 0 && query.kind !== "" && item.output.kind !== query.kind) return false;
+    if (search !== "") {
+      const haystack = `${item.run_id} ${item.label ?? ""} ${item.prompt ?? ""} ${item.output.name}`.toLowerCase();
+      if (!haystack.includes(search)) return false;
+    }
+    return true;
+  });
+  const limit = Math.min(Math.max(query.limit ?? DEFAULT_ARTIFACT_LIMIT, 1), MAX_ARTIFACT_LIMIT);
+  return { items: filtered.slice(0, limit), total: filtered.length, labels, kinds };
+}
+function getRunDetail(root, runId) {
+  const run2 = safeReadRun(root, runId);
+  if (run2 === null) return null;
+  let inputsSnapshot = null;
+  try {
+    inputsSnapshot = readJsonIfExists(join26(runDir(root, run2.run_id), RUN_INPUTS_FILE));
+  } catch {
+    inputsSnapshot = null;
+  }
+  let events = [];
+  try {
+    events = readEvents(taskDir(root, run2.task_id)).slice(-MAX_EVENT_ROWS);
+  } catch {
+    events = [];
+  }
+  return {
+    ...runSummaryDto(root, run2),
+    inputs: inputsSnapshot?.inputs ?? run2.inputs,
+    overrides: run2.overrides,
+    input_files: inputsSnapshot?.files ?? [],
+    events,
+    workflow_snapshot: existsSync28(join26(runDir(root, run2.run_id), RUN_WORKFLOW_FILE))
+  };
+}
+function taskItem(rec) {
+  return {
+    task_id: rec.task_id,
+    kind: rec.kind,
+    status: rec.status,
+    mode: rec.mode,
+    machine_id: rec.machine_id,
+    request_id: rec.request_id,
+    runs: rec.runs,
+    command: rec.command,
+    created_at: rec.created_at,
+    started_at: rec.started_at,
+    finished_at: rec.finished_at,
+    error: rec.error,
+    next_actions: rec.next_actions,
+    run_count: rec.runs.length,
+    active: !isTerminalStatus(rec.status)
+  };
+}
+function listTasksView(root) {
+  const tasks = safeListTasks(root);
+  return { items: tasks.map(taskItem), total: tasks.length };
+}
+function getTaskDetail(root, taskId) {
+  const task = safeReadTask(root, taskId);
+  if (task === null) return null;
+  const runs = task.runs.map((id) => safeReadRun(root, id)).filter((x) => x !== null).map((run2) => runSummaryDto(root, run2));
+  let events = [];
+  try {
+    events = readEvents(taskDir(root, taskId)).slice(-MAX_EVENT_ROWS);
+  } catch {
+    events = [];
+  }
+  return { ...taskItem(task), runs_detail: runs, events };
+}
+function recordOf(value) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  return value;
+}
+function stringOf(value) {
+  if (typeof value !== "string") return null;
+  const text = value.trim();
+  return text === "" ? null : text;
+}
+function numberOf(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+function firstField(record, keys) {
+  if (record === null) return void 0;
+  for (const key of keys) {
+    const value = record[key];
+    if (value !== void 0 && value !== null && value !== "") return value;
+  }
+  return void 0;
+}
+function firstString(record, keys) {
+  return stringOf(firstField(record, keys));
+}
+function arrayOf(value) {
+  if (value === void 0 || value === null) return [];
+  return Array.isArray(value) ? value : [value];
+}
+function entityFromRaw(value) {
+  if (typeof value === "string") {
+    const name2 = stringOf(value);
+    return name2 !== null ? { id: null, name: name2, description: null, reference: null } : null;
+  }
+  const record = recordOf(value);
+  if (record === null) return null;
+  const id = firstString(record, ENTITY_ID_KEYS);
+  const name = firstString(record, ENTITY_NAME_KEYS) ?? id;
+  if (name === null) return null;
+  return {
+    id,
+    name,
+    description: firstString(record, ENTITY_DESC_KEYS),
+    reference: firstString(record, ENTITY_REF_KEYS)
+  };
+}
+function entityKeyOf(entity) {
+  return entity.id !== null ? `id:${entity.id}` : `name:${entity.name}`;
+}
+function definitionsFrom(meta, keys) {
+  const raw = firstField(meta, keys);
+  const out = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const item of arrayOf(raw)) {
+    const entity = entityFromRaw(item);
+    if (entity === null) continue;
+    const key = entityKeyOf(entity);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(entity);
+  }
+  return out;
+}
+function resolveEntities(refs, definitions) {
+  const byId = /* @__PURE__ */ new Map();
+  const byName = /* @__PURE__ */ new Map();
+  for (const def of definitions) {
+    if (def.id !== null) byId.set(def.id, def);
+    byName.set(def.name, def);
+  }
+  const out = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const item of arrayOf(refs)) {
+    const parsed = entityFromRaw(item);
+    if (parsed === null) continue;
+    const def = (parsed.id !== null ? byId.get(parsed.id) : void 0) ?? byName.get(parsed.name) ?? byId.get(parsed.name);
+    const entity = {
+      id: parsed.id ?? def?.id ?? null,
+      name: def?.name ?? parsed.name,
+      description: parsed.description ?? def?.description ?? null,
+      reference: parsed.reference ?? def?.reference ?? null,
+      shots: [],
+      count: 0
+    };
+    const key = entity.id !== null ? `id:${entity.id}` : `name:${entity.name}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(entity);
+  }
+  return out;
+}
+function seedEntities(map, definitions) {
+  for (const def of definitions) {
+    const key = entityKeyOf(def);
+    if (map.has(key)) continue;
+    map.set(key, { ...def, shots: [], count: 0 });
+  }
+}
+function mergeEntity(map, entity, shotId) {
+  const key = entity.id !== null ? `id:${entity.id}` : `name:${entity.name}`;
+  const existing = map.get(key);
+  if (existing === void 0) {
+    map.set(key, { ...entity, shots: [shotId], count: 1 });
+    return;
+  }
+  if (!existing.shots.includes(shotId)) existing.shots.push(shotId);
+  existing.count = existing.shots.length;
+  if (existing.description === null && entity.description !== null) existing.description = entity.description;
+  if (existing.reference === null && entity.reference !== null) existing.reference = entity.reference;
+}
+function sortEntities(list) {
+  return list.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+}
+function latestArtifactOf(root, run2) {
+  if (run2 === null || run2.outputs.length === 0) return null;
+  const output = run2.outputs.find((o) => classifyArtifact(o.name) === "video") ?? run2.outputs[0];
+  return output !== void 0 ? artifactOf(root, run2, output) : null;
+}
+function buildShotsView(root, shots) {
+  if (shots === null) return null;
+  const metaRecord = shots.meta;
+  const defaultsRecord = shots.defaults;
+  const fps = numberOf(metaRecord.fps) ?? numberOf(defaultsRecord.fps);
+  const characterDefs = definitionsFrom(metaRecord, CHARACTER_KEYS);
+  const sceneDefs = definitionsFrom(metaRecord, SCENE_DEF_KEYS);
+  const characterMap = /* @__PURE__ */ new Map();
+  const sceneMap = /* @__PURE__ */ new Map();
+  seedEntities(characterMap, characterDefs);
+  seedEntities(sceneMap, sceneDefs);
+  const runs = safeListRuns(root);
+  const byLabel = /* @__PURE__ */ new Map();
+  for (const run2 of runs) {
+    if (run2.label === null) continue;
+    const list = byLabel.get(run2.label) ?? [];
+    list.push(run2);
+    byLabel.set(run2.label, list);
+  }
+  const items = shots.shots.map((shot) => {
+    const shotRuns = byLabel.get(`shot:${shot.id}`) ?? [];
+    const latest = shotRuns[0] ?? null;
+    const latestSuccess = shotRuns.find((r) => r.status === "succeeded") ?? null;
+    const record = shot;
+    const params = recordOf(shot.params);
+    const characterRefs = firstField(record, CHARACTER_KEYS) ?? firstField(params, CHARACTER_KEYS);
+    const sceneRef = firstField(record, SCENE_KEYS) ?? firstField(params, SCENE_KEYS);
+    const shotCharacters = resolveEntities(characterRefs, characterDefs);
+    const shotScene = resolveEntities(sceneRef, sceneDefs)[0] ?? null;
+    for (const entity of shotCharacters) {
+      entity.shots = [shot.id];
+      entity.count = 1;
+      mergeEntity(characterMap, entity, shot.id);
+    }
+    if (shotScene !== null) {
+      shotScene.shots = [shot.id];
+      shotScene.count = 1;
+      mergeEntity(sceneMap, shotScene, shot.id);
+    }
+    let firstFrame = null;
+    let firstFrameKind = "none";
+    if (typeof shot.first_frame === "string") {
+      firstFrame = shot.first_frame;
+      firstFrameKind = "anchor";
+    } else if (shot.first_frame !== void 0 && typeof shot.first_frame === "object") {
+      firstFrame = `\u63A5\u529B ${shot.first_frame.relay}`;
+      firstFrameKind = "relay";
+    }
+    const length = shot.length ?? shots.defaults.length ?? null;
+    const durationSeconds = numberOf(shot.duration) ?? (length !== null && fps !== null && fps > 0 ? length / fps : null);
+    const runViews = shotRuns.map((run2) => {
+      return {
+        run_id: run2.run_id,
+        status: run2.status,
+        started_at: run2.started_at,
+        finished_at: run2.finished_at,
+        duration_ms: durationMs(run2.started_at, run2.finished_at),
+        error: run2.error,
+        outputs: run2.outputs.map((o) => artifactOf(root, run2, o))
+      };
+    });
+    const artifacts = shotRuns.flatMap((run2) => flattenArtifacts(root, [run2]));
+    return {
+      id: shot.id,
+      slug: shot.slug ?? null,
+      title: shot.title ?? shot.slug ?? null,
+      summary: shot.summary ?? shot.description ?? firstString(record, CONTENT_KEYS) ?? shot.prompt,
+      seed: shot.seed,
+      prompt: shot.prompt,
+      characters: shotCharacters,
+      scene: shotScene,
+      first_frame: firstFrame,
+      first_frame_kind: firstFrameKind,
+      workflow: shot.workflow ?? shots.workflow ?? null,
+      done: latestSuccess !== null,
+      latest_run: latest?.run_id ?? null,
+      latest_status: latest?.status ?? null,
+      latest_artifact: latestArtifactOf(root, latestSuccess),
+      artifacts,
+      runs: runViews,
+      runs_count: shotRuns.length,
+      succeeded_count: shotRuns.filter((r) => r.status === "succeeded").length,
+      length,
+      duration_seconds: durationSeconds,
+      width: shot.width ?? shots.meta.width,
+      height: shot.height ?? shots.meta.height,
+      steps: shot.steps ?? shots.defaults.steps ?? null,
+      cfg: shot.cfg ?? shots.defaults.cfg ?? null,
+      notes: shot.notes ?? null,
+      params: shot.params ?? null
+    };
+  });
+  const characters = sortEntities(Array.from(characterMap.values()));
+  const scenes = sortEntities(Array.from(sceneMap.values()));
+  const artifactsTotal = items.reduce((sum, item) => sum + item.artifacts.length, 0);
+  const totalFrames = items.reduce((sum, item) => sum + (item.length ?? 0), 0);
+  const durations = items.map((item) => item.duration_seconds);
+  const totalDuration = items.length > 0 && durations.every((value) => value !== null) ? durations.reduce((sum, value) => sum + (value ?? 0), 0) : null;
+  return {
+    title: shots.meta.title ?? null,
+    synopsis: firstString(metaRecord, SYNOPSIS_KEYS),
+    workflow: shots.workflow ?? null,
+    style_prefix: shots.style_prefix ?? null,
+    meta: shots.meta,
+    defaults: shots.defaults,
+    fps,
+    characters,
+    scenes,
+    summary: {
+      shots_total: items.length,
+      shots_done: items.filter((item) => item.done).length,
+      characters_total: characters.length,
+      scenes_total: scenes.length,
+      artifacts_total: artifactsTotal,
+      total_frames: totalFrames,
+      total_duration_seconds: totalDuration,
+      resolution: `${shots.meta.width}x${shots.meta.height}`,
+      fps
+    },
+    shots: items
+  };
+}
+function listFinals(root) {
+  const dir = join26(root, FINAL_DIR);
+  if (!existsSync28(dir)) return [];
+  const entries = readdirSync10(dir, { withFileTypes: true }).filter((e) => e.isFile());
+  const referenced = /* @__PURE__ */ new Set();
+  const out = [];
+  for (const entry of entries) {
+    if (!entry.name.endsWith(".json")) continue;
+    try {
+      const manifest = JSON.parse(readFileSync19(join26(dir, entry.name), "utf8"));
+      const cut = typeof manifest.cut === "string" ? manifest.cut : "";
+      if (cut === "" || basename8(cut) !== cut || cut.includes("/") || cut.includes("\\")) continue;
+      if (!existsSync28(join26(dir, cut))) continue;
+      referenced.add(cut);
+      const stat = statSync7(join26(dir, cut));
+      const mediaUrl = finalMediaUrl(cut);
+      const clips = Array.isArray(manifest.clips) ? manifest.clips.filter((x) => typeof x === "object" && x !== null).map((x) => ({
+        shot: String(x.shot ?? ""),
+        run_id: String(x.run_id ?? ""),
+        artifact: String(x.artifact ?? "")
+      })) : [];
+      out.push({
+        name: cut,
+        manifest: entry.name,
+        media_url: mediaUrl,
+        download_url: `${mediaUrl}?download=1`,
+        bytes: stat.size,
+        present: true,
+        lfs_pointer: isLfsPointer(join26(dir, cut), stat.size),
+        created_at: typeof manifest.created_at === "string" ? manifest.created_at : null,
+        clips,
+        missing: Array.isArray(manifest.missing) ? manifest.missing.map((x) => String(x)) : []
+      });
+    } catch {
+    }
+  }
+  for (const entry of entries) {
+    if (referenced.has(entry.name)) continue;
+    if (!/^cut-.*\.(mp4|webm|mov|mkv)$/i.test(entry.name)) continue;
+    try {
+      const stat = statSync7(join26(dir, entry.name));
+      const mediaUrl = finalMediaUrl(entry.name);
+      out.push({
+        name: entry.name,
+        manifest: null,
+        media_url: mediaUrl,
+        download_url: `${mediaUrl}?download=1`,
+        bytes: stat.size,
+        present: true,
+        lfs_pointer: isLfsPointer(join26(dir, entry.name), stat.size),
+        created_at: null,
+        clips: [],
+        missing: []
+      });
+    } catch {
+    }
+  }
+  return out.sort((a, b) => b.name.localeCompare(a.name));
+}
+function listWorkflows(root, project) {
+  const dir = join26(root, WORKFLOWS_DIR);
+  if (!existsSync28(dir)) return [];
+  const defaultRef = (project.default_workflow ?? "").trim();
+  const out = [];
+  for (const entry of readdirSync10(dir, { withFileTypes: true })) {
+    if (!entry.isFile() || !entry.name.endsWith(".json") || entry.name.endsWith(".bindings.json")) continue;
+    const name = entry.name.slice(0, -".json".length);
+    let graph = null;
+    try {
+      graph = JSON.parse(readFileSync19(join26(dir, entry.name), "utf8"));
+    } catch {
+      graph = null;
+    }
+    const nodes = graph !== null && typeof graph === "object" && !Array.isArray(graph) ? Object.keys(graph).length : 0;
+    out.push({
+      name,
+      path: `${WORKFLOWS_DIR}/${entry.name}`,
+      nodes,
+      bindings: existsSync28(join26(dir, `${name}.bindings.json`)),
+      default: defaultRef === name || defaultRef === `workflows/${name}` || defaultRef === `workflows/${name}.json`,
+      valid: graph !== null && typeof graph === "object"
+    });
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+function buildStats(shots, runs, tasks, storyboard = null) {
+  const outputCount = runs.reduce((sum, r) => sum + r.outputs.length, 0);
+  const outputBytes = runs.reduce((sum, r) => sum + r.outputs.reduce((s, o) => s + o.bytes, 0), 0);
+  const doneShots = storyboard?.summary.shots_done ?? (shots === null ? 0 : shots.shots.filter((s) => runs.some((r) => r.label === `shot:${s.id}` && r.status === "succeeded")).length);
+  return {
+    runs_total: runs.length,
+    runs_succeeded: runs.filter((r) => r.status === "succeeded").length,
+    runs_failed: runs.filter((r) => r.status === "failed").length,
+    tasks_total: tasks.length,
+    tasks_active: tasks.filter((t) => !isTerminalStatus(t.status)).length,
+    outputs_total: outputCount,
+    outputs_bytes: outputBytes,
+    shots_total: shots?.shots.length ?? 0,
+    shots_done: doneShots,
+    characters_total: storyboard?.summary.characters_total ?? 0,
+    scenes_total: storyboard?.summary.scenes_total ?? 0,
+    total_frames: storyboard?.summary.total_frames ?? 0,
+    total_duration_seconds: storyboard?.summary.total_duration_seconds ?? null
+  };
+}
+function buildSharedOverview(root, project, shots) {
+  const runs = safeListRuns(root);
+  const tasks = safeListTasks(root);
+  const storyboard = buildShotsView(root, shots);
+  return {
+    project: { name: project.name, version: project.version },
+    mode: null,
+    machine_id: null,
+    machine: null,
+    engine: null,
+    machine_lock: null,
+    active_task: null,
+    active_tasks: [],
+    synced_running_tasks: [],
+    recent_tasks: tasks.slice(0, 10).map(taskItem),
+    gpu: null,
+    skill: null,
+    shots: shotProgress(root, shots),
+    storyboard,
+    next_actions: ["init --mode=local", "init --mode=remote --url <url>"],
+    stats: buildStats(shots, runs, tasks, storyboard),
+    recent_artifacts: flattenArtifacts(root, runs).slice(0, OVERVIEW_ARTIFACT_LIMIT),
+    generated_at: nowIso()
+  };
+}
+function machineViewOf(machine) {
+  if (machine === null || typeof machine !== "object") return null;
+  const m = machine;
+  const engine = m.engine;
+  if (engine === null || typeof engine !== "object") {
+    return { id: m.id, engine: null, override_workflows: m.override_workflows };
+  }
+  const e = engine;
+  return {
+    id: m.id,
+    engine: e.mode === "local" ? { mode: "local", port: e.port, comfyui_version: e.comfyui_version } : { mode: "remote", free_after_task: e.free_after_task },
+    override_workflows: m.override_workflows
+  };
+}
+async function buildOverview(root, project, machine, shots, commands = []) {
+  if (machine === null) return buildSharedOverview(root, project, shots);
+  const base = await buildStatusSnapshot(root, project, machine, shots, {
+    commands,
+    engineTimeoutMs: OVERVIEW_ENGINE_TIMEOUT_MS
+  });
+  const runs = safeListRuns(root);
+  const tasks = safeListTasks(root);
+  const storyboard = buildShotsView(root, shots);
+  return {
+    ...base,
+    machine: machineViewOf(base.machine),
+    storyboard,
+    stats: buildStats(shots, runs, tasks, storyboard),
+    recent_artifacts: flattenArtifacts(root, runs).slice(0, OVERVIEW_ARTIFACT_LIMIT),
+    recent_tasks: tasks.slice(0, 10).map(taskItem),
+    generated_at: nowIso()
+  };
+}
+var VIDEO_EXTENSIONS, IMAGE_EXTENSIONS, AUDIO_EXTENSIONS, JSON_EXTENSIONS, TEXT_EXTENSIONS, LFS_POINTER_PREFIX, MEDIA_PREFIX, DEFAULT_ARTIFACT_LIMIT, MAX_ARTIFACT_LIMIT, MAX_EVENT_ROWS, OVERVIEW_ENGINE_TIMEOUT_MS, OVERVIEW_ARTIFACT_LIMIT, EXTENSION_SEPARATOR, CHARACTER_KEYS, SCENE_KEYS, SCENE_DEF_KEYS, SYNOPSIS_KEYS, CONTENT_KEYS, ENTITY_ID_KEYS, ENTITY_NAME_KEYS, ENTITY_DESC_KEYS, ENTITY_REF_KEYS;
+var init_data = __esm({
+  "src/core/web/data.mts"() {
+    "use strict";
+    init_types();
+    init_fs();
+    init_snapshot();
+    init_events();
+    init_store();
+    init_store2();
+    VIDEO_EXTENSIONS = /* @__PURE__ */ new Set([".mp4", ".webm", ".mov", ".mkv", ".avi", ".m4v"]);
+    IMAGE_EXTENSIONS = /* @__PURE__ */ new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".avif"]);
+    AUDIO_EXTENSIONS = /* @__PURE__ */ new Set([".mp3", ".wav", ".flac", ".m4a", ".aac", ".ogg", ".opus"]);
+    JSON_EXTENSIONS = /* @__PURE__ */ new Set([".json"]);
+    TEXT_EXTENSIONS = /* @__PURE__ */ new Set([".txt", ".md", ".log", ".csv", ".yaml", ".yml"]);
+    LFS_POINTER_PREFIX = "version https://git-lfs.github.com/spec/v1";
+    MEDIA_PREFIX = "/media";
+    DEFAULT_ARTIFACT_LIMIT = 200;
+    MAX_ARTIFACT_LIMIT = 500;
+    MAX_EVENT_ROWS = 300;
+    OVERVIEW_ENGINE_TIMEOUT_MS = 1500;
+    OVERVIEW_ARTIFACT_LIMIT = 8;
+    EXTENSION_SEPARATOR = ".";
+    CHARACTER_KEYS = ["characters", "cast", "roles"];
+    SCENE_KEYS = ["scene", "location", "set"];
+    SCENE_DEF_KEYS = ["scenes", "locations", "sets"];
+    SYNOPSIS_KEYS = ["synopsis", "summary", "description", "intro"];
+    CONTENT_KEYS = ["content", "summary", "description"];
+    ENTITY_ID_KEYS = ["id", "key"];
+    ENTITY_NAME_KEYS = ["name", "title"];
+    ENTITY_DESC_KEYS = ["description", "desc", "profile", "intro"];
+    ENTITY_REF_KEYS = ["reference", "image", "ref", "portrait", "anchor"];
+  }
+});
+
+// src/core/web/media.mts
+import { createReadStream, existsSync as existsSync29, realpathSync, statSync as statSync8 } from "fs";
+import { basename as basename9, extname, join as join27, sep as sep3 } from "path";
+import { pipeline } from "stream/promises";
+function contentTypeOf(name) {
+  return MIME_TYPES[extname(name).toLowerCase()] ?? DEFAULT_MIME;
+}
+function isWithin(base, target) {
+  return target === base || target.startsWith(base.endsWith(PATH_SEPARATOR) ? base : base + PATH_SEPARATOR);
+}
+function safeRealpath(file) {
+  try {
+    return realpathSync(file);
+  } catch {
+    return null;
+  }
+}
+function makeTarget(abs, name, etag) {
+  if (!existsSync29(abs)) return null;
+  try {
+    const stat = statSync8(abs);
+    if (!stat.isFile()) return null;
+    return {
+      abs,
+      name,
+      bytes: stat.size,
+      content_type: contentTypeOf(name),
+      etag
+    };
+  } catch {
+    return null;
+  }
+}
+function resolveRunMedia(root, runId, name) {
+  if (basename9(runId) !== runId || runId.includes("/") || runId.includes("\\") || runId === "." || runId === "..") {
+    return null;
+  }
+  let rec = null;
+  try {
+    rec = readRun(root, runId);
+  } catch {
+    return null;
+  }
+  if (rec === null) return null;
+  const projectRoot = safeRealpath(root);
+  if (projectRoot === null) return null;
+  const output = rec.outputs.find((o) => o.name === name);
+  if (output === void 0) return null;
+  const base = safeRealpath(join27(root, RUNS_DIR, runId));
+  if (base === null || !isWithin(projectRoot, base)) return null;
+  const abs = safeRealpath(join27(runDir(root, runId), output.path));
+  if (abs === null || !isWithin(base, abs)) return null;
+  return makeTarget(abs, output.name, `"${output.sha256}"`);
+}
+function resolveFinalMedia(root, name) {
+  const dir = join27(root, FINAL_DIR);
+  const projectRoot = safeRealpath(root);
+  if (projectRoot === null) return null;
+  const base = safeRealpath(dir);
+  if (base === null || !isWithin(projectRoot, base)) return null;
+  if (basename9(name) !== name || name.includes("/") || name.includes("\\")) return null;
+  const abs = safeRealpath(join27(dir, name));
+  if (abs === null || !isWithin(base, abs)) return null;
+  try {
+    const stat = statSync8(abs);
+    if (!stat.isFile()) return null;
+    return makeTarget(abs, name, `"${stat.size}-${Math.floor(stat.mtimeMs)}"`);
+  } catch {
+    return null;
+  }
+}
+function parseRange(header, size) {
+  if (header === void 0 || header.trim() === "") return { kind: "none" };
+  const value = header.trim();
+  if (!value.startsWith("bytes=")) return { kind: "invalid" };
+  if (value.includes(",")) return { kind: "none" };
+  const match = /^bytes=(\d*)-(\d*)$/.exec(value);
+  if (match === null) return { kind: "invalid" };
+  const startText = match[1] ?? "";
+  const endText = match[2] ?? "";
+  if (startText === "" && endText === "") return { kind: "invalid" };
+  if (size <= 0) return { kind: "invalid" };
+  if (startText === "") {
+    const suffix = Number(endText);
+    if (!Number.isInteger(suffix) || suffix <= 0) return { kind: "invalid" };
+    return { kind: "ok", start: Math.max(size - suffix, 0), end: size - 1 };
+  }
+  const start = Number(startText);
+  if (!Number.isInteger(start) || start < 0 || start >= size) return { kind: "invalid" };
+  if (endText === "") return { kind: "ok", start, end: size - 1 };
+  const end = Number(endText);
+  if (!Number.isInteger(end) || end < start) return { kind: "invalid" };
+  return { kind: "ok", start, end: Math.min(end, size - 1) };
+}
+async function serveMedia(req, res, target, download) {
+  const range = parseRange(typeof req.headers.range === "string" ? req.headers.range : void 0, target.bytes);
+  if (range.kind === "invalid") {
+    res.statusCode = 416;
+    res.setHeader("Content-Range", `bytes */${target.bytes}`);
+    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+    res.end("Range Not Satisfiable");
+    return;
+  }
+  const ifNoneMatch = req.headers["if-none-match"];
+  if (range.kind === "none" && typeof ifNoneMatch === "string" && ifNoneMatch === target.etag) {
+    res.statusCode = 304;
+    res.setHeader("ETag", target.etag);
+    res.end();
+    return;
+  }
+  res.setHeader("Content-Type", target.content_type);
+  res.setHeader("Accept-Ranges", "bytes");
+  res.setHeader("Cache-Control", `private, max-age=${MEDIA_CACHE_SECONDS}, immutable`);
+  res.setHeader("ETag", target.etag);
+  const filename = target.name.replace(UNSAFE_FILENAME_CHARS, "_");
+  res.setHeader("Content-Disposition", `${download ? "attachment" : "inline"}; filename="${filename}"`);
+  if (range.kind === "none" && target.bytes === 0) {
+    res.statusCode = 200;
+    res.setHeader("Content-Length", "0");
+    res.end();
+    return;
+  }
+  if (range.kind === "ok") {
+    const length = range.end - range.start + 1;
+    res.statusCode = 206;
+    res.setHeader("Content-Range", `bytes ${range.start}-${range.end}/${target.bytes}`);
+    res.setHeader("Content-Length", String(length));
+    if (req.method === "HEAD") {
+      res.end();
+      return;
+    }
+    await streamFile(target.abs, res, range.start, range.end);
+    return;
+  }
+  res.statusCode = 200;
+  res.setHeader("Content-Length", String(target.bytes));
+  if (req.method === "HEAD") {
+    res.end();
+    return;
+  }
+  await streamFile(target.abs, res, 0, Math.max(target.bytes - 1, 0));
+}
+async function streamFile(abs, res, start, end) {
+  if (end < start) {
+    res.end();
+    return;
+  }
+  try {
+    const stream = createReadStream(abs, { start, end });
+    await pipeline(stream, res);
+  } catch {
+    if (!res.headersSent) {
+      res.statusCode = 500;
+      res.end("Internal Server Error");
+    } else {
+      res.destroy();
+    }
+  }
+}
+var MIME_TYPES, DEFAULT_MIME, MEDIA_CACHE_SECONDS, PATH_SEPARATOR, UNSAFE_FILENAME_CHARS;
+var init_media = __esm({
+  "src/core/web/media.mts"() {
+    "use strict";
+    init_types();
+    init_store2();
+    MIME_TYPES = {
+      ".mp4": "video/mp4",
+      ".webm": "video/webm",
+      ".mov": "video/quicktime",
+      ".mkv": "video/x-matroska",
+      ".avi": "video/x-msvideo",
+      ".m4v": "video/x-m4v",
+      ".png": "image/png",
+      ".jpg": "image/jpeg",
+      ".jpeg": "image/jpeg",
+      ".webp": "image/webp",
+      ".gif": "image/gif",
+      ".bmp": "image/bmp",
+      ".avif": "image/avif",
+      ".mp3": "audio/mpeg",
+      ".wav": "audio/wav",
+      ".flac": "audio/flac",
+      ".m4a": "audio/mp4",
+      ".aac": "audio/aac",
+      ".ogg": "audio/ogg",
+      ".opus": "audio/opus",
+      ".json": "application/json; charset=utf-8",
+      ".txt": "text/plain; charset=utf-8",
+      ".md": "text/markdown; charset=utf-8",
+      ".log": "text/plain; charset=utf-8",
+      ".csv": "text/csv; charset=utf-8",
+      ".yaml": "text/yaml; charset=utf-8",
+      ".yml": "text/yaml; charset=utf-8"
+    };
+    DEFAULT_MIME = "application/octet-stream";
+    MEDIA_CACHE_SECONDS = 31536e3;
+    PATH_SEPARATOR = sep3;
+    UNSAFE_FILENAME_CHARS = /["\\\r\n]/g;
+  }
+});
+
+// src/core/web/server.mts
+import { createServer as createServer2 } from "http";
+function isLoopbackHost(host) {
+  return host === "127.0.0.1" || host === "localhost" || host === "::1" || host === "[::1]";
+}
+function displayHost(host) {
+  if (host === "0.0.0.0") return "127.0.0.1";
+  if (host === "::" || host === "::1") return "[::1]";
+  if (host.includes(":") && !host.startsWith("[")) return `[${host}]`;
+  return host;
+}
+function setSecurityHeaders(res) {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
+  res.setHeader("Content-Security-Policy", CONTENT_SECURITY_POLICY);
+}
+function sendJson(res, status, data, headOnly = false) {
+  const body = Buffer.from(JSON.stringify({ ok: true, schema_version: SCHEMA_VERSION, data }), "utf8");
+  res.statusCode = status;
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  res.setHeader("Cache-Control", "no-store");
+  res.setHeader("Content-Length", String(body.byteLength));
+  if (headOnly) res.end();
+  else res.end(body);
+}
+function sendJsonError(res, status, code, message, headOnly = false) {
+  const body = Buffer.from(
+    JSON.stringify({ ok: false, schema_version: SCHEMA_VERSION, error: { code, message } }),
+    "utf8"
+  );
+  res.statusCode = status;
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  res.setHeader("Cache-Control", "no-store");
+  res.setHeader("Content-Length", String(body.byteLength));
+  if (headOnly) res.end();
+  else res.end(body);
+}
+function sendText(res, status, body, contentType = "text/plain; charset=utf-8", headOnly = false) {
+  const payload = Buffer.from(body, "utf8");
+  res.statusCode = status;
+  res.setHeader("Content-Type", contentType);
+  res.setHeader("Cache-Control", "no-store");
+  res.setHeader("Content-Length", String(payload.byteLength));
+  if (headOnly) res.end();
+  else res.end(payload);
+}
+function sendAsset(res, body, contentType, headOnly) {
+  const payload = Buffer.from(body, "utf8");
+  res.statusCode = 200;
+  res.setHeader("Content-Type", contentType);
+  res.setHeader("Cache-Control", `public, max-age=${ASSET_CACHE_SECONDS}`);
+  res.setHeader("Content-Length", String(payload.byteLength));
+  if (headOnly) res.end();
+  else res.end(payload);
+}
+function hostAllowed(req, host, port) {
+  if (!isLoopbackHost(host)) return true;
+  const header = req.headers.host;
+  if (typeof header !== "string" || header === "") return false;
+  const allowed = /* @__PURE__ */ new Set([
+    `127.0.0.1:${port}`,
+    `localhost:${port}`,
+    `[::1]:${port}`,
+    "127.0.0.1",
+    "localhost",
+    "[::1]"
+  ]);
+  return allowed.has(header.toLowerCase());
+}
+function intQuery(value, fallback) {
+  if (value === null || value === "") return fallback;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) ? parsed : fallback;
+}
+function decodeSegment(value) {
+  try {
+    const decoded = decodeURIComponent(value);
+    if (decoded === "" || decoded.includes("/") || decoded.includes("\\")) return null;
+    return decoded;
+  } catch {
+    return null;
+  }
+}
+async function overviewOf(ctx2, cache) {
+  const now = Date.now();
+  if (cache.data !== null && now - cache.at < OVERVIEW_CACHE_MS) return cache.data;
+  const data = await buildOverview(ctx2.root, ctx2.project, ctx2.machine, ctx2.shots, ctx2.commands);
+  cache.at = now;
+  cache.data = data;
+  return data;
+}
+async function handleRequest(req, res, ctx2, cache) {
+  try {
+    setSecurityHeaders(res);
+    const headOnly = req.method === "HEAD";
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      res.setHeader("Allow", ALLOWED_METHODS);
+      sendJsonError(res, 405, "method_not_allowed", "\u53EA\u652F\u6301 GET / HEAD", headOnly);
+      return;
+    }
+    if (!hostAllowed(req, ctx2.host, ctx2.port)) {
+      sendJsonError(res, 403, "forbidden", "Host \u4E0D\u5728\u5141\u8BB8\u5217\u8868", headOnly);
+      return;
+    }
+    let url;
+    try {
+      url = new URL(req.url ?? "/", URL_BASE);
+    } catch {
+      sendJsonError(res, 400, "bad_request", "URL \u975E\u6CD5", headOnly);
+      return;
+    }
+    const pathname = url.pathname;
+    if (pathname === "/" || pathname === "/index.html") {
+      sendAsset(res, ctx2.assets.index_html, "text/html; charset=utf-8", headOnly);
+      return;
+    }
+    if (pathname === "/assets/app.js") {
+      sendAsset(res, ctx2.assets.app_js, "text/javascript; charset=utf-8", headOnly);
+      return;
+    }
+    if (pathname === "/assets/style.css") {
+      sendAsset(res, ctx2.assets.style_css, "text/css; charset=utf-8", headOnly);
+      return;
+    }
+    if (pathname === "/favicon.ico") {
+      res.statusCode = 204;
+      res.end();
+      return;
+    }
+    if (pathname === "/api/health") {
+      sendJson(
+        res,
+        200,
+        {
+          status: "ok",
+          version: VERSION,
+          project: ctx2.project.name,
+          mode: ctx2.machine?.engine.mode ?? null
+        },
+        headOnly
+      );
+      return;
+    }
+    if (pathname === "/api/overview") {
+      sendJson(res, 200, await overviewOf(ctx2, cache), headOnly);
+      return;
+    }
+    if (pathname === "/api/shots") {
+      sendJson(res, 200, buildShotsView(ctx2.root, ctx2.shots), headOnly);
+      return;
+    }
+    if (pathname === "/api/artifacts") {
+      sendJson(
+        res,
+        200,
+        listArtifacts(ctx2.root, {
+          label: url.searchParams.get("label") ?? void 0,
+          status: url.searchParams.get("status") ?? void 0,
+          kind: url.searchParams.get("kind") ?? void 0,
+          search: url.searchParams.get("search") ?? void 0,
+          limit: intQuery(url.searchParams.get("limit"), 200)
+        }),
+        headOnly
+      );
+      return;
+    }
+    if (pathname.startsWith("/api/runs/")) {
+      const segments = pathname.split("/");
+      if (segments.length !== 4) {
+        sendJsonError(res, 404, "not_found", "\u63A5\u53E3\u4E0D\u5B58\u5728", headOnly);
+        return;
+      }
+      const runId = decodeSegment(segments[3] ?? "");
+      if (runId === null) {
+        sendJsonError(res, 400, "bad_request", "run id \u975E\u6CD5", headOnly);
+        return;
+      }
+      const detail = getRunDetail(ctx2.root, runId);
+      if (detail === null) {
+        sendJsonError(res, 404, "not_found", `\u672A\u627E\u5230 run ${runId}`, headOnly);
+        return;
+      }
+      sendJson(res, 200, detail, headOnly);
+      return;
+    }
+    if (pathname === "/api/tasks") {
+      sendJson(res, 200, listTasksView(ctx2.root), headOnly);
+      return;
+    }
+    if (pathname.startsWith("/api/tasks/")) {
+      const segments = pathname.split("/");
+      if (segments.length !== 4) {
+        sendJsonError(res, 404, "not_found", "\u63A5\u53E3\u4E0D\u5B58\u5728", headOnly);
+        return;
+      }
+      const taskId = decodeSegment(segments[3] ?? "");
+      if (taskId === null) {
+        sendJsonError(res, 400, "bad_request", "task id \u975E\u6CD5", headOnly);
+        return;
+      }
+      const detail = getTaskDetail(ctx2.root, taskId);
+      if (detail === null) {
+        sendJsonError(res, 404, "not_found", `\u672A\u627E\u5230 task ${taskId}`, headOnly);
+        return;
+      }
+      sendJson(res, 200, detail, headOnly);
+      return;
+    }
+    if (pathname === "/api/finals") {
+      sendJson(res, 200, listFinals(ctx2.root), headOnly);
+      return;
+    }
+    if (pathname === "/api/workflows") {
+      sendJson(res, 200, listWorkflows(ctx2.root, ctx2.project), headOnly);
+      return;
+    }
+    if (pathname.startsWith(`${MEDIA_PREFIX2}/run/`)) {
+      const segments = pathname.split("/");
+      if (segments.length !== 5) {
+        sendJsonError(res, 404, "not_found", "\u5A92\u4F53\u4E0D\u5B58\u5728", headOnly);
+        return;
+      }
+      const runId = decodeSegment(segments[3] ?? "");
+      const name = decodeSegment(segments[4] ?? "");
+      if (runId === null || name === null) {
+        sendJsonError(res, 400, "bad_request", "\u5A92\u4F53\u8DEF\u5F84\u975E\u6CD5", headOnly);
+        return;
+      }
+      const target = resolveRunMedia(ctx2.root, runId, name);
+      if (target === null) {
+        sendJsonError(res, 404, "not_found", "\u5A92\u4F53\u4E0D\u5B58\u5728", headOnly);
+        return;
+      }
+      await serveMedia(req, res, target, url.searchParams.get("download") === "1");
+      return;
+    }
+    if (pathname.startsWith(`${MEDIA_PREFIX2}/final/`)) {
+      const segments = pathname.split("/");
+      if (segments.length !== 4) {
+        sendJsonError(res, 404, "not_found", "\u5A92\u4F53\u4E0D\u5B58\u5728", headOnly);
+        return;
+      }
+      const name = decodeSegment(segments[3] ?? "");
+      if (name === null) {
+        sendJsonError(res, 400, "bad_request", "\u5A92\u4F53\u8DEF\u5F84\u975E\u6CD5", headOnly);
+        return;
+      }
+      const target = resolveFinalMedia(ctx2.root, name);
+      if (target === null) {
+        sendJsonError(res, 404, "not_found", "\u5A92\u4F53\u4E0D\u5B58\u5728", headOnly);
+        return;
+      }
+      await serveMedia(req, res, target, url.searchParams.get("download") === "1");
+      return;
+    }
+    if (pathname.startsWith(API_PREFIX) || pathname.startsWith(MEDIA_PREFIX2)) {
+      sendJsonError(res, 404, "not_found", "\u63A5\u53E3\u4E0D\u5B58\u5728", headOnly);
+      return;
+    }
+    sendText(res, 404, "Not Found", "text/plain; charset=utf-8", headOnly);
+  } catch (e) {
+    process.stderr.write(`[web] ${e instanceof Error ? e.stack ?? e.message : String(e)}
+`);
+    if (!res.headersSent) {
+      sendJsonError(res, 500, "internal_error", "\u670D\u52A1\u5185\u90E8\u9519\u8BEF", req.method === "HEAD");
+    } else {
+      res.destroy();
+    }
+  }
+}
+async function startWebServer(options) {
+  const host = options.host ?? DEFAULT_HOST;
+  const port = options.port ?? 0;
+  const cache = { at: 0, data: null };
+  const ctx2 = {
+    root: options.root,
+    project: options.project,
+    machine: options.machine,
+    shots: options.shots,
+    commands: options.commands ?? [],
+    assets: options.assets,
+    host,
+    port
+  };
+  const server = createServer2((req, res) => {
+    void handleRequest(req, res, ctx2, cache);
+  });
+  let resolveClosed = null;
+  const closed = new Promise((resolve8) => {
+    resolveClosed = resolve8;
+  });
+  server.once("close", () => {
+    resolveClosed?.();
+  });
+  await new Promise((resolve8, reject) => {
+    const onListening = () => {
+      server.off("error", onError);
+      resolve8();
+    };
+    const onError = (e) => {
+      server.off("listening", onListening);
+      reject(e);
+    };
+    server.once("listening", onListening);
+    server.once("error", onError);
+    server.listen(port, host);
+  });
+  const address = server.address();
+  if (address === null || typeof address === "string") {
+    await new Promise((resolve8) => server.close(() => resolve8()));
+    throw new Error("\u65E0\u6CD5\u83B7\u53D6 Web \u670D\u52A1\u76D1\u542C\u5730\u5740");
+  }
+  const actualPort = address.port;
+  ctx2.port = actualPort;
+  const urlHost = displayHost(host);
+  const url = `http://${urlHost}:${actualPort}`;
+  let closePromise = null;
+  function close() {
+    if (closePromise !== null) return closePromise;
+    closePromise = new Promise((resolve8) => {
+      if (!server.listening) {
+        resolveClosed?.();
+        resolve8();
+        return;
+      }
+      server.close(() => {
+        resolveClosed?.();
+        resolve8();
+      });
+      server.closeAllConnections();
+    });
+    return closePromise;
+  }
+  return {
+    url,
+    host,
+    port: actualPort,
+    close,
+    closed
+  };
+}
+var DEFAULT_HOST, OVERVIEW_CACHE_MS, ASSET_CACHE_SECONDS, URL_BASE, ALLOWED_METHODS, API_PREFIX, MEDIA_PREFIX2, CONTENT_SECURITY_POLICY;
+var init_server = __esm({
+  "src/core/web/server.mts"() {
+    "use strict";
+    init_json();
+    init_version();
+    init_data();
+    init_media();
+    DEFAULT_HOST = "127.0.0.1";
+    OVERVIEW_CACHE_MS = 2e3;
+    ASSET_CACHE_SECONDS = 300;
+    URL_BASE = "http://127.0.0.1";
+    ALLOWED_METHODS = "GET, HEAD";
+    API_PREFIX = "/api";
+    MEDIA_PREFIX2 = "/media";
+    CONTENT_SECURITY_POLICY = [
+      "default-src 'self'",
+      "img-src 'self' data:",
+      "media-src 'self'",
+      "style-src 'self' 'unsafe-inline'",
+      "script-src 'self'",
+      "connect-src 'self'",
+      "font-src 'self'",
+      "base-uri 'none'",
+      "form-action 'none'",
+      "frame-ancestors 'none'"
+    ].join("; ");
+  }
+});
+
+// src/core/web/ui/index.html
+var ui_default;
+var init_ui = __esm({
+  "src/core/web/ui/index.html"() {
+    ui_default = '<!doctype html>\n<html lang="zh-CN">\n    <head>\n        <meta charset="utf-8" />\n        <meta name="viewport" content="width=device-width, initial-scale=1" />\n        <meta name="color-scheme" content="light dark" />\n        <title>daoyan web</title>\n        <link rel="stylesheet" href="/assets/style.css" />\n    </head>\n    <body>\n        <div id="app"></div>\n        <div id="modal" class="modal" hidden>\n            <div class="modal-backdrop" data-modal-close="1"></div>\n            <section class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="modal-title">\n                <header class="modal-head">\n                    <div class="modal-heading">\n                        <p class="eyebrow">\u4EA7\u51FA\u7269\u9884\u89C8</p>\n                        <h2 id="modal-title">\u9884\u89C8</h2>\n                    </div>\n                    <button id="modal-close" class="icon-button" type="button" aria-label="\u5173\u95ED">\xD7</button>\n                </header>\n                <div id="modal-content" class="modal-content"></div>\n                <footer class="modal-foot">\n                    <button id="modal-prev" class="button ghost" type="button">\u4E0A\u4E00\u4E2A</button>\n                    <span id="modal-counter" class="muted"></span>\n                    <button id="modal-next" class="button ghost" type="button">\u4E0B\u4E00\u4E2A</button>\n                </footer>\n            </section>\n        </div>\n        <div id="toast" class="toast" role="status" hidden></div>\n        <script src="/assets/app.js" defer></script>\n    </body>\n</html>\n';
+  }
+});
+
+// src/core/web/ui/app.client
+var app_default;
+var init_app = __esm({
+  "src/core/web/ui/app.client"() {
+    app_default = '/* daoyan web \u5BA2\u6237\u7AEF \u2014\u2014 \u539F\u751F JS \u5355\u9875\u5E94\u7528\uFF0C\u65E0\u6784\u5EFA\u4F9D\u8D56\u3002\n * \u6240\u6709\u6570\u636E\u6765\u81EA\u540C\u6E90\u53EA\u8BFB API\uFF1BDOM \u6587\u672C\u7EDF\u4E00\u7528 textContent\uFF0C\u907F\u514D\u63D0\u793A\u8BCD\u7B49\u5B57\u6BB5\u6CE8\u5165 HTML\u3002 */\n\n// \u9875\u9762\u89C6\u56FE\nconst VIEWS = [\n    { id: "overview", label: "\u6982\u89C8", hint: "\u9879\u76EE\u4E0E\u5F15\u64CE\u72B6\u6001" },\n    { id: "shots", label: "\u5206\u955C", hint: "\u955C\u5934\u8FDB\u5EA6\u4E0E\u63D0\u793A\u8BCD" },\n    { id: "artifacts", label: "\u4EA7\u51FA\u7269", hint: "\u64AD\u653E\u4E0E\u4E0B\u8F7D" },\n    { id: "tasks", label: "\u4EFB\u52A1", hint: "\u4EFB\u52A1\u4E0E\u4E8B\u4EF6" },\n    { id: "finals", label: "\u6210\u7247", hint: "\u5408\u7247\u7ED3\u679C" },\n    { id: "workflows", label: "\u5DE5\u4F5C\u6D41", hint: "\u56FE\u4E0E bindings" },\n];\n// \u5408\u6CD5\u89C6\u56FE\u96C6\u5408\nconst VIEW_IDS = new Set(VIEWS.map((view) => view.id));\n// \u9ED8\u8BA4\u89C6\u56FE\nconst DEFAULT_VIEW = "overview";\n// \u63A5\u53E3\u8DEF\u5F84\nconst API = {\n    overview: "/api/overview",\n    shots: "/api/shots",\n    artifacts: "/api/artifacts?limit=500",\n    tasks: "/api/tasks",\n    finals: "/api/finals",\n    workflows: "/api/workflows",\n};\n// \u5404\u89C6\u56FE\u8F6E\u8BE2\u95F4\u9694\uFF08\u6BEB\u79D2\uFF09\nconst POLL_MS = {\n    overview: 3000,\n    shots: 5000,\n    artifacts: 5000,\n    tasks: 3000,\n    finals: 8000,\n    workflows: 15000,\n};\n// \u72B6\u6001\u6587\u6848\nconst STATUS_LABEL = {\n    queued: "\u6392\u961F",\n    running: "\u8FD0\u884C\u4E2D",\n    succeeded: "\u6210\u529F",\n    failed: "\u5931\u8D25",\n    cancelled: "\u5DF2\u53D6\u6D88",\n    interrupted: "\u5DF2\u4E2D\u65AD",\n    held: "\u6301\u6709",\n    stale: "\u9648\u65E7",\n    absent: "\u7A7A\u95F2",\n    corrupt: "\u635F\u574F",\n};\n// \u4EA7\u7269\u7C7B\u578B\u6587\u6848\nconst KIND_LABEL = {\n    video: "\u89C6\u9891",\n    image: "\u56FE\u7247",\n    audio: "\u97F3\u9891",\n    json: "JSON",\n    text: "\u6587\u672C",\n    other: "\u6587\u4EF6",\n};\n// \u4EA7\u7269\u7C7B\u578B\u56FE\u6807\nconst KIND_ICON = {\n    video: "\u25B6",\n    image: "\u25A7",\n    audio: "\u266A",\n    json: "{}",\n    text: "TXT",\n    other: "\u2193",\n};\n// \u4EFB\u52A1\u7C7B\u578B\u6587\u6848\nconst TASK_KIND_LABEL = {\n    run: "\u5355\u6B21",\n    shot: "\u955C\u5934",\n    retake: "\u91CD\u62CD",\n    batch: "\u6279\u91CF",\n    metadata: "\u5143\u6570\u636E",\n};\n// \u6700\u5927\u64AD\u653E\u5217\u8868\u957F\u5EA6\nconst MAX_PLAYLIST = 200;\n// \u6587\u672C\u9884\u89C8\u4E0A\u9650\nconst TEXT_PREVIEW_LIMIT = 200_000;\n// \u4EFB\u52A1\u8BE6\u60C5\u7F13\u5B58\u65F6\u95F4\uFF08\u6BEB\u79D2\uFF09\nconst TASK_DETAIL_CACHE_MS = 2000;\n// \u65F6\u95F4\u683C\u5F0F\u5668\nconst TIME_FORMATTER = new Intl.DateTimeFormat("zh-CN", {\n    year: "numeric",\n    month: "2-digit",\n    day: "2-digit",\n    hour: "2-digit",\n    minute: "2-digit",\n    second: "2-digit",\n    hour12: false,\n});\n// \u5B57\u8282\u5355\u4F4D\nconst BYTE_UNITS = ["B", "KB", "MB", "GB", "TB"];\n// hash \u524D\u7F00\nconst HASH_PREFIX = "#/";\n// \u53EF\u64AD\u653E\u7C7B\u578B\nconst PLAYABLE_KINDS = new Set(["video", "audio"]);\n// \u53EF\u9884\u89C8\u7C7B\u578B\nconst PREVIEW_KINDS = new Set(["video", "audio", "image", "json", "text"]);\n\n// \u5E94\u7528\u6839\u8282\u70B9\nconst appRoot = document.querySelector("#app");\n// \u6A21\u6001\u6846\u6839\u8282\u70B9\nconst modalRoot = document.querySelector("#modal");\n// \u6A21\u6001\u6807\u9898\nconst modalTitle = document.querySelector("#modal-title");\n// \u6A21\u6001\u5185\u5BB9\nconst modalContent = document.querySelector("#modal-content");\n// \u6A21\u6001\u8BA1\u6570\nconst modalCounter = document.querySelector("#modal-counter");\n// \u4E0A\u4E00\u4E2A\u6309\u94AE\nconst modalPrev = document.querySelector("#modal-prev");\n// \u4E0B\u4E00\u4E2A\u6309\u94AE\nconst modalNext = document.querySelector("#modal-next");\n// \u5173\u95ED\u6309\u94AE\nconst modalClose = document.querySelector("#modal-close");\n// Toast \u6839\u8282\u70B9\nconst toastRoot = document.querySelector("#toast");\n\n// \u5F53\u524D\u89C6\u56FE\nlet currentView = DEFAULT_VIEW;\n// \u5F53\u524D\u89C6\u56FE\u662F\u5426\u5DF2\u6210\u529F\u52A0\u8F7D\nlet loaded = false;\n// \u4E0A\u6B21\u6E32\u67D3\u7684\u6570\u636E\u7B7E\u540D\uFF08\u907F\u514D\u8F6E\u8BE2\u91CD\u590D\u91CD\u5EFA DOM\uFF09\nlet lastSignature = "";\n// \u5F53\u524D\u8BF7\u6C42\u63A7\u5236\u5668\nlet requestController = null;\n// \u8F6E\u8BE2\u5B9A\u65F6\u5668\nlet pollTimer = null;\n// \u5F53\u524D\u4EA7\u7269\u7B5B\u9009\nlet artifactFilters = { label: "", status: "", kind: "", search: "" };\n// \u5F53\u524D\u5206\u955C\u7B5B\u9009\nlet shotFilters = { character: "", scene: "", status: "", search: "" };\n// \u5F53\u524D\u5C55\u5F00\u7684 task id\nlet openTaskId = null;\n// \u4EFB\u52A1\u8BE6\u60C5\u7F13\u5B58\nconst taskDetailCache = new Map();\n// \u64AD\u653E\u5217\u8868\nlet playerItems = [];\n// \u64AD\u653E\u7D22\u5F15\nlet playerIndex = 0;\n// Toast \u5B9A\u65F6\u5668\nlet toastTimer = null;\n// \u6700\u540E\u66F4\u65B0\u65F6\u95F4\nlet lastUpdatedAt = "";\n\n// \u4FA7\u8FB9\u5BFC\u822A\u5BB9\u5668\nlet navRoot = null;\n// \u4E3B\u5185\u5BB9\u5BB9\u5668\nlet viewRoot = null;\n// \u9879\u76EE\u540D\u5143\u7D20\nlet projectNameEl = null;\n// \u6A21\u5F0F\u5143\u7D20\nlet modeEl = null;\n// \u8FDE\u63A5\u72B6\u6001\u5143\u7D20\nlet connectionEl = null;\n// \u66F4\u65B0\u65F6\u95F4\u5143\u7D20\nlet updatedEl = null;\n\n/**\n * \u521B\u5EFA\u5143\u7D20\u5E76\u8BBE\u7F6E\u6587\u672C\u3002\n */\nfunction createElement(tag, className, text) {\n    // \u65B0\u5143\u7D20\n    const node = document.createElement(tag);\n    if (className !== undefined && className !== "") node.className = className;\n    if (text !== undefined && text !== null) node.textContent = String(text);\n    return node;\n}\n\n/**\n * \u6E05\u7A7A\u5B50\u8282\u70B9\u3002\n */\nfunction clearNode(node) {\n    while (node.firstChild !== null) node.removeChild(node.firstChild);\n}\n\n/**\n * \u683C\u5F0F\u5316\u5B57\u8282\u3002\n */\nfunction formatBytes(bytes) {\n    // \u515C\u5E95\u6570\u503C\n    const value = Number(bytes);\n    if (!Number.isFinite(value) || value <= 0) return "0 B";\n    // \u5355\u4F4D\u6307\u6570\n    let index = 0;\n    // \u5F53\u524D\u6570\u503C\n    let current = value;\n    while (current >= 1024 && index < BYTE_UNITS.length - 1) {\n        current /= 1024;\n        index += 1;\n    }\n    // \u5C0F\u6570\u4F4D\n    const digits = index === 0 ? 0 : current >= 10 ? 1 : 2;\n    return `${current.toFixed(digits)} ${BYTE_UNITS[index]}`;\n}\n\n/**\n * \u683C\u5F0F\u5316\u65F6\u95F4\u3002\n */\nfunction formatTime(iso) {\n    if (typeof iso !== "string" || iso === "") return "\u2014";\n    // \u65F6\u95F4\u5BF9\u8C61\n    const date = new Date(iso);\n    if (Number.isNaN(date.getTime())) return "\u2014";\n    return TIME_FORMATTER.format(date);\n}\n\n/**\n * \u683C\u5F0F\u5316\u8017\u65F6\u3002\n */\nfunction formatDuration(ms) {\n    // \u6BEB\u79D2\u503C\n    const value = Number(ms);\n    if (!Number.isFinite(value) || value <= 0) return "0 \u79D2";\n    if (value < 1000) return `${Math.round(value)} \u6BEB\u79D2`;\n    // \u79D2\n    const seconds = Math.round(value / 1000);\n    if (seconds < 60) return `${seconds} \u79D2`;\n    // \u5206\u949F/\u79D2\n    const minutes = Math.floor(seconds / 60);\n    // \u4F59\u6570\u79D2\n    const rest = seconds % 60;\n    return rest === 0 ? `${minutes} \u5206` : `${minutes} \u5206 ${rest} \u79D2`;\n}\n\n/**\n * \u77ED id\u3002\n */\nfunction shortId(id) {\n    if (typeof id !== "string") return "\u2014";\n    return id.length > 20 ? `${id.slice(0, 20)}\u2026` : id;\n}\n\n/**\n * \u6587\u672C\u515C\u5E95\u3002\n */\nfunction textOrDash(value) {\n    if (value === undefined || value === null || value === "") return "\u2014";\n    return String(value);\n}\n\n/**\n * \u901A\u7528\u5FBD\u6807\u3002\n */\nfunction badge(text, className) {\n    return createElement("span", `badge ${className ?? ""}`.trim(), text);\n}\n\n/**\n * \u72B6\u6001\u5FBD\u6807\u3002\n */\nfunction statusBadge(status, text) {\n    // \u72B6\u6001\u952E\n    const key = typeof status === "string" && status !== "" ? status : "queued";\n    return badge(text ?? STATUS_LABEL[key] ?? key, `status-${key}`);\n}\n\n/**\n * \u7C7B\u578B\u5FBD\u6807\u3002\n */\nfunction kindBadge(kind) {\n    // \u7C7B\u578B\u952E\n    const key = typeof kind === "string" && kind !== "" ? kind : "other";\n    return badge(KIND_LABEL[key] ?? key, `kind-${key}`);\n}\n\n/**\n * \u8FFD\u52A0\u952E\u503C\u884C\u3002\n */\nfunction appendKv(dl, key, value) {\n    dl.append(createElement("dt", "", key));\n    dl.append(createElement("dd", "", textOrDash(value)));\n}\n\n/**\n * \u4EBA\u7269 / \u573A\u666F\u53BB\u91CD\u952E\u3002\n */\nfunction entityKey(entity) {\n    return entity.id !== null && entity.id !== undefined ? `id:${entity.id}` : `name:${entity.name}`;\n}\n\n/**\n * \u683C\u5F0F\u5316\u79D2\u6570\u3002\n */\nfunction formatSeconds(seconds) {\n    // \u6570\u503C\u515C\u5E95\n    const value = Number(seconds);\n    if (!Number.isFinite(value) || value < 0) return "\u2014";\n    if (value < 60) return Number.isInteger(value) ? `${value} \u79D2` : `${value.toFixed(1)} \u79D2`;\n    // \u5206\u949F\u4E0E\u4F59\u79D2\n    const minutes = Math.floor(value / 60);\n    const rest = Math.round(value % 60);\n    return rest === 0 ? `${minutes} \u5206` : `${minutes} \u5206 ${rest} \u79D2`;\n}\n\n/**\n * \u4EBA\u7269 / \u573A\u666F chip\u3002\n */\nfunction entityChip(entity, className) {\n    // chip\n    const chip = createElement("span", `chip ${className ?? ""}`.trim(), entity.name);\n    if (entity.description) chip.title = entity.description;\n    return chip;\n}\n\n/**\n * \u4E00\u7EC4\u4EBA\u7269 / \u573A\u666F chip\u3002\n */\nfunction entityChips(entities, className) {\n    // chip \u5BB9\u5668\n    const row = createElement("div", "chip-row");\n    if (!Array.isArray(entities) || entities.length === 0) {\n        row.append(createElement("span", "muted", "\u672A\u6807\u6CE8"));\n        return row;\n    }\n    for (const entity of entities) row.append(entityChip(entity, className));\n    return row;\n}\n\n/**\n * \u5206\u955C\u72B6\u6001\u5FBD\u6807\u3002\n */\nfunction shotStatusBadge(shot) {\n    if (shot.done === true) return statusBadge("succeeded", "\u5DF2\u5B8C\u6210");\n    if (shot.latest_status === "failed") return statusBadge("failed");\n    if (shot.latest_status === "running" || shot.latest_status === "queued") {\n        return statusBadge(shot.latest_status);\n    }\n    return statusBadge("queued", "\u672A\u5B8C\u6210");\n}\n\n/**\n * \u8BF7\u6C42 JSON \u5E76\u89E3\u5305\u4FE1\u5C01\u3002\n */\nasync function requestJson(path, signal) {\n    // \u54CD\u5E94\n    const response = await fetch(path, { headers: { Accept: "application/json" }, signal });\n    // \u54CD\u5E94\u4F53\n    const payload = await response.json();\n    if (payload.ok !== true) {\n        throw new Error(payload.error !== undefined ? payload.error.message : `\u8BF7\u6C42\u5931\u8D25\uFF08HTTP ${response.status}\uFF09`);\n    }\n    return payload.data;\n}\n\n/**\n * \u5F53\u524D\u89C6\u56FE\u8BF7\u6C42\uFF08\u53EF\u88AB\u4E0B\u4E00\u6B21\u5BFC\u822A\u4E2D\u6B62\uFF09\u3002\n */\nasync function fetchJson(path) {\n    // \u8BF7\u6C42\u63A7\u5236\u5668\n    const controller = new AbortController();\n    requestController = controller;\n    try {\n        return await requestJson(path, controller.signal);\n    } finally {\n        if (requestController === controller) requestController = null;\n    }\n}\n\n/**\n * \u6E32\u67D3\u9875\u9762\u9AA8\u67B6\u3002\n */\nfunction renderShell() {\n    appRoot.innerHTML = `\n        <div class="app-shell">\n            <aside class="sidebar">\n                <div class="brand">\n                    <div class="brand-mark"><span class="brand-dot"></span>daoyan web</div>\n                    <p class="brand-sub">\u4E34\u65F6\u53EA\u8BFB\u9879\u76EE\u67E5\u770B\u5668</p>\n                </div>\n                <nav id="nav" class="nav" aria-label="\u9875\u9762\u5BFC\u822A"></nav>\n                <div class="sidebar-foot">\n                    <code>Ctrl+C</code> \u505C\u6B62\u670D\u52A1<br />\n                    \u6570\u636E\u6765\u81EA\u5F53\u524D\u9879\u76EE\u76EE\u5F55\uFF0C\u53EA\u8BFB\u3002\n                </div>\n            </aside>\n            <main class="main">\n                <header class="topbar">\n                    <div class="topbar-left">\n                        <h1 id="project-name" class="project-name">\u9879\u76EE</h1>\n                        <span id="project-mode" class="project-mode">\u2014</span>\n                    </div>\n                    <div class="topbar-right">\n                        <span id="connection" class="connection">\n                            <span class="connection-dot"></span>\n                            <span id="connection-text">\u8FDE\u63A5\u4E2D</span>\n                        </span>\n                        <span id="updated-at" class="muted">\u2014</span>\n                    </div>\n                </header>\n                <section id="view" class="content" aria-live="polite"></section>\n            </main>\n        </div>\n    `;\n    navRoot = document.querySelector("#nav");\n    viewRoot = document.querySelector("#view");\n    projectNameEl = document.querySelector("#project-name");\n    modeEl = document.querySelector("#project-mode");\n    connectionEl = document.querySelector("#connection");\n    updatedEl = document.querySelector("#updated-at");\n}\n\n/**\n * \u6E32\u67D3\u5BFC\u822A\u3002\n */\nfunction renderNav() {\n    clearNode(navRoot);\n    for (const view of VIEWS) {\n        // \u5BFC\u822A\u6309\u94AE\n        const button = createElement("button", "nav-item");\n        button.type = "button";\n        button.dataset.view = view.id;\n        button.append(createElement("span", "nav-label", view.label));\n        button.append(createElement("span", "nav-hint", view.hint));\n        button.addEventListener("click", () => {\n            window.location.hash = `${HASH_PREFIX}${view.id}`;\n        });\n        navRoot.append(button);\n    }\n}\n\n/**\n * \u9AD8\u4EAE\u5F53\u524D\u5BFC\u822A\u3002\n */\nfunction setActiveNav() {\n    if (navRoot === null) return;\n    for (const button of navRoot.querySelectorAll(".nav-item")) {\n        button.classList.toggle("active", button.dataset.view === currentView);\n    }\n}\n\n/**\n * \u66F4\u65B0\u8FDE\u63A5\u72B6\u6001\u3002\n */\nfunction setConnection(state, text) {\n    if (connectionEl === null) return;\n    connectionEl.classList.remove("ok", "error");\n    if (state === "ok") connectionEl.classList.add("ok");\n    if (state === "error") connectionEl.classList.add("error");\n    // \u72B6\u6001\u6587\u672C\n    const textEl = connectionEl.querySelector("#connection-text");\n    if (textEl !== null) textEl.textContent = text;\n}\n\n/**\n * \u52A0\u8F7D\u9876\u680F\u9879\u76EE\u4FE1\u606F\uFF08\u4E0D\u63A2\u6D4B\u5F15\u64CE\uFF09\u3002\n */\nasync function loadHeader() {\n    try {\n        // \u5065\u5EB7\u68C0\u67E5\u6570\u636E\n        const data = await requestJson("/api/health");\n        if (projectNameEl !== null && typeof data.project === "string") projectNameEl.textContent = data.project;\n        if (modeEl !== null) modeEl.textContent = data.mode === null ? "\u672A\u7ED1\u5B9A\u672C\u673A" : data.mode;\n    } catch {\n        // \u9876\u680F\u5931\u8D25\u4E0D\u5F71\u54CD\u9875\u9762\u4E3B\u4F53\n    }\n}\n\n/**\n * \u66F4\u65B0\u9876\u680F\u9879\u76EE\u4FE1\u606F\u3002\n */\nfunction updateHeader(data) {\n    if (projectNameEl !== null && data !== null && data.project !== undefined && data.project.name !== undefined) {\n        projectNameEl.textContent = data.project.name;\n    }\n    if (modeEl !== null && data !== null && data.mode !== undefined) {\n        modeEl.textContent = data.mode === null ? "\u672A\u7ED1\u5B9A\u672C\u673A" : data.mode;\n    }\n    if (updatedEl !== null) {\n        updatedEl.textContent = lastUpdatedAt === "" ? "\u2014" : `\u66F4\u65B0\u4E8E ${formatTime(lastUpdatedAt)}`;\n    }\n}\n\n/**\n * \u663E\u793A\u9519\u8BEF\u6761\u3002\n */\nfunction showError(message) {\n    if (viewRoot === null) return;\n    // \u73B0\u6709\u9519\u8BEF\u6761\n    let banner = viewRoot.querySelector(".error-banner");\n    if (banner === null) {\n        banner = createElement("div", "error-banner");\n        viewRoot.prepend(banner);\n    }\n    banner.textContent = message;\n}\n\n/**\n * \u6E05\u9664\u9519\u8BEF\u6761\u3002\n */\nfunction clearError() {\n    if (viewRoot === null) return;\n    // \u73B0\u6709\u9519\u8BEF\u6761\n    const banner = viewRoot.querySelector(".error-banner");\n    if (banner !== null) banner.remove();\n}\n\n/**\n * \u663E\u793A Toast\u3002\n */\nfunction showToast(message, isError) {\n    toastRoot.textContent = message;\n    toastRoot.classList.toggle("error", isError === true);\n    toastRoot.hidden = false;\n    if (toastTimer !== null) window.clearTimeout(toastTimer);\n    toastTimer = window.setTimeout(() => {\n        toastRoot.hidden = true;\n    }, 2600);\n}\n\n/**\n * \u7A7A\u72B6\u6001\u8282\u70B9\u3002\n */\nfunction emptyNode(title, body) {\n    // \u5BB9\u5668\n    const box = createElement("div", "empty");\n    box.append(createElement("p", "empty-title", title));\n    box.append(createElement("p", "empty-body", body));\n    return box;\n}\n\n/**\n * \u52A0\u8F7D\u72B6\u6001\u3002\n */\nfunction renderLoading() {\n    if (viewRoot === null) return;\n    clearNode(viewRoot);\n    // \u52A0\u8F7D\u5BB9\u5668\n    const box = createElement("div", "loading");\n    box.append(createElement("span", "spinner"));\n    box.append(createElement("span", "", "\u52A0\u8F7D\u4E2D\u2026"));\n    viewRoot.append(box);\n}\n\n/**\n * \u8BA1\u7B97\u7528\u4E8E\u8DF3\u8FC7\u91CD\u590D\u6E32\u67D3\u7684\u6570\u636E\u7B7E\u540D\uFF08\u5FFD\u7565\u6982\u89C8\u7684\u751F\u6210\u65F6\u95F4\uFF09\u3002\n */\nfunction signatureOf(data) {\n    if (data !== null && typeof data === "object" && Object.prototype.hasOwnProperty.call(data, "generated_at")) {\n        // \u53BB\u6389\u65F6\u95F4\u6233\u540E\u7684\u526F\u672C\n        const copy = { ...data };\n        delete copy.generated_at;\n        return JSON.stringify(copy);\n    }\n    return JSON.stringify(data);\n}\n\n/**\n * \u52A0\u8F7D\u5F53\u524D\u89C6\u56FE\u3002\n */\nasync function loadCurrent() {\n    if (requestController !== null) requestController.abort();\n    // \u76EE\u6807\u89C6\u56FE\n    const view = currentView;\n    if (!loaded) renderLoading();\n    try {\n        // \u63A5\u53E3\u6570\u636E\n        const data = await fetchJson(API[view]);\n        if (view !== currentView) return;\n        // \u6570\u636E\u7B7E\u540D\uFF08\u7A33\u5B9A\u9875\u9762\u4E0D\u91CD\u590D\u91CD\u5EFA DOM\uFF09\n        const signature = signatureOf(data);\n        lastUpdatedAt = new Date().toISOString();\n        updateHeader(data);\n        setConnection("ok", "\u5DF2\u8FDE\u63A5");\n        if (loaded && signature === lastSignature) return;\n        loaded = true;\n        lastSignature = signature;\n        renderView(view, data);\n    } catch (error) {\n        if (error !== null && error !== undefined && error.name === "AbortError") return;\n        setConnection("error", "\u8FDE\u63A5\u5931\u8D25");\n        if (!loaded) {\n            clearNode(viewRoot);\n            viewRoot.append(emptyNode("\u65E0\u6CD5\u52A0\u8F7D", "\u8BF7\u786E\u8BA4\u670D\u52A1\u4ECD\u5728\u8FD0\u884C\uFF0C\u6216\u5237\u65B0\u9875\u9762\u91CD\u8BD5\u3002"));\n        }\n        showError(error instanceof Error ? error.message : "\u52A0\u8F7D\u5931\u8D25");\n    }\n}\n\n/**\n * \u5207\u6362\u89C6\u56FE\u3002\n */\nfunction onHashChange() {\n    // \u539F\u59CB hash\n    const raw = window.location.hash.replace(/^#\\/?/, "");\n    // \u76EE\u6807\u89C6\u56FE\n    const view = VIEW_IDS.has(raw) ? raw : DEFAULT_VIEW;\n    currentView = view;\n    loaded = false;\n    lastSignature = "";\n    openTaskId = null;\n    setActiveNav();\n    renderLoading();\n    void loadCurrent();\n    schedulePoll();\n}\n\n/**\n * \u5B89\u6392\u8F6E\u8BE2\u3002\n */\nfunction schedulePoll() {\n    if (pollTimer !== null) window.clearInterval(pollTimer);\n    // \u5F53\u524D\u95F4\u9694\n    const interval = POLL_MS[currentView] ?? 5000;\n    pollTimer = window.setInterval(() => {\n        if (document.hidden) return;\n        void loadCurrent();\n    }, interval);\n}\n\n/**\n * \u5206\u53D1\u89C6\u56FE\u6E32\u67D3\u3002\n */\nfunction renderView(view, data) {\n    if (viewRoot === null) return;\n    clearNode(viewRoot);\n    if (view === "overview") renderOverview(data);\n    else if (view === "shots") renderShots(data);\n    else if (view === "artifacts") renderArtifacts(data);\n    else if (view === "tasks") renderTasks(data);\n    else if (view === "finals") renderFinals(data);\n    else if (view === "workflows") renderWorkflows(data);\n    clearError();\n}\n\n/**\n * \u72B6\u6001\u5361\u7247\u3002\n */\nfunction statCard(label, value, hint) {\n    // \u5361\u7247\n    const card = createElement("div", "stat-card");\n    card.append(createElement("p", "stat-label", label));\n    card.append(createElement("p", "stat-value", value));\n    if (hint !== undefined) card.append(createElement("p", "stat-hint", hint));\n    return card;\n}\n\n/**\n * \u6982\u89C8\u9875\u3002\n */\nfunction renderOverview(data) {\n    // \u7EDF\u8BA1\n    const stats = data.stats ?? {};\n    // \u5206\u955C\u89C6\u56FE\n    const storyboard = data.storyboard !== undefined ? data.storyboard : null;\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    // \u9875\u5934\u6587\u672C\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", "Overview"));\n    headText.append(createElement("h2", "page-title", data.project !== undefined ? data.project.name : "\u9879\u76EE\u6982\u89C8"));\n    // \u9879\u76EE\u6458\u8981\n    const subtitle = [`${data.mode ?? "\u672A\u7ED1\u5B9A\u672C\u673A"} \xB7 ${data.machine_id ?? "\u672C\u673A\u672A\u521D\u59CB\u5316"}`];\n    if (storyboard !== null && storyboard.summary !== undefined) {\n        subtitle.push(\n            `${storyboard.summary.shots_total} \u955C \xB7 ${storyboard.summary.characters_total} \u89D2\u8272 \xB7 ${storyboard.summary.scenes_total} \u573A\u666F`,\n        );\n    }\n    headText.append(createElement("p", "page-subtitle", subtitle.join(" \xB7 ")));\n    head.append(headText);\n    viewRoot.append(head);\n\n    if (data.machine === null) {\n        // \u672A\u521D\u59CB\u5316\u63D0\u793A\n        const callout = createElement("div", "callout");\n        callout.append(createElement("strong", "", "\u672C\u673A\u5C1A\u672A\u521D\u59CB\u5316\u3002"));\n        callout.append(document.createTextNode(" \u5F53\u524D\u4EC5\u5C55\u793A\u5171\u4EAB\u6570\u636E\uFF1B\u8FD0\u884C "));\n        callout.append(createElement("code", "mono", "daoyan init --mode=local|remote"));\n        callout.append(document.createTextNode(" \u7ED1\u5B9A\u672C\u673A\u540E\u5373\u53EF\u770B\u5230\u5F15\u64CE\u4E0E\u673A\u5668\u72B6\u6001\u3002"));\n        viewRoot.append(callout);\n    }\n\n    // \u7EDF\u8BA1\u7F51\u683C\n    const statsGrid = createElement("div", "stats-grid");\n    statsGrid.append(statCard("\u955C\u5934", `${stats.shots_done ?? 0}/${stats.shots_total ?? 0}`, "\u5DF2\u5B8C\u6210 / \u603B\u6570"));\n    statsGrid.append(statCard("\u4EBA\u7269", stats.characters_total ?? 0, "\u5DF2\u767B\u8BB0\u89D2\u8272"));\n    statsGrid.append(statCard("\u573A\u666F", stats.scenes_total ?? 0, "\u5DF2\u767B\u8BB0\u573A\u666F"));\n    statsGrid.append(statCard("\u4EA7\u51FA\u7269", stats.outputs_total ?? 0, formatBytes(stats.outputs_bytes ?? 0)));\n    statsGrid.append(\n        statCard("\u6210\u529F run", `${stats.runs_succeeded ?? 0}/${stats.runs_total ?? 0}`, `\u5931\u8D25 ${stats.runs_failed ?? 0}`),\n    );\n    statsGrid.append(statCard("\u8FD0\u884C\u4E2D\u4EFB\u52A1", stats.tasks_active ?? 0, `\u5171 ${stats.tasks_total ?? 0} \u4E2A\u4EFB\u52A1`));\n    viewRoot.append(statsGrid);\n\n    if (storyboard !== null) {\n        viewRoot.append(renderProjectProfile(storyboard));\n        viewRoot.append(renderEntitySection("character", storyboard.characters));\n        viewRoot.append(renderEntitySection("scene", storyboard.scenes));\n        viewRoot.append(renderStoryboardPanel(storyboard));\n    } else {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u5206\u955C\u8BBE\u5B9A", "\u521B\u5EFA shots.json \u540E\uFF0C\u8FD9\u91CC\u4F1A\u5C55\u793A\u955C\u5934\u3001\u4EBA\u7269\u3001\u573A\u666F\u548C\u9010\u955C\u4EA7\u51FA\u3002"));\n    }\n\n    // \u4E24\u5217\u4FE1\u606F\n    const layout = createElement("div", "layout-two");\n    layout.append(renderEnginePanel(data));\n    layout.append(renderEnvironmentPanel(data));\n    viewRoot.append(layout);\n\n    // \u6700\u8FD1\u4EA7\u7269\n    const artifacts = Array.isArray(data.recent_artifacts) ? data.recent_artifacts : [];\n    // \u4EA7\u7269\u533A\u5757\u5934\n    const artifactHead = createElement("div", "section-head");\n    artifactHead.append(createElement("h3", "section-title", "\u6700\u8FD1\u4EA7\u51FA\u7269"));\n    artifactHead.append(createElement("span", "section-meta", `${artifacts.length} \u4E2A`));\n    viewRoot.append(artifactHead);\n    if (artifacts.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u4EA7\u51FA\u7269", "\u6267\u884C shot / run \u540E\uFF0C\u89C6\u9891\u4E0E\u56FE\u7247\u4F1A\u51FA\u73B0\u5728\u8FD9\u91CC\u3002"));\n    } else {\n        // \u4EA7\u7269\u7F51\u683C\n        const grid = createElement("div", "grid");\n        renderArtifactCards(grid, artifacts);\n        viewRoot.append(grid);\n    }\n\n    // \u6700\u8FD1\u4EFB\u52A1\n    const tasks = Array.isArray(data.recent_tasks) ? data.recent_tasks : [];\n    // \u4EFB\u52A1\u533A\u5757\u5934\n    const taskHead = createElement("div", "section-head");\n    taskHead.append(createElement("h3", "section-title", "\u6700\u8FD1\u4EFB\u52A1"));\n    taskHead.append(createElement("span", "section-meta", `${tasks.length} \u4E2A`));\n    viewRoot.append(taskHead);\n    if (tasks.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u4EFB\u52A1", "daoyan shot / batch \u521B\u5EFA\u7684\u4EFB\u52A1\u4F1A\u5728\u8FD9\u91CC\u51FA\u73B0\u3002"));\n    } else {\n        viewRoot.append(renderTaskList(tasks));\n    }\n}\n\n/**\n * \u9879\u76EE\u6863\u6848\u9762\u677F\u3002\n */\nfunction renderProjectProfile(storyboard) {\n    // \u9762\u677F\n    const panel = createElement("section", "panel profile-panel");\n    // \u9762\u677F\u5934\n    const head = createElement("div", "panel-head");\n    // \u6807\u9898\u5BB9\u5668\n    const titles = createElement("div");\n    titles.append(createElement("h3", "panel-title", "\u9879\u76EE\u6863\u6848"));\n    titles.append(createElement("p", "panel-sub", "\u5267\u60C5\u3001\u753B\u9762\u4E0E\u751F\u6210\u53C2\u6570"));\n    head.append(titles);\n    panel.append(head);\n\n    if (storyboard.synopsis !== null && storyboard.synopsis !== undefined) {\n        panel.append(createElement("p", "profile-synopsis", storyboard.synopsis));\n    }\n\n    // \u6458\u8981\n    const summary = storyboard.summary ?? {};\n    // \u9ED8\u8BA4\u53C2\u6570\n    const defaults = storyboard.defaults ?? {};\n    // \u952E\u503C\u5217\u8868\n    const kv = createElement("dl", "kv");\n    appendKv(kv, "\u7247\u540D", storyboard.title ?? "\u672A\u547D\u540D");\n    appendKv(kv, "\u5206\u8FA8\u7387", summary.resolution ?? "\u2014");\n    appendKv(kv, "\u5E27\u7387", summary.fps !== null && summary.fps !== undefined ? `${summary.fps} fps` : "\u672A\u8BBE\u7F6E");\n    appendKv(kv, "\u603B\u5E27\u6570", summary.total_frames ?? 0);\n    appendKv(\n        kv,\n        "\u603B\u65F6\u957F",\n        summary.total_duration_seconds !== null && summary.total_duration_seconds !== undefined\n            ? formatSeconds(summary.total_duration_seconds)\n            : "\u90E8\u5206\u955C\u5934\u672A\u77E5",\n    );\n    appendKv(kv, "\u98CE\u683C", storyboard.style_prefix ?? "\u2014");\n    appendKv(kv, "workflow", storyboard.workflow ?? "\u2014");\n    if (defaults.steps !== undefined) appendKv(kv, "\u9ED8\u8BA4 steps", defaults.steps);\n    if (defaults.cfg !== undefined) appendKv(kv, "\u9ED8\u8BA4 cfg", defaults.cfg);\n    if (defaults.negative !== undefined) appendKv(kv, "\u8D1F\u5411\u63D0\u793A\u8BCD", defaults.negative);\n    panel.append(kv);\n    return panel;\n}\n\n/**\n * \u4EBA\u7269 / \u573A\u666F\u533A\u5757\u3002\n */\nfunction renderEntitySection(kind, entities) {\n    // \u662F\u5426\u4EBA\u7269\n    const isCharacter = kind === "character";\n    // \u533A\u5757\n    const section = createElement("section", "entity-section");\n    // \u533A\u5757\u5934\n    const head = createElement("div", "section-head");\n    head.append(createElement("h3", "section-title", isCharacter ? "\u4EBA\u7269\u8BBE\u5B9A" : "\u573A\u666F\u8BBE\u5B9A"));\n    head.append(createElement("span", "section-meta", `${Array.isArray(entities) ? entities.length : 0} \u4E2A`));\n    section.append(head);\n    if (!Array.isArray(entities) || entities.length === 0) {\n        section.append(\n            emptyNode(\n                isCharacter ? "\u8FD8\u6CA1\u6709\u4EBA\u7269\u8BBE\u5B9A" : "\u8FD8\u6CA1\u6709\u573A\u666F\u8BBE\u5B9A",\n                isCharacter\n                    ? "\u5728 shots.json \u7684 meta.characters \u767B\u8BB0\u4EBA\u7269\uFF0C\u5E76\u5728\u955C\u5934\u7684 characters \u5B57\u6BB5\u5F15\u7528\u3002"\n                    : "\u5728 shots.json \u7684 meta.scenes \u767B\u8BB0\u573A\u666F\uFF0C\u5E76\u5728\u955C\u5934\u7684 scene \u5B57\u6BB5\u5F15\u7528\u3002",\n            ),\n        );\n        return section;\n    }\n    // \u5361\u7247\u7F51\u683C\n    const grid = createElement("div", "entity-grid");\n    for (const entity of entities) {\n        // \u5B9E\u4F53\u5361\u7247\n        const card = createElement("article", "entity-card");\n        // \u5361\u7247\u5934\n        const cardHead = createElement("div", "entity-head");\n        cardHead.append(createElement("h4", "entity-name", entity.name));\n        cardHead.append(\n            entity.count > 0\n                ? badge(`\u51FA\u573A ${entity.count} \u955C`, isCharacter ? "kind-image" : "kind-video")\n                : badge("\u672A\u51FA\u573A", ""),\n        );\n        card.append(cardHead);\n        if (entity.description) card.append(createElement("p", "entity-desc", entity.description));\n        if (entity.reference) card.append(createElement("p", "entity-ref mono", entity.reference));\n        // \u51FA\u573A\u955C\u53F7\n        const shots = createElement("div", "chip-row");\n        if (Array.isArray(entity.shots) && entity.shots.length > 0) {\n            for (const shotId of entity.shots) shots.append(createElement("span", "chip chip-small", `\u955C ${shotId}`));\n        } else {\n            shots.append(createElement("span", "muted", "\u6682\u65E0\u51FA\u573A\u955C\u5934"));\n        }\n        card.append(shots);\n        grid.append(card);\n    }\n    section.append(grid);\n    return section;\n}\n\n/**\n * \u5206\u955C\u4E00\u89C8\u9762\u677F\u3002\n */\nfunction renderStoryboardPanel(storyboard) {\n    // \u955C\u5934\n    const shots = Array.isArray(storyboard.shots) ? storyboard.shots : [];\n    // \u533A\u5757\n    const section = createElement("section", "storyboard-section");\n    // \u533A\u5757\u5934\n    const head = createElement("div", "section-head");\n    head.append(createElement("h3", "section-title", "\u5206\u955C\u4E00\u89C8"));\n    head.append(createElement("span", "section-meta", `${shots.length} \u955C`));\n    // \u67E5\u770B\u5168\u90E8\n    const more = createElement("button", "button ghost", "\u67E5\u770B\u5206\u955C\u8BE6\u60C5");\n    more.type = "button";\n    more.addEventListener("click", () => {\n        window.location.hash = `${HASH_PREFIX}shots`;\n    });\n    head.append(more);\n    section.append(head);\n    if (shots.length === 0) {\n        section.append(emptyNode("\u8FD8\u6CA1\u6709\u955C\u5934", "\u5728 shots.json \u7684 shots \u6570\u7EC4\u91CC\u6DFB\u52A0\u955C\u5934\u3002"));\n        return section;\n    }\n    // \u5206\u955C\u5217\u8868\n    const list = createElement("div", "storyboard-list");\n    // \u8868\u5934\n    const header = createElement("div", "storyboard-row storyboard-header");\n    for (const label of ["\u955C\u53F7", "\u5185\u5BB9", "\u573A\u666F", "\u4EBA\u7269", "\u4EA7\u51FA"]) header.append(createElement("span", "", label));\n    list.append(header);\n    for (const shot of shots) {\n        // \u6570\u636E\u884C\n        const row = createElement("div", "storyboard-row");\n        // \u955C\u53F7\n        const idCell = createElement("div", "storyboard-id-cell");\n        idCell.append(createElement("span", "storyboard-id", shot.id));\n        idCell.append(shotStatusBadge(shot));\n        row.append(idCell);\n        // \u5185\u5BB9\n        const content = createElement("div", "storyboard-content");\n        content.append(createElement("div", "storyboard-title", shot.title ?? shot.slug ?? `\u955C\u5934 ${shot.id}`));\n        content.append(createElement("p", "storyboard-summary", shot.summary));\n        row.append(content);\n        // \u573A\u666F\n        row.append(\n            shot.scene !== null && shot.scene !== undefined\n                ? entityChip(shot.scene, "chip-scene")\n                : createElement("span", "muted", "\u2014"),\n        );\n        // \u4EBA\u7269\n        const cast = createElement("div", "chip-row");\n        if (Array.isArray(shot.characters) && shot.characters.length > 0) {\n            for (const character of shot.characters) cast.append(entityChip(character, "chip-character"));\n        } else {\n            cast.append(createElement("span", "muted", "\u2014"));\n        }\n        row.append(cast);\n        // \u4EA7\u51FA\n        const artifacts = Array.isArray(shot.artifacts) ? shot.artifacts : [];\n        const artifactCell = createElement("div", "storyboard-artifacts");\n        artifactCell.append(createElement("span", "muted", `${artifacts.length} \u4E2A`));\n        // \u53EF\u64AD\u653E\u4EA7\u7269\n        const playable = artifacts.find(\n            (item) =>\n                item.output.present === true && item.output.lfs_pointer !== true && PREVIEW_KINDS.has(item.output.kind),\n        );\n        if (playable !== undefined) {\n            // \u64AD\u653E\u6309\u94AE\n            const play = createElement("button", "button ghost", "\u64AD\u653E");\n            play.type = "button";\n            play.addEventListener("click", () => openArtifact(playable, artifacts));\n            artifactCell.append(play);\n        }\n        row.append(artifactCell);\n        list.append(row);\n    }\n    section.append(list);\n    return section;\n}\n\n/**\n * \u5F15\u64CE\u9762\u677F\u3002\n */\nfunction renderEnginePanel(data) {\n    // \u9762\u677F\n    const panel = createElement("section", "panel");\n    // \u9762\u677F\u5934\n    const head = createElement("div", "panel-head");\n    // \u6807\u9898\u5BB9\u5668\n    const titles = createElement("div");\n    titles.append(createElement("h3", "panel-title", "\u5F15\u64CE"));\n    titles.append(createElement("p", "panel-sub", data.engine === null ? "\u672A\u7ED1\u5B9A\u672C\u673A" : data.engine.mode));\n    head.append(titles);\n    if (data.engine !== null) {\n        head.append(data.engine.up === true ? badge("\u53EF\u8FBE", "status-succeeded") : badge("\u4E0D\u53EF\u8FBE", "status-failed"));\n    }\n    panel.append(head);\n    if (data.engine === null) {\n        panel.append(createElement("p", "muted", "\u8FD0\u884C init \u7ED1\u5B9A\u672C\u673A\u540E\u663E\u793A\u5F15\u64CE\u72B6\u6001\u3002"));\n        return panel;\n    }\n    // \u952E\u503C\u5217\u8868\n    const kv = createElement("dl", "kv");\n    appendKv(kv, "\u5730\u5740", data.engine.url);\n    appendKv(kv, "PID", data.engine.pid);\n    if (data.engine.queue !== null && data.engine.queue !== undefined) {\n        appendKv(kv, "\u961F\u5217", `\u6267\u884C\u4E2D ${data.engine.queue.running} / \u7B49\u5F85 ${data.engine.queue.pending}`);\n    }\n    appendKv(kv, "\u6A21\u5F0F", data.mode);\n    panel.append(kv);\n    return panel;\n}\n\n/**\n * \u673A\u5668 / GPU / Skill \u9762\u677F\u3002\n */\nfunction renderEnvironmentPanel(data) {\n    // \u9762\u677F\n    const panel = createElement("section", "panel");\n    // \u9762\u677F\u5934\n    const head = createElement("div", "panel-head");\n    // \u6807\u9898\u5BB9\u5668\n    const titles = createElement("div");\n    titles.append(createElement("h3", "panel-title", "\u673A\u5668\u4E0E\u8FD0\u884C\u73AF\u5883"));\n    titles.append(createElement("p", "panel-sub", data.machine_id ?? "\u672C\u673A\u672A\u521D\u59CB\u5316"));\n    head.append(titles);\n    panel.append(head);\n\n    // \u952E\u503C\u5217\u8868\n    const kv = createElement("dl", "kv");\n    // \u673A\u5668\u9501\u72B6\u6001\n    const lock = data.machine_lock;\n    if (lock === null || lock === undefined) {\n        appendKv(kv, "\u673A\u5668\u9501", "\u2014");\n    } else if (lock.status === "held" && lock.owner !== undefined) {\n        appendKv(kv, "\u673A\u5668\u9501", `${lock.owner.command}\uFF08task ${lock.owner.task_id}\uFF0Cpid ${lock.owner.pid}\uFF09`);\n    } else {\n        appendKv(kv, "\u673A\u5668\u9501", STATUS_LABEL[lock.status] ?? lock.status);\n    }\n\n    // GPU \u72B6\u6001\n    const gpu = data.gpu;\n    if (gpu === null || gpu === undefined) {\n        appendKv(kv, "GPU", "\u2014");\n    } else if (gpu.supported === true && Array.isArray(gpu.devices) && gpu.devices.length > 0) {\n        appendKv(kv, "GPU", `${gpu.devices[0].usedMb} MiB / ${gpu.devices[0].totalMb} MiB`);\n    } else {\n        appendKv(kv, "GPU", gpu.reason ?? "\u4E0D\u53EF\u7528");\n    }\n\n    // Skill \u72B6\u6001\n    const skill = data.skill;\n    if (skill === null || skill === undefined) {\n        appendKv(kv, "Skill", "\u2014");\n    } else if (skill.present !== true) {\n        appendKv(kv, "Skill", "\u7F3A\u5931\uFF08\u8FD0\u884C daoyan skill update\uFF09");\n    } else {\n        appendKv(kv, "Skill", skill.stale === true ? "\u9700\u8981\u66F4\u65B0" : "\u5DF2\u5C31\u7EEA");\n    }\n    panel.append(kv);\n\n    // \u4E0B\u4E00\u6B65\u52A8\u4F5C\n    const actions = Array.isArray(data.next_actions) ? data.next_actions : [];\n    if (actions.length > 0) {\n        // \u4E0B\u4E00\u6B65\n        const next = createElement("div", "card-actions");\n        for (const action of actions) next.append(createElement("code", "mono", action));\n        panel.append(next);\n    }\n    return panel;\n}\n\n/**\n * \u5206\u955C\u9875\u3002\n */\nfunction renderShots(data) {\n    if (data === null) {\n        // \u9875\u5934\n        const head = createElement("div", "view-head");\n        head.append(createElement("h2", "page-title", "\u5206\u955C"));\n        viewRoot.append(head);\n        viewRoot.append(emptyNode("\u672A\u914D\u7F6E shots.json", "\u5728\u9879\u76EE\u6839\u521B\u5EFA shots.json \u540E\u5237\u65B0\u3002"));\n        return;\n    }\n    // \u9875\u9762\u6807\u9898\n    const title = data.title !== null && data.title !== undefined ? data.title : "\u5206\u955C";\n    // \u7EDF\u8BA1\n    const stats = data.summary ?? {};\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    // \u9875\u5934\u6587\u672C\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", "Storyboard"));\n    headText.append(createElement("h2", "page-title", title));\n    // \u9875\u5934\u526F\u6807\u9898\n    const subtitle = [];\n    if (data.style_prefix) subtitle.push(`\u98CE\u683C ${data.style_prefix}`);\n    if (data.workflow) subtitle.push(`workflow ${data.workflow}`);\n    if (stats.resolution) subtitle.push(stats.resolution);\n    if (stats.fps) subtitle.push(`${stats.fps} fps`);\n    headText.append(createElement("p", "page-subtitle", subtitle.join(" \xB7 ") || "\u6309\u955C\u5934\u67E5\u770B\u5185\u5BB9\u3001\u4EBA\u7269\u3001\u573A\u666F\u4E0E\u4EA7\u51FA"));\n    head.append(headText);\n    viewRoot.append(head);\n\n    if (data.synopsis !== null && data.synopsis !== undefined) {\n        viewRoot.append(createElement("p", "profile-synopsis", data.synopsis));\n    }\n\n    // \u7EDF\u8BA1\u5361\u7247\n    const statsGrid = createElement("div", "stats-grid");\n    statsGrid.append(statCard("\u955C\u5934", `${stats.shots_done ?? 0}/${stats.shots_total ?? 0}`, "\u5DF2\u5B8C\u6210 / \u603B\u6570"));\n    statsGrid.append(statCard("\u4EBA\u7269", stats.characters_total ?? 0, "\u5168\u7247\u89D2\u8272"));\n    statsGrid.append(statCard("\u573A\u666F", stats.scenes_total ?? 0, "\u5168\u7247\u573A\u666F"));\n    statsGrid.append(\n        statCard(\n            "\u4EA7\u51FA\u7269",\n            stats.artifacts_total ?? 0,\n            `${stats.total_frames ?? 0} \u5E27 \xB7 ${\n                stats.total_duration_seconds !== null && stats.total_duration_seconds !== undefined\n                    ? formatSeconds(stats.total_duration_seconds)\n                    : "\u90E8\u5206\u955C\u5934\u672A\u77E5"\n            }`,\n        ),\n    );\n    viewRoot.append(statsGrid);\n\n    // \u955C\u5934\u5217\u8868\n    const shots = Array.isArray(data.shots) ? data.shots : [];\n    if (shots.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u955C\u5934", "\u5728 shots.json \u7684 shots \u6570\u7EC4\u91CC\u6DFB\u52A0\u955C\u5934\u3002"));\n        return;\n    }\n\n    // \u4EBA\u7269\u7B5B\u9009\u503C -> \u540D\u79F0\n    const characterOptions = {};\n    for (const entity of Array.isArray(data.characters) ? data.characters : []) {\n        characterOptions[entityKey(entity)] = entity.name;\n    }\n    // \u573A\u666F\u7B5B\u9009\u503C -> \u540D\u79F0\n    const sceneOptions = {};\n    for (const entity of Array.isArray(data.scenes) ? data.scenes : []) {\n        sceneOptions[entityKey(entity)] = entity.name;\n    }\n    // \u72B6\u6001\u6587\u6848\n    const statusLabels = { done: "\u5DF2\u5B8C\u6210", pending: "\u672A\u5B8C\u6210", failed: "\u5931\u8D25", running: "\u8FD0\u884C\u4E2D" };\n\n    // \u7B5B\u9009\u680F\n    const filters = createElement("div", "filter-bar");\n    filters.append(\n        buildSelect(\n            "\u4EBA\u7269",\n            Object.keys(characterOptions),\n            shotFilters.character,\n            (value) => {\n                shotFilters.character = value;\n                refresh();\n            },\n            "\u5168\u90E8\u4EBA\u7269",\n            characterOptions,\n        ),\n    );\n    filters.append(\n        buildSelect(\n            "\u573A\u666F",\n            Object.keys(sceneOptions),\n            shotFilters.scene,\n            (value) => {\n                shotFilters.scene = value;\n                refresh();\n            },\n            "\u5168\u90E8\u573A\u666F",\n            sceneOptions,\n        ),\n    );\n    filters.append(\n        buildSelect(\n            "\u72B6\u6001",\n            ["done", "pending", "failed", "running"],\n            shotFilters.status,\n            (value) => {\n                shotFilters.status = value;\n                refresh();\n            },\n            "\u5168\u90E8\u72B6\u6001",\n            statusLabels,\n        ),\n    );\n    // \u641C\u7D22\u6846\n    const search = createElement("input", "input search");\n    search.type = "search";\n    search.placeholder = "\u641C\u7D22\u955C\u53F7 / \u5185\u5BB9 / \u4EBA\u7269 / \u573A\u666F";\n    search.value = shotFilters.search;\n    search.addEventListener("input", () => {\n        shotFilters.search = search.value;\n        refresh();\n    });\n    filters.append(search);\n    viewRoot.append(filters);\n\n    // \u7ED3\u679C\u5934\n    const listHead = createElement("div", "section-head");\n    listHead.append(createElement("h3", "section-title", "\u5206\u955C\u5217\u8868"));\n    // \u7ED3\u679C\u6458\u8981\n    const resultMeta = createElement("span", "section-meta", "");\n    listHead.append(resultMeta);\n    viewRoot.append(listHead);\n\n    // \u955C\u5934\u7F51\u683C\n    const grid = createElement("div", "grid shot-grid");\n    viewRoot.append(grid);\n\n    /**\n     * \u6309\u7B5B\u9009\u6761\u4EF6\u5237\u65B0\u955C\u5934\u5361\u7247\u3002\n     */\n    function refresh() {\n        // \u8FC7\u6EE4\u7ED3\u679C\n        const filtered = filterShots(shots);\n        resultMeta.textContent = `\u663E\u793A ${filtered.length} / ${shots.length}`;\n        clearNode(grid);\n        if (filtered.length === 0) {\n            grid.append(emptyNode("\u6CA1\u6709\u5339\u914D\u7684\u955C\u5934", "\u8C03\u6574\u4EBA\u7269\u3001\u573A\u666F\u3001\u72B6\u6001\u6216\u641C\u7D22\u6761\u4EF6\u3002"));\n            return;\n        }\n        for (const shot of filtered) grid.append(renderShotCard(shot));\n    }\n\n    refresh();\n}\n\n/**\n * \u6309\u5F53\u524D\u7B5B\u9009\u6761\u4EF6\u8FC7\u6EE4\u955C\u5934\u3002\n */\nfunction filterShots(shots) {\n    // \u641C\u7D22\u8BCD\n    const search = shotFilters.search.trim().toLowerCase();\n    return shots.filter((shot) => {\n        if (\n            shotFilters.character !== "" &&\n            !(\n                Array.isArray(shot.characters) &&\n                shot.characters.some((entity) => entityKey(entity) === shotFilters.character)\n            )\n        ) {\n            return false;\n        }\n        if (\n            shotFilters.scene !== "" &&\n            (shot.scene === null || shot.scene === undefined || entityKey(shot.scene) !== shotFilters.scene)\n        ) {\n            return false;\n        }\n        if (shotFilters.status === "done" && shot.done !== true) return false;\n        if (shotFilters.status === "pending" && shot.done === true) return false;\n        if (shotFilters.status === "failed" && shot.latest_status !== "failed") return false;\n        if (shotFilters.status === "running" && shot.latest_status !== "running" && shot.latest_status !== "queued") {\n            return false;\n        }\n        if (search !== "") {\n            // \u641C\u7D22\u6587\u672C\n            const haystack = `${shot.id} ${shot.title ?? ""} ${shot.slug ?? ""} ${shot.summary} ${shot.prompt} ${(\n                shot.characters ?? []\n            )\n                .map((entity) => entity.name)\n                .join(" ")} ${shot.scene !== null && shot.scene !== undefined ? shot.scene.name : ""}`.toLowerCase();\n            if (!haystack.includes(search)) return false;\n        }\n        return true;\n    });\n}\n\n/**\n * \u5355\u4E2A\u5206\u955C\u5361\u7247\u3002\n */\nfunction renderShotCard(shot) {\n    // \u5361\u7247\n    const card = createElement("article", "card shot-card shot-card-rich");\n    // \u5361\u7247\u5934\n    const cardHead = createElement("div", "shot-head");\n    // \u6807\u9898\u5BB9\u5668\n    const titles = createElement("div", "shot-title");\n    titles.append(createElement("span", "shot-id", shot.id));\n    titles.append(createElement("span", "shot-title-text", shot.title ?? shot.slug ?? `\u955C\u5934 ${shot.id}`));\n    if (shot.slug && shot.title) titles.append(createElement("span", "shot-slug", shot.slug));\n    cardHead.append(titles);\n    // \u72B6\u6001\u4E0E\u573A\u666F\n    const headBadges = createElement("div", "chip-row");\n    headBadges.append(shotStatusBadge(shot));\n    if (shot.scene !== null && shot.scene !== undefined) headBadges.append(entityChip(shot.scene, "chip-scene"));\n    cardHead.append(headBadges);\n    card.append(cardHead);\n\n    // \u5185\u5BB9\u6458\u8981\n    const summary = createElement("p", "shot-summary", shot.summary);\n    card.append(summary);\n\n    // \u4EBA\u7269\n    const cast = createElement("div", "shot-line");\n    cast.append(createElement("span", "shot-line-label", "\u4EBA\u7269"));\n    cast.append(entityChips(shot.characters, "chip-character"));\n    card.append(cast);\n\n    // \u5236\u4F5C\u53C2\u6570\n    const meta = createElement("div", "shot-meta-grid");\n    meta.append(createElement("span", "", `seed ${shot.seed}`));\n    meta.append(createElement("span", "", shot.length !== null ? `${shot.length} \u5E27` : "\u5E27\u6570\u672A\u77E5"));\n    meta.append(\n        createElement("span", "", shot.duration_seconds !== null ? formatSeconds(shot.duration_seconds) : "\u65F6\u957F\u672A\u77E5"),\n    );\n    meta.append(createElement("span", "", `${shot.width}x${shot.height}`));\n    meta.append(createElement("span", "", shot.steps !== null ? `steps ${shot.steps}` : "steps \u9ED8\u8BA4"));\n    meta.append(createElement("span", "", shot.cfg !== null ? `cfg ${shot.cfg}` : "cfg \u9ED8\u8BA4"));\n    meta.append(createElement("span", "", `\u9996\u5E27 ${shot.first_frame ?? "\u65E0"}`));\n    meta.append(createElement("span", "", shot.workflow ?? "\u9ED8\u8BA4 workflow"));\n    meta.append(createElement("span", "", `${shot.runs_count} run / ${shot.succeeded_count} \u6210\u529F`));\n    card.append(meta);\n\n    // \u5B8C\u6574\u63D0\u793A\u8BCD\n    const promptDetails = createElement("details", "shot-prompt");\n    promptDetails.append(createElement("summary", "", "\u5B8C\u6574\u63D0\u793A\u8BCD"));\n    promptDetails.append(createElement("p", "", shot.prompt));\n    card.append(promptDetails);\n\n    if (shot.notes) card.append(createElement("p", "shot-notes", `\u5907\u6CE8\uFF1A${shot.notes}`));\n\n    // \u4EA7\u7269\u533A\u5757\n    const artifacts = Array.isArray(shot.artifacts) ? shot.artifacts : [];\n    const artifactHead = createElement("div", "shot-section-head");\n    artifactHead.append(createElement("h4", "", `\u4EA7\u51FA\u7269\uFF08${artifacts.length}\uFF09`));\n    artifactHead.append(createElement("span", "muted", `${shot.runs_count} run / ${shot.succeeded_count} \u6210\u529F`));\n    card.append(artifactHead);\n    if (artifacts.length === 0) {\n        card.append(createElement("p", "muted", "\u8FD8\u6CA1\u6709\u4EA7\u51FA\u7269\u3002"));\n    } else {\n        // \u4EA7\u7269\u5217\u8868\n        const list = createElement("div", "artifact-list");\n        for (const item of artifacts) list.append(renderShotArtifactRow(item, artifacts));\n        card.append(list);\n    }\n\n    card.append(renderShotRunHistory(shot));\n    return card;\n}\n\n/**\n * \u5206\u955C\u4EA7\u7269\u7684\u5355\u884C\u5C55\u793A\u3002\n */\nfunction renderShotArtifactRow(item, all) {\n    // \u4EA7\u7269\n    const output = item.output;\n    // \u884C\n    const row = createElement("div", "artifact-row");\n    // \u7F29\u7565\u56FE\n    const thumb = createElement("div", "artifact-thumb");\n    // \u662F\u5426\u53EF\u7528\n    const available = output.present === true && output.lfs_pointer !== true;\n    if (available && output.kind === "video") {\n        // \u89C6\u9891\u9996\u5E27\n        const video = document.createElement("video");\n        video.src = `${output.media_url}#t=0.1`;\n        video.muted = true;\n        video.playsInline = true;\n        video.preload = "metadata";\n        thumb.append(video);\n    } else if (available && output.kind === "image") {\n        // \u56FE\u7247\u7F29\u7565\u56FE\n        const image = document.createElement("img");\n        image.src = output.media_url;\n        image.alt = output.name;\n        image.loading = "lazy";\n        thumb.append(image);\n    } else {\n        thumb.append(createElement("span", "artifact-thumb-icon", KIND_ICON[output.kind] ?? "\u2193"));\n    }\n    if (!output.present) thumb.append(createElement("span", "artifact-thumb-note", "\u7F3A\u5931"));\n    else if (output.lfs_pointer) thumb.append(createElement("span", "artifact-thumb-note", "LFS"));\n    row.append(thumb);\n\n    // \u4FE1\u606F\n    const info = createElement("div", "artifact-info");\n    info.append(createElement("div", "artifact-name", output.name));\n    // \u5143\u4FE1\u606F\n    const meta = createElement("div", "artifact-meta");\n    meta.append(kindBadge(output.kind));\n    meta.append(statusBadge(item.run_status));\n    meta.append(createElement("span", "", shortId(item.run_id)));\n    meta.append(createElement("span", "", formatTime(item.started_at)));\n    meta.append(createElement("span", "", formatBytes(output.bytes)));\n    info.append(meta);\n    row.append(info);\n\n    // \u64CD\u4F5C\n    const actions = createElement("div", "artifact-row-actions");\n    if (available && PREVIEW_KINDS.has(output.kind)) {\n        // \u9884\u89C8\u6309\u94AE\n        const preview = createElement("button", "button ghost", output.kind === "video" ? "\u64AD\u653E" : "\u67E5\u770B");\n        preview.type = "button";\n        preview.addEventListener("click", () => openArtifact(item, all));\n        actions.append(preview);\n    }\n    // \u4E0B\u8F7D\u94FE\u63A5\n    const download = createElement("a", "button ghost", "\u4E0B\u8F7D");\n    download.href = output.download_url;\n    actions.append(download);\n    row.append(actions);\n    return row;\n}\n\n/**\n * \u5386\u53F2 run \u6298\u53E0\u533A\u3002\n */\nfunction renderShotRunHistory(shot) {\n    // run \u5217\u8868\n    const runs = Array.isArray(shot.runs) ? shot.runs : [];\n    // \u6298\u53E0\u533A\n    const details = createElement("details", "shot-runs");\n    details.append(createElement("summary", "", `\u5386\u53F2 run\uFF08${runs.length}\uFF09`));\n    if (runs.length === 0) {\n        details.append(createElement("p", "muted", "\u8FD8\u6CA1\u6709 run\u3002"));\n        return details;\n    }\n    // \u5217\u8868\n    const list = createElement("ul", "run-list");\n    for (const run of runs) {\n        // run \u884C\n        const item = createElement("li", "run-item");\n        // \u4E3B\u4FE1\u606F\n        const main = createElement("div", "run-main");\n        main.append(statusBadge(run.status));\n        main.append(createElement("code", "mono", shortId(run.run_id)));\n        main.append(createElement("span", "", `${run.outputs.length} \u4E2A\u4EA7\u7269`));\n        main.append(\n            createElement("span", "muted", `${formatDuration(run.duration_ms)} \xB7 ${formatTime(run.started_at)}`),\n        );\n        item.append(main);\n        list.append(item);\n    }\n    details.append(list);\n    return details;\n}\n\n/**\n * \u4EA7\u51FA\u7269\u9875\u3002\n */\nfunction renderArtifacts(data) {\n    // \u5168\u90E8\u6761\u76EE\n    const items = Array.isArray(data.items) ? data.items : [];\n    // label \u5019\u9009\n    const labels = Array.isArray(data.labels) ? data.labels : [];\n    // \u7C7B\u578B\u5019\u9009\n    const kinds = Array.isArray(data.kinds) ? data.kinds : [];\n    // \u603B\u6570\n    const total = Number(data.total ?? items.length);\n\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    // \u9875\u5934\u6587\u672C\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", "Artifacts"));\n    headText.append(createElement("h2", "page-title", "\u4EA7\u51FA\u7269"));\n    headText.append(createElement("p", "page-subtitle", "\u70B9\u51FB\u89C6\u9891\u6216\u56FE\u7247\u9884\u89C8\uFF1B\u652F\u6301\u62D6\u52A8\u8FDB\u5EA6\u6761\u64AD\u653E\u3002"));\n    head.append(headText);\n    viewRoot.append(head);\n\n    // \u7B5B\u9009\u680F\n    const filters = createElement("div", "filter-bar");\n    filters.append(\n        buildSelect(\n            "\u955C\u5934",\n            labels,\n            artifactFilters.label,\n            (value) => {\n                artifactFilters.label = value;\n                refresh();\n            },\n            "\u5168\u90E8\u955C\u5934",\n        ),\n    );\n    filters.append(\n        buildSelect(\n            "\u72B6\u6001",\n            ["queued", "running", "succeeded", "failed", "cancelled", "interrupted"],\n            artifactFilters.status,\n            (value) => {\n                artifactFilters.status = value;\n                refresh();\n            },\n            "\u5168\u90E8\u72B6\u6001",\n            STATUS_LABEL,\n        ),\n    );\n    filters.append(\n        buildSelect(\n            "\u7C7B\u578B",\n            kinds,\n            artifactFilters.kind,\n            (value) => {\n                artifactFilters.kind = value;\n                refresh();\n            },\n            "\u5168\u90E8\u7C7B\u578B",\n            KIND_LABEL,\n        ),\n    );\n    // \u641C\u7D22\u6846\n    const search = createElement("input", "input search");\n    search.type = "search";\n    search.placeholder = "\u641C\u7D22 run / label / prompt / \u6587\u4EF6\u540D";\n    search.value = artifactFilters.search;\n    search.addEventListener("input", () => {\n        artifactFilters.search = search.value;\n        refresh();\n    });\n    filters.append(search);\n    viewRoot.append(filters);\n\n    // \u7ED3\u679C\u6458\u8981\n    const summaryHead = createElement("div", "section-head");\n    summaryHead.append(createElement("h3", "section-title", "\u5168\u90E8\u4EA7\u51FA\u7269"));\n    // \u6458\u8981\n    const summary = createElement("span", "section-meta", "");\n    summaryHead.append(summary);\n    viewRoot.append(summaryHead);\n\n    // \u7F51\u683C\n    const grid = createElement("div", "grid");\n    viewRoot.append(grid);\n\n    /**\n     * \u6309\u5F53\u524D\u7B5B\u9009\u5237\u65B0\u7F51\u683C\u3002\n     */\n    function refresh() {\n        // \u8FC7\u6EE4\u7ED3\u679C\n        const filtered = filterArtifacts(items);\n        summary.textContent = `\u663E\u793A ${filtered.length} / ${total}`;\n        clearNode(grid);\n        if (filtered.length === 0) {\n            grid.append(emptyNode("\u6CA1\u6709\u5339\u914D\u7684\u4EA7\u51FA\u7269", "\u8C03\u6574\u7B5B\u9009\u6761\u4EF6\u6216\u5148\u6267\u884C\u751F\u6210\u4EFB\u52A1\u3002"));\n            return;\n        }\n        renderArtifactCards(grid, filtered);\n    }\n\n    refresh();\n}\n\n/**\n * \u6784\u9020\u4E0B\u62C9\u7B5B\u9009\u3002\n */\nfunction buildSelect(label, options, value, onChange, allLabel, labels) {\n    // \u5B57\u6BB5\u5BB9\u5668\n    const field = createElement("label", "field");\n    field.append(createElement("span", "field-label", label));\n    // \u4E0B\u62C9\u6846\n    const select = createElement("select", "select");\n    select.append(new Option(allLabel, ""));\n    for (const option of options) {\n        // \u9009\u9879\u6587\u6848\n        const text = labels !== undefined ? (labels[option] ?? option) : option;\n        select.append(new Option(text, option));\n    }\n    select.value = value;\n    select.addEventListener("change", () => onChange(select.value));\n    field.append(select);\n    return field;\n}\n\n/**\n * \u6309\u7B5B\u9009\u6761\u4EF6\u8FC7\u6EE4\u4EA7\u7269\u3002\n */\nfunction filterArtifacts(items) {\n    // \u641C\u7D22\u8BCD\n    const search = artifactFilters.search.trim().toLowerCase();\n    return items.filter((item) => {\n        if (artifactFilters.label !== "" && item.label !== artifactFilters.label) return false;\n        if (artifactFilters.status !== "" && item.run_status !== artifactFilters.status) return false;\n        if (artifactFilters.kind !== "" && item.output.kind !== artifactFilters.kind) return false;\n        if (search !== "") {\n            // \u641C\u7D22\u6587\u672C\n            const haystack =\n                `${item.run_id} ${item.label ?? ""} ${item.prompt ?? ""} ${item.output.name}`.toLowerCase();\n            if (!haystack.includes(search)) return false;\n        }\n        return true;\n    });\n}\n\n/**\n * \u6E32\u67D3\u4EA7\u7269\u5361\u7247\u5217\u8868\u3002\n */\nfunction renderArtifactCards(container, items) {\n    for (const item of items) container.append(renderArtifactCard(item, items));\n}\n\n/**\n * \u5355\u4E2A\u4EA7\u7269\u5361\u7247\u3002\n */\nfunction renderArtifactCard(item, items) {\n    // \u4EA7\u7269\n    const output = item.output;\n    // \u5361\u7247\n    const card = createElement("article", "card artifact-card");\n    // \u9884\u89C8\u533A\n    const preview = createElement("div", "artifact-preview");\n    // \u662F\u5426\u53EF\u9884\u89C8\n    const available = output.present === true && output.lfs_pointer !== true;\n    if (available && (output.kind === "video" || output.kind === "image")) {\n        if (output.kind === "video") {\n            // \u89C6\u9891\u9996\u5E27\n            const video = document.createElement("video");\n            video.src = `${output.media_url}#t=0.1`;\n            video.muted = true;\n            video.playsInline = true;\n            video.preload = "metadata";\n            preview.append(video);\n        } else {\n            // \u56FE\u7247\u7F29\u7565\u56FE\n            const image = document.createElement("img");\n            image.src = output.media_url;\n            image.alt = output.name;\n            image.loading = "lazy";\n            preview.append(image);\n        }\n    } else {\n        preview.append(createElement("span", "preview-icon", KIND_ICON[output.kind] ?? "\u2193"));\n    }\n    if (!output.present) preview.append(createElement("span", "preview-note", "\u6587\u4EF6\u7F3A\u5931"));\n    else if (output.lfs_pointer) preview.append(createElement("span", "preview-note", "LFS \u672A\u62C9\u53D6"));\n    if (available && PREVIEW_KINDS.has(output.kind)) {\n        // \u64AD\u653E/\u9884\u89C8\u6309\u94AE\n        const open = createElement("button", "play-button", output.kind === "video" ? "\u25B6" : "\u2315");\n        open.type = "button";\n        open.title = output.kind === "video" ? "\u64AD\u653E" : "\u9884\u89C8";\n        open.addEventListener("click", (event) => {\n            event.stopPropagation();\n            openArtifact(item, items);\n        });\n        preview.append(open);\n    }\n    card.append(preview);\n\n    // \u5361\u7247\u5185\u5BB9\n    const body = createElement("div", "card-body");\n    // \u6807\u9898\u884C\n    const titleRow = createElement("div", "card-meta");\n    titleRow.append(createElement("h3", "card-title", output.name));\n    titleRow.append(kindBadge(output.kind));\n    body.append(titleRow);\n\n    // \u5143\u4FE1\u606F\n    const meta = createElement("div", "card-meta");\n    meta.append(createElement("span", "", item.label ?? shortId(item.run_id)));\n    meta.append(createElement("span", "", formatTime(item.started_at)));\n    meta.append(createElement("span", "", formatBytes(output.bytes)));\n    body.append(meta);\n\n    // \u64CD\u4F5C\u533A\n    const actions = createElement("div", "card-actions");\n    if (available && PREVIEW_KINDS.has(output.kind)) {\n        // \u6253\u5F00\u6309\u94AE\n        const open = createElement(\n            "button",\n            "button",\n            output.kind === "video" ? "\u64AD\u653E" : output.kind === "image" ? "\u67E5\u770B" : "\u9884\u89C8",\n        );\n        open.type = "button";\n        open.addEventListener("click", () => openArtifact(item, items));\n        actions.append(open);\n    }\n    // \u4E0B\u8F7D\u94FE\u63A5\n    const download = createElement("a", "button ghost", "\u4E0B\u8F7D");\n    download.href = output.download_url;\n    actions.append(download);\n    body.append(actions);\n    card.append(body);\n    return card;\n}\n\n/**\n * \u6253\u5F00\u4EA7\u7269\u3002\n */\nfunction openArtifact(item, list) {\n    // \u4EA7\u7269\n    const output = item.output;\n    if (output.present !== true) {\n        showToast("\u6587\u4EF6\u4E0D\u5B58\u5728\uFF0C\u53EF\u80FD\u5C1A\u672A\u4ECE Git LFS \u62C9\u53D6", true);\n        return;\n    }\n    if (output.lfs_pointer === true) {\n        showToast("\u8FD9\u662F Git LFS pointer\uFF0C\u8BF7\u5148\u6267\u884C git lfs pull", true);\n        return;\n    }\n    if (output.kind === "video" || output.kind === "audio") {\n        // \u53EF\u64AD\u653E\u6761\u76EE\n        const playable = playableItems(list ?? [item]);\n        // \u5F53\u524D\u7D22\u5F15\n        const index = playable.findIndex((entry) => entry.url === output.media_url);\n        openPlayer(playable, Math.max(index, 0));\n        return;\n    }\n    if (output.kind === "image") {\n        openImage(item);\n        return;\n    }\n    if (output.kind === "json" || output.kind === "text") {\n        void openText(item);\n        return;\n    }\n    window.location.href = output.download_url;\n}\n\n/**\n * \u53EF\u64AD\u653E\u5217\u8868\u3002\n */\nfunction playableItems(items) {\n    // \u7ED3\u679C\n    const out = [];\n    for (const item of items) {\n        // \u4EA7\u7269\n        const output = item.output;\n        if (output === undefined || output.present !== true || output.lfs_pointer === true) continue;\n        if (!PLAYABLE_KINDS.has(output.kind)) continue;\n        out.push({\n            title: `${item.label ?? item.run_id} \xB7 ${output.name}`,\n            url: output.media_url,\n            kind: output.kind,\n        });\n    }\n    return out;\n}\n\n/**\n * \u4EFB\u52A1\u9875\u3002\n */\nfunction renderTasks(data) {\n    // \u4EFB\u52A1\u5217\u8868\n    const tasks = Array.isArray(data.items) ? data.items : [];\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    // \u9875\u5934\u6587\u672C\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", "Tasks"));\n    headText.append(createElement("h2", "page-title", "\u4EFB\u52A1"));\n    headText.append(\n        createElement("p", "page-subtitle", `\u5171 ${data.total ?? tasks.length} \u4E2A\u4EFB\u52A1\uFF1B\u70B9\u51FB\u8BE6\u60C5\u67E5\u770B run \u4E0E\u4E8B\u4EF6\u3002`),\n    );\n    head.append(headText);\n    viewRoot.append(head);\n    if (tasks.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u4EFB\u52A1", "daoyan run / shot / batch \u521B\u5EFA\u7684\u4EFB\u52A1\u4F1A\u5728\u8FD9\u91CC\u51FA\u73B0\u3002"));\n        return;\n    }\n    viewRoot.append(renderTaskList(tasks));\n}\n\n/**\n * \u6E32\u67D3\u4EFB\u52A1\u5217\u8868\u3002\n */\nfunction renderTaskList(tasks) {\n    // \u5BB9\u5668\n    const list = createElement("div", "task-list");\n    for (const task of tasks) {\n        // \u4EFB\u52A1\u5361\u7247\n        const card = renderTaskCard(task);\n        list.append(card);\n        if (openTaskId === task.task_id) {\n            // \u8BE6\u60C5\u5BB9\u5668\n            const detail = card.querySelector(".task-detail");\n            void loadTaskDetail(task.task_id, detail);\n        }\n    }\n    return list;\n}\n\n/**\n * \u5355\u4E2A\u4EFB\u52A1\u5361\u7247\u3002\n */\nfunction renderTaskCard(task) {\n    // \u5361\u7247\n    const card = createElement("article", "task-card");\n    // \u5934\u90E8\n    const head = createElement("div", "task-head");\n    // \u6807\u9898\u533A\n    const title = createElement("div", "task-title");\n    title.append(statusBadge(task.status));\n    title.append(createElement("h3", "task-command", task.command));\n    title.append(badge(TASK_KIND_LABEL[task.kind] ?? task.kind, ""));\n    head.append(title);\n\n    // \u8BE6\u60C5\u6309\u94AE\n    const toggle = createElement("button", "button ghost task-toggle", openTaskId === task.task_id ? "\u6536\u8D77" : "\u8BE6\u60C5");\n    toggle.type = "button";\n    head.append(toggle);\n    card.append(head);\n\n    // \u5143\u4FE1\u606F\n    const meta = createElement("div", "task-meta");\n    meta.append(createElement("span", "", `task ${shortId(task.task_id)}`));\n    meta.append(createElement("span", "", `machine ${task.machine_id}`));\n    meta.append(createElement("span", "", `${task.run_count ?? 0} run`));\n    meta.append(createElement("span", "", formatTime(task.created_at)));\n    if (task.error !== null && task.error !== undefined) {\n        meta.append(createElement("span", "", `${task.error.code}: ${task.error.message}`));\n    }\n    card.append(meta);\n\n    // \u8BE6\u60C5\u5BB9\u5668\n    const detail = createElement("div", "task-detail");\n    detail.hidden = openTaskId !== task.task_id;\n    card.append(detail);\n    toggle.addEventListener("click", () => {\n        if (openTaskId === task.task_id) {\n            openTaskId = null;\n            detail.hidden = true;\n            toggle.textContent = "\u8BE6\u60C5";\n            return;\n        }\n        openTaskId = task.task_id;\n        for (const other of viewRoot.querySelectorAll(".task-detail")) other.hidden = true;\n        for (const button of viewRoot.querySelectorAll(".task-toggle")) button.textContent = "\u8BE6\u60C5";\n        detail.hidden = false;\n        toggle.textContent = "\u6536\u8D77";\n        void loadTaskDetail(task.task_id, detail);\n    });\n    return card;\n}\n\n/**\n * \u52A0\u8F7D\u4EFB\u52A1\u8BE6\u60C5\u3002\n */\nasync function loadTaskDetail(taskId, container) {\n    if (container === null) return;\n    container.hidden = false;\n    container.textContent = "\u52A0\u8F7D\u4E2D\u2026";\n    // \u7F13\u5B58\u9879\n    const cached = taskDetailCache.get(taskId);\n    if (cached !== undefined && Date.now() - cached.at < TASK_DETAIL_CACHE_MS) {\n        renderTaskDetail(container, cached.data);\n        return;\n    }\n    try {\n        // \u8BE6\u60C5\u6570\u636E\n        const data = await requestJson(`/api/tasks/${encodeURIComponent(taskId)}`);\n        taskDetailCache.set(taskId, { at: Date.now(), data });\n        renderTaskDetail(container, data);\n    } catch (error) {\n        container.textContent = `\u52A0\u8F7D\u5931\u8D25\uFF1A${error instanceof Error ? error.message : String(error)}`;\n    }\n}\n\n/**\n * \u6E32\u67D3\u4EFB\u52A1\u8BE6\u60C5\u3002\n */\nfunction renderTaskDetail(container, data) {\n    clearNode(container);\n    // run \u5217\u8868\n    const runs = Array.isArray(data.runs_detail) ? data.runs_detail : [];\n    container.append(createElement("h4", "", `Runs\uFF08${runs.length}\uFF09`));\n    if (runs.length === 0) {\n        container.append(createElement("p", "muted", "\u8FD8\u6CA1\u6709 run\u3002"));\n    } else {\n        // run \u5217\u8868\u8282\u70B9\n        const list = createElement("ul", "run-list");\n        for (const run of runs) {\n            // run \u884C\n            const item = createElement("li", "run-item");\n            // run \u4E3B\u4FE1\u606F\n            const main = createElement("div", "run-main");\n            main.append(statusBadge(run.status));\n            main.append(createElement("code", "mono", shortId(run.run_id)));\n            main.append(createElement("span", "", run.label ?? "\u65E0 label"));\n            main.append(\n                createElement("span", "muted", `${run.outputs.length} \u4E2A\u4EA7\u7269 \xB7 ${formatDuration(run.duration_ms)}`),\n            );\n            item.append(main);\n\n            // run \u64CD\u4F5C\n            const actions = createElement("div", "card-actions");\n            // \u9996\u4E2A\u4EA7\u7269\n            const firstOutput = run.outputs[0];\n            if (\n                firstOutput !== undefined &&\n                firstOutput.present === true &&\n                firstOutput.lfs_pointer !== true &&\n                PREVIEW_KINDS.has(firstOutput.kind)\n            ) {\n                // \u9884\u89C8\u6309\u94AE\n                const preview = createElement("button", "button ghost", "\u9884\u89C8");\n                preview.type = "button";\n                preview.addEventListener("click", () => {\n                    openArtifact(artifactItemFromRun(run, firstOutput));\n                });\n                actions.append(preview);\n            }\n            item.append(actions);\n            list.append(item);\n        }\n        container.append(list);\n    }\n\n    // \u4E8B\u4EF6\n    const events = Array.isArray(data.events) ? data.events : [];\n    container.append(createElement("h4", "", `\u4E8B\u4EF6\uFF08${events.length}\uFF09`));\n    if (events.length === 0) {\n        container.append(createElement("p", "muted", "\u6682\u65E0\u4E8B\u4EF6\u3002"));\n        return;\n    }\n    // \u4E8B\u4EF6\u5217\u8868\n    const eventList = createElement("ul", "events");\n    for (const event of events) {\n        // \u4E8B\u4EF6\u884C\n        const item = createElement("li", "event");\n        item.append(createElement("span", "event-time", event.ts.slice(11, 19)));\n        item.append(createElement("span", "event-type", event.type));\n        // \u4E8B\u4EF6\u6570\u636E\u6587\u672C\n        const dataText = JSON.stringify(event.data ?? {});\n        item.append(\n            createElement("span", "event-data", dataText.length > 220 ? `${dataText.slice(0, 220)}\u2026` : dataText),\n        );\n        eventList.append(item);\n    }\n    container.append(eventList);\n}\n\n/**\n * \u7528 run \u4FE1\u606F\u6784\u9020\u4EA7\u7269\u6761\u76EE\u3002\n */\nfunction artifactItemFromRun(run, output) {\n    return {\n        run_id: run.run_id,\n        task_id: run.task_id,\n        machine_id: run.machine_id,\n        label: run.label,\n        run_status: run.status,\n        started_at: run.started_at,\n        finished_at: run.finished_at,\n        workflow: run.workflow.path,\n        prompt: run.prompt,\n        output,\n    };\n}\n\n/**\n * \u6210\u7247\u9875\u3002\n */\nfunction renderFinals(data) {\n    // \u6210\u7247\u5217\u8868\n    const items = Array.isArray(data) ? data : [];\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    // \u9875\u5934\u6587\u672C\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", "Final cuts"));\n    headText.append(createElement("h2", "page-title", "\u6210\u7247"));\n    headText.append(createElement("p", "page-subtitle", "daoyan wrap \u751F\u6210\u7684 final/cut-* \u6587\u4EF6\u3002"));\n    head.append(headText);\n    viewRoot.append(head);\n    if (items.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u6210\u7247", "\u5B8C\u6210\u81F3\u5C11\u4E24\u4E2A\u955C\u5934\u540E\u8FD0\u884C daoyan wrap\u3002"));\n        return;\n    }\n    // \u7F51\u683C\n    const grid = createElement("div", "grid");\n    for (const item of items) {\n        // \u5361\u7247\n        const card = createElement("article", "card final-card");\n        // \u9884\u89C8\u533A\n        const preview = createElement("div", "artifact-preview");\n        if (item.present === true && item.lfs_pointer !== true) {\n            // \u89C6\u9891\u9996\u5E27\n            const video = document.createElement("video");\n            video.src = `${item.media_url}#t=0.1`;\n            video.muted = true;\n            video.playsInline = true;\n            video.preload = "metadata";\n            preview.append(video);\n            // \u64AD\u653E\u6309\u94AE\n            const play = createElement("button", "play-button", "\u25B6");\n            play.type = "button";\n            play.title = "\u64AD\u653E\u6210\u7247";\n            play.addEventListener("click", () => {\n                openPlayer([{ title: item.name, url: item.media_url, kind: "video" }], 0);\n            });\n            preview.append(play);\n        } else {\n            preview.append(createElement("span", "preview-icon", "\u25B6"));\n            preview.append(\n                createElement("span", "preview-note", item.lfs_pointer === true ? "LFS \u672A\u62C9\u53D6" : "\u6587\u4EF6\u7F3A\u5931"),\n            );\n        }\n        card.append(preview);\n\n        // \u5361\u7247\u5185\u5BB9\n        const body = createElement("div", "card-body");\n        body.append(createElement("h3", "card-title", item.name));\n        // \u5143\u4FE1\u606F\n        const meta = createElement("div", "card-meta");\n        meta.append(createElement("span", "", item.created_at !== null ? formatTime(item.created_at) : "\u65E0 manifest"));\n        meta.append(createElement("span", "", formatBytes(item.bytes)));\n        meta.append(createElement("span", "", `${item.clips.length} \u6BB5`));\n        if (item.missing.length > 0) meta.append(createElement("span", "", `\u7F3A ${item.missing.length} \u955C`));\n        body.append(meta);\n\n        // \u64CD\u4F5C\u533A\n        const actions = createElement("div", "card-actions");\n        if (item.present === true && item.lfs_pointer !== true) {\n            // \u64AD\u653E\u6309\u94AE\n            const play = createElement("button", "button", "\u64AD\u653E");\n            play.type = "button";\n            play.addEventListener("click", () => {\n                openPlayer([{ title: item.name, url: item.media_url, kind: "video" }], 0);\n            });\n            actions.append(play);\n        }\n        // \u4E0B\u8F7D\u94FE\u63A5\n        const download = createElement("a", "button ghost", "\u4E0B\u8F7D");\n        download.href = item.download_url;\n        actions.append(download);\n        body.append(actions);\n        card.append(body);\n        grid.append(card);\n    }\n    viewRoot.append(grid);\n}\n\n/**\n * \u5DE5\u4F5C\u6D41\u9875\u3002\n */\nfunction renderWorkflows(data) {\n    // \u5DE5\u4F5C\u6D41\u5217\u8868\n    const items = Array.isArray(data) ? data : [];\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    // \u9875\u5934\u6587\u672C\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", "Workflows"));\n    headText.append(createElement("h2", "page-title", "\u5DE5\u4F5C\u6D41"));\n    headText.append(createElement("p", "page-subtitle", "workflows/ \u4E0B\u7684 ComfyUI API \u56FE\u4E0E bindings\u3002"));\n    head.append(headText);\n    viewRoot.append(head);\n    if (items.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u5DE5\u4F5C\u6D41", "\u8FD0\u884C daoyan workflow new / import \u521B\u5EFA\u5DE5\u4F5C\u6D41\u3002"));\n        return;\n    }\n    // \u8868\u683C\n    const list = createElement("div", "table-list");\n    // \u8868\u5934\n    const header = createElement("div", "table-row header");\n    for (const label of ["\u5DE5\u4F5C\u6D41", "\u8282\u70B9", "bindings", "\u9ED8\u8BA4", "\u72B6\u6001"]) header.append(createElement("span", "", label));\n    list.append(header);\n    for (const item of items) {\n        // \u6570\u636E\u884C\n        const row = createElement("div", "table-row");\n        // \u540D\u79F0\u533A\n        const name = createElement("div");\n        name.append(createElement("div", "workflow-name", item.name));\n        name.append(createElement("div", "muted mono", item.path));\n        row.append(name);\n        row.append(createElement("span", "", item.nodes));\n        row.append(createElement("span", "", item.bindings ? "\u6709" : "\u65E0"));\n        row.append(createElement("span", "", item.default ? "\u662F" : "\u2014"));\n        row.append(createElement("span", "", item.valid ? "\u53EF\u89E3\u6790" : "JSON \u635F\u574F"));\n        list.append(row);\n    }\n    viewRoot.append(list);\n}\n\n/**\n * \u6253\u5F00\u64AD\u653E\u5668\u3002\n */\nfunction openPlayer(items, index) {\n    if (items.length === 0) {\n        showToast("\u6CA1\u6709\u53EF\u64AD\u653E\u7684\u4EA7\u7269", true);\n        return;\n    }\n    playerItems = items.slice(0, MAX_PLAYLIST);\n    playerIndex = Math.max(0, Math.min(index, playerItems.length - 1));\n    renderPlayerItem();\n}\n\n/**\n * \u6E32\u67D3\u5F53\u524D\u64AD\u653E\u9879\u3002\n */\nfunction renderPlayerItem() {\n    // \u5F53\u524D\u9879\n    const item = playerItems[playerIndex];\n    if (item === undefined) {\n        closeModal();\n        return;\n    }\n    // \u5A92\u4F53\u5143\u7D20\n    const media = document.createElement(item.kind === "video" ? "video" : "audio");\n    media.controls = true;\n    media.autoplay = true;\n    media.playsInline = true;\n    media.src = item.url;\n    setModal(item.title, media, `${playerIndex + 1} / ${playerItems.length}`);\n    modalPrev.disabled = playerIndex <= 0;\n    modalNext.disabled = playerIndex >= playerItems.length - 1;\n}\n\n/**\n * \u6253\u5F00\u56FE\u7247\u3002\n */\nfunction openImage(item) {\n    // \u56FE\u7247\u5143\u7D20\n    const image = document.createElement("img");\n    image.src = item.output.media_url;\n    image.alt = item.output.name;\n    setModal(item.output.name, image, "\u56FE\u7247");\n    modalPrev.disabled = true;\n    modalNext.disabled = true;\n}\n\n/**\n * \u6253\u5F00\u6587\u672C\u9884\u89C8\u3002\n */\nasync function openText(item) {\n    // \u9884\u89C8\u8282\u70B9\n    const pre = createElement("pre", "", "\u52A0\u8F7D\u4E2D\u2026");\n    setModal(item.output.name, pre, "\u6587\u672C\u9884\u89C8");\n    modalPrev.disabled = true;\n    modalNext.disabled = true;\n    try {\n        // \u6587\u672C\u54CD\u5E94\n        const response = await fetch(item.output.media_url);\n        if (!response.ok) throw new Error(`HTTP ${response.status}`);\n        // \u539F\u59CB\u6587\u672C\n        const raw = await response.text();\n        // \u5C55\u793A\u6587\u672C\n        let text = raw;\n        if (item.output.kind === "json") {\n            try {\n                text = JSON.stringify(JSON.parse(raw), null, 2);\n            } catch {\n                text = raw;\n            }\n        }\n        pre.textContent =\n            text.length > TEXT_PREVIEW_LIMIT\n                ? `${text.slice(0, TEXT_PREVIEW_LIMIT)}\\n\\n\u2026\uFF08\u5DF2\u622A\u65AD\uFF0C\u5B8C\u6574\u5185\u5BB9\u8BF7\u4E0B\u8F7D\uFF09`\n                : text;\n    } catch (error) {\n        pre.textContent = `\u8BFB\u53D6\u5931\u8D25\uFF1A${error instanceof Error ? error.message : String(error)}`;\n    }\n}\n\n/**\n * \u8BBE\u7F6E\u6A21\u6001\u6846\u5185\u5BB9\u3002\n */\nfunction setModal(title, content, counter) {\n    modalTitle.textContent = title;\n    clearNode(modalContent);\n    modalContent.append(content);\n    modalCounter.textContent = counter ?? "";\n    modalRoot.hidden = false;\n}\n\n/**\n * \u5173\u95ED\u6A21\u6001\u6846\u3002\n */\nfunction closeModal() {\n    modalRoot.hidden = true;\n    clearNode(modalContent);\n    modalTitle.textContent = "\u9884\u89C8";\n    modalCounter.textContent = "";\n    playerItems = [];\n    playerIndex = 0;\n}\n\n/**\n * \u4E0A\u4E00\u4E2A\u64AD\u653E\u9879\u3002\n */\nfunction modalPrevStep() {\n    if (playerItems.length === 0 || playerIndex <= 0) return;\n    playerIndex -= 1;\n    renderPlayerItem();\n}\n\n/**\n * \u4E0B\u4E00\u4E2A\u64AD\u653E\u9879\u3002\n */\nfunction modalNextStep() {\n    if (playerItems.length === 0 || playerIndex >= playerItems.length - 1) return;\n    playerIndex += 1;\n    renderPlayerItem();\n}\n\n/**\n * \u952E\u76D8\u64CD\u4F5C\u3002\n */\nfunction handleKeydown(event) {\n    if (modalRoot.hidden) return;\n    if (event.key === "Escape") closeModal();\n    else if (event.key === "ArrowLeft") modalPrevStep();\n    else if (event.key === "ArrowRight") modalNextStep();\n}\n\n/**\n * \u542F\u52A8\u5E94\u7528\u3002\n */\nfunction start() {\n    renderShell();\n    renderNav();\n    setActiveNav();\n    modalClose.addEventListener("click", closeModal);\n    modalPrev.addEventListener("click", modalPrevStep);\n    modalNext.addEventListener("click", modalNextStep);\n    // \u906E\u7F69\u5C42\n    const backdrop = document.querySelector(".modal-backdrop");\n    if (backdrop !== null) backdrop.addEventListener("click", closeModal);\n    window.addEventListener("hashchange", onHashChange);\n    window.addEventListener("keydown", handleKeydown);\n    document.addEventListener("visibilitychange", () => {\n        if (!document.hidden) void loadCurrent();\n    });\n    void loadHeader();\n    onHashChange();\n}\n\nstart();\n';
+  }
+});
+
+// src/core/web/ui/style.css
+var style_default;
+var init_style = __esm({
+  "src/core/web/ui/style.css"() {
+    style_default = '/* daoyan web \u2014\u2014 \u53EA\u8BFB\u9879\u76EE\u67E5\u770B\u5668\uFF1B\u539F\u751F CSS\uFF0C\u65E0\u5916\u90E8\u4F9D\u8D56\u3002 */\n:root {\n    color-scheme: light dark;\n    --bg: #f4f5f7;\n    --bg-elevated: #ffffff;\n    --bg-soft: #eceef2;\n    --panel: #ffffff;\n    --panel-strong: #ffffff;\n    --border: #d9dde4;\n    --border-strong: #c3c9d3;\n    --text: #1c2027;\n    --text-soft: #5c6470;\n    --text-muted: #8a919c;\n    --accent: #2f6fed;\n    --accent-soft: #e8f0ff;\n    --green: #16845b;\n    --green-soft: #e4f6ee;\n    --amber: #a56700;\n    --amber-soft: #fff2d9;\n    --red: #b42318;\n    --red-soft: #fde8e6;\n    --violet: #6b4fd8;\n    --violet-soft: #eee9ff;\n    --shadow: 0 10px 30px rgba(20, 28, 44, 0.08);\n    --radius: 14px;\n    --radius-sm: 10px;\n    --sidebar-width: 232px;\n}\n\n@media (prefers-color-scheme: dark) {\n    :root {\n        --bg: #101318;\n        --bg-elevated: #161a21;\n        --bg-soft: #1d222b;\n        --panel: #161a21;\n        --panel-strong: #1b2029;\n        --border: #2a303a;\n        --border-strong: #3a424f;\n        --text: #eef1f6;\n        --text-soft: #b3bac6;\n        --text-muted: #808895;\n        --accent: #7aa2ff;\n        --accent-soft: #1c2a4a;\n        --green: #5bd3a0;\n        --green-soft: #143329;\n        --amber: #f0b44c;\n        --amber-soft: #392b13;\n        --red: #ff8f86;\n        --red-soft: #3a1b1b;\n        --violet: #b19cff;\n        --violet-soft: #2a2148;\n        --shadow: 0 14px 40px rgba(0, 0, 0, 0.35);\n    }\n}\n\n* {\n    box-sizing: border-box;\n}\n\n[hidden] {\n    display: none !important;\n}\n\nhtml,\nbody {\n    margin: 0;\n    min-height: 100%;\n}\n\nbody {\n    background: var(--bg);\n    color: var(--text);\n    font-family:\n        -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;\n    font-size: 14px;\n    line-height: 1.55;\n    -webkit-font-smoothing: antialiased;\n}\n\nbutton,\ninput,\nselect {\n    font: inherit;\n    color: inherit;\n}\n\na {\n    color: var(--accent);\n    text-decoration: none;\n}\n\na:hover {\n    text-decoration: underline;\n}\n\n.app-shell {\n    display: grid;\n    grid-template-columns: var(--sidebar-width) minmax(0, 1fr);\n    min-height: 100vh;\n}\n\n.sidebar {\n    position: sticky;\n    top: 0;\n    display: flex;\n    flex-direction: column;\n    gap: 22px;\n    height: 100vh;\n    padding: 24px 16px 18px;\n    border-right: 1px solid var(--border);\n    background: var(--bg-elevated);\n}\n\n.brand {\n    padding: 0 8px;\n}\n\n.brand-mark {\n    display: inline-flex;\n    align-items: center;\n    gap: 8px;\n    font-size: 17px;\n    font-weight: 700;\n    letter-spacing: 0.01em;\n}\n\n.brand-dot {\n    display: inline-block;\n    width: 10px;\n    height: 10px;\n    border-radius: 50%;\n    background: var(--accent);\n    box-shadow: 0 0 0 4px var(--accent-soft);\n}\n\n.brand-sub {\n    margin: 6px 0 0;\n    color: var(--text-muted);\n    font-size: 12px;\n}\n\n.nav {\n    display: flex;\n    flex-direction: column;\n    gap: 4px;\n}\n\n.nav-item {\n    display: flex;\n    flex-direction: column;\n    align-items: flex-start;\n    gap: 1px;\n    width: 100%;\n    padding: 9px 10px;\n    border: 0;\n    border-radius: 9px;\n    background: transparent;\n    cursor: pointer;\n    text-align: left;\n}\n\n.nav-item:hover {\n    background: var(--bg-soft);\n}\n\n.nav-item.active {\n    background: var(--accent-soft);\n    color: var(--accent);\n}\n\n.nav-label {\n    font-weight: 600;\n}\n\n.nav-hint {\n    color: var(--text-muted);\n    font-size: 11px;\n}\n\n.nav-item.active .nav-hint {\n    color: color-mix(in srgb, var(--accent) 72%, var(--text-muted));\n}\n\n.sidebar-foot {\n    margin-top: auto;\n    padding: 12px 10px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius-sm);\n    color: var(--text-muted);\n    font-size: 11px;\n    line-height: 1.5;\n}\n\n.sidebar-foot code {\n    color: var(--text-soft);\n    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;\n    font-size: 11px;\n}\n\n.main {\n    min-width: 0;\n}\n\n.topbar {\n    position: sticky;\n    top: 0;\n    z-index: 10;\n    display: flex;\n    align-items: center;\n    justify-content: space-between;\n    gap: 16px;\n    padding: 16px 28px;\n    border-bottom: 1px solid var(--border);\n    background: color-mix(in srgb, var(--bg) 88%, transparent);\n    backdrop-filter: blur(12px);\n}\n\n.topbar-left {\n    display: flex;\n    align-items: baseline;\n    gap: 12px;\n    min-width: 0;\n}\n\n.project-name {\n    margin: 0;\n    overflow: hidden;\n    font-size: 16px;\n    font-weight: 700;\n    text-overflow: ellipsis;\n    white-space: nowrap;\n}\n\n.project-mode {\n    flex: none;\n    padding: 2px 8px;\n    border: 1px solid var(--border);\n    border-radius: 99px;\n    color: var(--text-soft);\n    font-size: 11px;\n}\n\n.topbar-right {\n    display: flex;\n    align-items: center;\n    gap: 14px;\n    color: var(--text-muted);\n    font-size: 12px;\n}\n\n.connection {\n    display: inline-flex;\n    align-items: center;\n    gap: 6px;\n}\n\n.connection-dot {\n    width: 7px;\n    height: 7px;\n    border-radius: 50%;\n    background: var(--text-muted);\n}\n\n.connection.ok .connection-dot {\n    background: var(--green);\n    box-shadow: 0 0 0 3px var(--green-soft);\n}\n\n.connection.error .connection-dot {\n    background: var(--red);\n    box-shadow: 0 0 0 3px var(--red-soft);\n}\n\n.content {\n    max-width: 1280px;\n    margin: 0 auto;\n    padding: 28px;\n}\n\n.view-head {\n    display: flex;\n    align-items: flex-end;\n    justify-content: space-between;\n    gap: 20px;\n    margin-bottom: 22px;\n}\n\n.eyebrow {\n    margin: 0 0 4px;\n    color: var(--text-muted);\n    font-size: 11px;\n    font-weight: 600;\n    letter-spacing: 0.08em;\n    text-transform: uppercase;\n}\n\n.page-title {\n    margin: 0;\n    font-size: 26px;\n    letter-spacing: -0.02em;\n}\n\n.page-subtitle {\n    margin: 6px 0 0;\n    color: var(--text-soft);\n    font-size: 13px;\n}\n\n.stats-grid {\n    display: grid;\n    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));\n    gap: 12px;\n    margin-bottom: 20px;\n}\n\n.stat-card {\n    padding: 16px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius);\n    background: var(--panel);\n}\n\n.stat-label {\n    margin: 0;\n    color: var(--text-muted);\n    font-size: 12px;\n}\n\n.stat-value {\n    margin: 6px 0 0;\n    font-size: 24px;\n    font-weight: 700;\n    letter-spacing: -0.02em;\n}\n\n.stat-hint {\n    margin: 4px 0 0;\n    color: var(--text-muted);\n    font-size: 11px;\n}\n\n.layout-two {\n    display: grid;\n    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);\n    gap: 16px;\n    margin-bottom: 20px;\n}\n\n.panel {\n    padding: 18px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius);\n    background: var(--panel);\n}\n\n.panel-head {\n    display: flex;\n    align-items: center;\n    justify-content: space-between;\n    gap: 12px;\n    margin-bottom: 12px;\n}\n\n.panel-title {\n    margin: 0;\n    font-size: 15px;\n    font-weight: 700;\n}\n\n.panel-sub {\n    margin: 2px 0 0;\n    color: var(--text-muted);\n    font-size: 12px;\n}\n\n.kv {\n    display: grid;\n    grid-template-columns: 92px minmax(0, 1fr);\n    gap: 7px 12px;\n    margin: 0;\n    font-size: 13px;\n}\n\n.kv dt {\n    color: var(--text-muted);\n}\n\n.kv dd {\n    margin: 0;\n    overflow-wrap: anywhere;\n}\n\n.badge {\n    display: inline-flex;\n    align-items: center;\n    gap: 5px;\n    padding: 2px 8px;\n    border-radius: 99px;\n    background: var(--bg-soft);\n    color: var(--text-soft);\n    font-size: 11px;\n    font-weight: 600;\n    white-space: nowrap;\n}\n\n.badge.status-succeeded {\n    background: var(--green-soft);\n    color: var(--green);\n}\n\n.badge.status-running {\n    background: var(--accent-soft);\n    color: var(--accent);\n}\n\n.badge.status-queued {\n    background: var(--amber-soft);\n    color: var(--amber);\n}\n\n.badge.status-failed {\n    background: var(--red-soft);\n    color: var(--red);\n}\n\n.badge.status-cancelled,\n.badge.status-interrupted {\n    background: var(--violet-soft);\n    color: var(--violet);\n}\n\n.badge.kind-video {\n    background: var(--violet-soft);\n    color: var(--violet);\n}\n\n.badge.kind-image {\n    background: var(--green-soft);\n    color: var(--green);\n}\n\n.badge.kind-audio {\n    background: var(--amber-soft);\n    color: var(--amber);\n}\n\n.badge.kind-json,\n.badge.kind-text {\n    background: var(--accent-soft);\n    color: var(--accent);\n}\n\n.muted {\n    color: var(--text-muted);\n}\n\n.mono {\n    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;\n    font-size: 12px;\n}\n\n.section-head {\n    display: flex;\n    align-items: center;\n    justify-content: space-between;\n    gap: 12px;\n    margin: 24px 0 12px;\n}\n\n.section-title {\n    margin: 0;\n    font-size: 16px;\n    font-weight: 700;\n}\n\n.section-meta {\n    color: var(--text-muted);\n    font-size: 12px;\n}\n\n.grid {\n    display: grid;\n    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));\n    gap: 14px;\n}\n\n.card {\n    overflow: hidden;\n    border: 1px solid var(--border);\n    border-radius: var(--radius);\n    background: var(--panel);\n}\n\n.card-body {\n    padding: 13px 14px 14px;\n}\n\n.card-title {\n    margin: 0;\n    overflow: hidden;\n    font-size: 14px;\n    font-weight: 700;\n    text-overflow: ellipsis;\n    white-space: nowrap;\n}\n\n.card-meta {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 6px 10px;\n    margin-top: 7px;\n    color: var(--text-muted);\n    font-size: 11px;\n}\n\n.card-actions {\n    display: flex;\n    flex-wrap: wrap;\n    gap: 8px;\n    margin-top: 12px;\n}\n\n.artifact-card {\n    display: flex;\n    flex-direction: column;\n}\n\n.artifact-preview {\n    position: relative;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    aspect-ratio: 16 / 10;\n    overflow: hidden;\n    background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 10%, var(--bg-soft)), var(--bg-soft));\n}\n\n.artifact-preview video,\n.artifact-preview img {\n    width: 100%;\n    height: 100%;\n    object-fit: cover;\n}\n\n.artifact-preview .preview-icon {\n    font-size: 38px;\n    opacity: 0.65;\n}\n\n.artifact-preview .preview-note {\n    position: absolute;\n    inset: auto 8px 8px;\n    padding: 4px 8px;\n    border-radius: 8px;\n    background: rgba(0, 0, 0, 0.62);\n    color: #fff;\n    font-size: 11px;\n    text-align: center;\n}\n\n.play-button {\n    position: absolute;\n    display: inline-flex;\n    align-items: center;\n    justify-content: center;\n    width: 46px;\n    height: 46px;\n    border: 0;\n    border-radius: 50%;\n    background: rgba(0, 0, 0, 0.62);\n    color: #fff;\n    cursor: pointer;\n    font-size: 18px;\n}\n\n.play-button:hover {\n    background: var(--accent);\n}\n\n.button {\n    display: inline-flex;\n    align-items: center;\n    justify-content: center;\n    gap: 6px;\n    padding: 6px 11px;\n    border: 1px solid var(--border-strong);\n    border-radius: 8px;\n    background: var(--panel-strong);\n    cursor: pointer;\n    font-size: 12px;\n    font-weight: 600;\n}\n\n.button:hover {\n    border-color: var(--accent);\n    color: var(--accent);\n}\n\n.button.primary {\n    border-color: var(--accent);\n    background: var(--accent);\n    color: #fff;\n}\n\n.button.primary:hover {\n    color: #fff;\n    filter: brightness(1.06);\n}\n\n.button.ghost {\n    border-color: transparent;\n    background: transparent;\n    color: var(--text-soft);\n}\n\n.button:disabled {\n    cursor: not-allowed;\n    opacity: 0.4;\n}\n\n.icon-button {\n    display: inline-flex;\n    align-items: center;\n    justify-content: center;\n    width: 34px;\n    height: 34px;\n    border: 1px solid var(--border);\n    border-radius: 9px;\n    background: transparent;\n    cursor: pointer;\n    font-size: 20px;\n    line-height: 1;\n}\n\n.filter-bar {\n    display: flex;\n    flex-wrap: wrap;\n    gap: 10px;\n    margin-bottom: 16px;\n    padding: 12px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius);\n    background: var(--panel);\n}\n\n.field {\n    display: flex;\n    flex-direction: column;\n    gap: 4px;\n}\n\n.field-label {\n    color: var(--text-muted);\n    font-size: 11px;\n    font-weight: 600;\n}\n\n.input,\n.select {\n    min-width: 140px;\n    padding: 7px 9px;\n    border: 1px solid var(--border);\n    border-radius: 8px;\n    background: var(--bg-elevated);\n    font-size: 12px;\n}\n\n.input:focus,\n.select:focus {\n    border-color: var(--accent);\n    outline: 2px solid var(--accent-soft);\n}\n\n.input.search {\n    min-width: 210px;\n}\n\n.shot-card {\n    display: flex;\n    flex-direction: column;\n    gap: 10px;\n    padding: 14px;\n}\n\n.shot-title {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: baseline;\n    gap: 8px;\n    min-width: 0;\n}\n\n.shot-head {\n    display: flex;\n    align-items: flex-start;\n    justify-content: space-between;\n    gap: 10px;\n}\n\n.shot-id {\n    font-size: 18px;\n    font-weight: 800;\n    letter-spacing: -0.02em;\n}\n\n.shot-slug {\n    color: var(--text-muted);\n    font-size: 12px;\n}\n\n.prompt {\n    display: -webkit-box;\n    overflow: hidden;\n    margin: 0;\n    color: var(--text-soft);\n    font-size: 12px;\n    -webkit-box-orient: vertical;\n    -webkit-line-clamp: 3;\n}\n\n.meta-row {\n    display: flex;\n    flex-wrap: wrap;\n    gap: 6px 12px;\n    color: var(--text-muted);\n    font-size: 11px;\n}\n\n.task-list {\n    display: flex;\n    flex-direction: column;\n    gap: 10px;\n}\n\n.task-card {\n    padding: 14px 16px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius);\n    background: var(--panel);\n}\n\n.task-head {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    justify-content: space-between;\n    gap: 10px;\n}\n\n.task-title {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 8px;\n    min-width: 0;\n}\n\n.task-command {\n    margin: 0;\n    font-size: 14px;\n    font-weight: 700;\n}\n\n.task-meta {\n    display: flex;\n    flex-wrap: wrap;\n    gap: 6px 12px;\n    margin-top: 7px;\n    color: var(--text-muted);\n    font-size: 11px;\n}\n\n.task-detail {\n    margin-top: 14px;\n    padding-top: 14px;\n    border-top: 1px dashed var(--border);\n}\n\n.task-detail h4 {\n    margin: 0 0 8px;\n    font-size: 13px;\n}\n\n.run-list {\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n    margin: 0;\n    padding: 0;\n    list-style: none;\n}\n\n.run-item {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    justify-content: space-between;\n    gap: 8px;\n    padding: 8px 10px;\n    border-radius: 8px;\n    background: var(--bg-soft);\n    font-size: 12px;\n}\n\n.run-main {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 8px;\n    min-width: 0;\n}\n\n.events {\n    display: flex;\n    flex-direction: column;\n    gap: 4px;\n    max-height: 320px;\n    margin: 0;\n    padding: 0;\n    overflow: auto;\n    list-style: none;\n}\n\n.event {\n    display: grid;\n    grid-template-columns: 48px 132px minmax(0, 1fr);\n    gap: 8px;\n    padding: 4px 6px;\n    border-radius: 6px;\n    color: var(--text-soft);\n    font-size: 11px;\n}\n\n.event:nth-child(odd) {\n    background: var(--bg-soft);\n}\n\n.event-time {\n    color: var(--text-muted);\n}\n\n.event-type {\n    font-weight: 600;\n}\n\n.event-data {\n    overflow: hidden;\n    color: var(--text-muted);\n    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;\n    text-overflow: ellipsis;\n    white-space: nowrap;\n}\n\n.table-list {\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n}\n\n.table-row {\n    display: grid;\n    grid-template-columns: minmax(150px, 1.4fr) 80px 80px 90px minmax(0, 1fr);\n    gap: 10px;\n    align-items: center;\n    padding: 11px 14px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius-sm);\n    background: var(--panel);\n    font-size: 12px;\n}\n\n.table-row.header {\n    border-color: transparent;\n    background: transparent;\n    color: var(--text-muted);\n    font-size: 11px;\n    font-weight: 600;\n}\n\n.workflow-name {\n    font-weight: 700;\n}\n\n.final-card .artifact-preview {\n    aspect-ratio: 16 / 9;\n}\n\n.empty {\n    padding: 42px 20px;\n    border: 1px dashed var(--border-strong);\n    border-radius: var(--radius);\n    background: var(--panel);\n    color: var(--text-muted);\n    text-align: center;\n}\n\n.empty-title {\n    margin: 0 0 5px;\n    color: var(--text-soft);\n    font-size: 15px;\n    font-weight: 700;\n}\n\n.empty-body {\n    margin: 0;\n    font-size: 12px;\n}\n\n.loading {\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    gap: 10px;\n    padding: 60px 20px;\n    color: var(--text-muted);\n    font-size: 13px;\n}\n\n.spinner {\n    width: 18px;\n    height: 18px;\n    border: 2px solid var(--border);\n    border-top-color: var(--accent);\n    border-radius: 50%;\n    animation: spin 0.8s linear infinite;\n}\n\n@keyframes spin {\n    to {\n        transform: rotate(360deg);\n    }\n}\n\n.error-banner {\n    margin-bottom: 16px;\n    padding: 10px 13px;\n    border: 1px solid color-mix(in srgb, var(--red) 35%, var(--border));\n    border-radius: var(--radius-sm);\n    background: var(--red-soft);\n    color: var(--red);\n    font-size: 12px;\n}\n\n.callout {\n    margin-bottom: 18px;\n    padding: 13px 15px;\n    border: 1px solid var(--border);\n    border-left: 3px solid var(--amber);\n    border-radius: var(--radius-sm);\n    background: var(--amber-soft);\n    color: var(--text-soft);\n    font-size: 12px;\n}\n\n.callout strong {\n    color: var(--text);\n}\n\n.modal {\n    position: fixed;\n    inset: 0;\n    z-index: 50;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    padding: 24px;\n}\n\n.modal-backdrop {\n    position: absolute;\n    inset: 0;\n    background: rgba(7, 10, 16, 0.72);\n    backdrop-filter: blur(4px);\n}\n\n.modal-panel {\n    position: relative;\n    display: flex;\n    flex-direction: column;\n    width: min(100%, 980px);\n    max-height: calc(100vh - 48px);\n    overflow: hidden;\n    border: 1px solid var(--border-strong);\n    border-radius: 18px;\n    background: var(--panel-strong);\n    box-shadow: var(--shadow);\n}\n\n.modal-head {\n    display: flex;\n    align-items: flex-start;\n    justify-content: space-between;\n    gap: 16px;\n    padding: 16px 18px;\n    border-bottom: 1px solid var(--border);\n}\n\n.modal-heading h2 {\n    margin: 0;\n    overflow: hidden;\n    font-size: 17px;\n    text-overflow: ellipsis;\n    white-space: nowrap;\n}\n\n.modal-content {\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    min-height: 220px;\n    padding: 16px;\n    overflow: auto;\n    background: #05070a;\n}\n\n.modal-content video,\n.modal-content audio {\n    width: 100%;\n    max-height: calc(100vh - 260px);\n    border-radius: 10px;\n}\n\n.modal-content audio {\n    max-width: 620px;\n}\n\n.modal-content img {\n    max-width: 100%;\n    max-height: calc(100vh - 250px);\n    border-radius: 10px;\n    object-fit: contain;\n}\n\n.modal-content pre {\n    width: 100%;\n    max-height: calc(100vh - 260px);\n    margin: 0;\n    padding: 16px;\n    overflow: auto;\n    border-radius: 10px;\n    background: #0d1117;\n    color: #d6deeb;\n    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;\n    font-size: 12px;\n    line-height: 1.6;\n    white-space: pre-wrap;\n}\n\n.modal-foot {\n    display: flex;\n    align-items: center;\n    justify-content: space-between;\n    gap: 12px;\n    padding: 10px 16px;\n    border-top: 1px solid var(--border);\n}\n\n.toast {\n    position: fixed;\n    right: 24px;\n    bottom: 24px;\n    z-index: 60;\n    max-width: 360px;\n    padding: 10px 14px;\n    border: 1px solid var(--border-strong);\n    border-radius: 10px;\n    background: var(--panel-strong);\n    box-shadow: var(--shadow);\n    font-size: 12px;\n}\n\n.toast.error {\n    border-color: color-mix(in srgb, var(--red) 45%, var(--border));\n    color: var(--red);\n}\n\n.profile-panel {\n    margin-bottom: 20px;\n}\n\n.profile-synopsis {\n    margin: 0 0 14px;\n    padding: 12px 14px;\n    border-left: 3px solid var(--accent);\n    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;\n    background: var(--accent-soft);\n    color: var(--text-soft);\n    font-size: 13px;\n    line-height: 1.65;\n}\n\n.entity-section {\n    margin-bottom: 8px;\n}\n\n.entity-grid {\n    display: grid;\n    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));\n    gap: 12px;\n}\n\n.entity-card {\n    padding: 14px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius);\n    background: var(--panel);\n}\n\n.entity-head {\n    display: flex;\n    align-items: center;\n    justify-content: space-between;\n    gap: 10px;\n}\n\n.entity-name {\n    margin: 0;\n    font-size: 15px;\n    font-weight: 700;\n}\n\n.entity-desc {\n    margin: 8px 0 0;\n    color: var(--text-soft);\n    font-size: 12px;\n    line-height: 1.6;\n}\n\n.entity-ref {\n    margin: 6px 0 0;\n    color: var(--text-muted);\n    font-size: 11px;\n}\n\n.chip-row {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 6px;\n}\n\n.chip {\n    display: inline-flex;\n    align-items: center;\n    padding: 3px 8px;\n    border: 1px solid var(--border);\n    border-radius: 99px;\n    background: var(--bg-soft);\n    color: var(--text-soft);\n    font-size: 11px;\n    white-space: nowrap;\n}\n\n.chip-small {\n    padding: 2px 7px;\n    font-size: 10px;\n}\n\n.chip-character {\n    border-color: color-mix(in srgb, var(--green) 30%, var(--border));\n    background: var(--green-soft);\n    color: var(--green);\n}\n\n.chip-scene {\n    border-color: color-mix(in srgb, var(--violet) 30%, var(--border));\n    background: var(--violet-soft);\n    color: var(--violet);\n}\n\n.storyboard-section {\n    margin-top: 8px;\n}\n\n.storyboard-list {\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n}\n\n.storyboard-row {\n    display: grid;\n    grid-template-columns: 96px minmax(220px, 1.8fr) 120px minmax(140px, 1fr) 110px;\n    gap: 12px;\n    align-items: center;\n    padding: 12px 14px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius-sm);\n    background: var(--panel);\n    font-size: 12px;\n}\n\n.storyboard-header {\n    padding-top: 0;\n    padding-bottom: 4px;\n    border-color: transparent;\n    background: transparent;\n    color: var(--text-muted);\n    font-size: 11px;\n    font-weight: 600;\n}\n\n.storyboard-id-cell {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 6px;\n}\n\n.storyboard-id {\n    font-size: 16px;\n    font-weight: 800;\n    letter-spacing: -0.02em;\n}\n\n.storyboard-content {\n    min-width: 0;\n}\n\n.storyboard-title {\n    overflow: hidden;\n    font-weight: 700;\n    text-overflow: ellipsis;\n    white-space: nowrap;\n}\n\n.storyboard-summary {\n    display: -webkit-box;\n    overflow: hidden;\n    margin: 3px 0 0;\n    color: var(--text-muted);\n    font-size: 11px;\n    -webkit-box-orient: vertical;\n    -webkit-line-clamp: 2;\n}\n\n.storyboard-artifacts {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 6px;\n}\n\n.shot-grid {\n    grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));\n}\n\n.shot-card-rich {\n    gap: 12px;\n}\n\n.shot-title-text {\n    overflow: hidden;\n    font-size: 15px;\n    font-weight: 700;\n    text-overflow: ellipsis;\n    white-space: nowrap;\n}\n\n.shot-summary {\n    margin: 0;\n    color: var(--text-soft);\n    font-size: 13px;\n    line-height: 1.7;\n}\n\n.shot-line {\n    display: flex;\n    align-items: flex-start;\n    gap: 10px;\n}\n\n.shot-line-label {\n    flex: none;\n    padding-top: 3px;\n    color: var(--text-muted);\n    font-size: 11px;\n    font-weight: 600;\n}\n\n.shot-meta-grid {\n    display: flex;\n    flex-wrap: wrap;\n    gap: 6px 12px;\n    padding: 10px 12px;\n    border-radius: var(--radius-sm);\n    background: var(--bg-soft);\n    color: var(--text-muted);\n    font-size: 11px;\n}\n\n.shot-prompt,\n.shot-runs {\n    border-top: 1px dashed var(--border);\n    padding-top: 10px;\n}\n\n.shot-prompt summary,\n.shot-runs summary {\n    color: var(--text-soft);\n    cursor: pointer;\n    font-size: 12px;\n    font-weight: 600;\n}\n\n.shot-prompt p {\n    margin: 8px 0 0;\n    color: var(--text-soft);\n    font-size: 12px;\n    line-height: 1.7;\n    white-space: pre-wrap;\n}\n\n.shot-notes {\n    margin: 0;\n    color: var(--text-muted);\n    font-size: 12px;\n}\n\n.shot-section-head {\n    display: flex;\n    align-items: center;\n    justify-content: space-between;\n    gap: 10px;\n    margin-top: 4px;\n}\n\n.shot-section-head h4 {\n    margin: 0;\n    font-size: 13px;\n}\n\n.artifact-list {\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n}\n\n.artifact-row {\n    display: grid;\n    grid-template-columns: 84px minmax(0, 1fr) auto;\n    gap: 10px;\n    align-items: center;\n    padding: 8px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius-sm);\n    background: var(--bg-elevated);\n}\n\n.artifact-thumb {\n    position: relative;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    width: 84px;\n    height: 56px;\n    overflow: hidden;\n    border-radius: 7px;\n    background: var(--bg-soft);\n}\n\n.artifact-thumb video,\n.artifact-thumb img {\n    width: 100%;\n    height: 100%;\n    object-fit: cover;\n}\n\n.artifact-thumb-icon {\n    font-size: 22px;\n    opacity: 0.7;\n}\n\n.artifact-thumb-note {\n    position: absolute;\n    inset: auto 3px 3px;\n    padding: 1px 4px;\n    border-radius: 4px;\n    background: rgba(0, 0, 0, 0.65);\n    color: #fff;\n    font-size: 9px;\n    text-align: center;\n}\n\n.artifact-info {\n    min-width: 0;\n}\n\n.artifact-name {\n    overflow: hidden;\n    font-size: 12px;\n    font-weight: 700;\n    text-overflow: ellipsis;\n    white-space: nowrap;\n}\n\n.artifact-meta {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 5px 8px;\n    margin-top: 4px;\n    color: var(--text-muted);\n    font-size: 10px;\n}\n\n.artifact-row-actions {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 4px;\n}\n\n@media (max-width: 980px) {\n    .app-shell {\n        grid-template-columns: 1fr;\n    }\n\n    .sidebar {\n        position: static;\n        display: block;\n        height: auto;\n        padding: 16px;\n        border-right: 0;\n        border-bottom: 1px solid var(--border);\n    }\n\n    .brand-sub,\n    .sidebar-foot {\n        display: none;\n    }\n\n    .nav {\n        flex-direction: row;\n        flex-wrap: wrap;\n        margin-top: 12px;\n    }\n\n    .nav-item {\n        width: auto;\n        padding: 7px 10px;\n    }\n\n    .nav-hint {\n        display: none;\n    }\n\n    .topbar {\n        padding: 12px 18px;\n    }\n\n    .content {\n        padding: 18px;\n    }\n\n    .stats-grid {\n        grid-template-columns: repeat(2, minmax(0, 1fr));\n    }\n\n    .layout-two {\n        grid-template-columns: 1fr;\n    }\n\n    .shot-grid {\n        grid-template-columns: 1fr;\n    }\n\n    .storyboard-row {\n        grid-template-columns: 1fr;\n        gap: 6px;\n    }\n\n    .storyboard-header {\n        display: none;\n    }\n\n    .artifact-row {\n        grid-template-columns: 72px minmax(0, 1fr);\n    }\n\n    .artifact-row-actions {\n        grid-column: 1 / -1;\n        justify-content: flex-end;\n    }\n\n    .table-row {\n        grid-template-columns: minmax(0, 1fr) 70px 70px;\n    }\n\n    .table-row.header span:nth-child(n + 3) {\n        display: none;\n    }\n}\n\n@media (max-width: 560px) {\n    .stats-grid {\n        grid-template-columns: 1fr;\n    }\n\n    .grid {\n        grid-template-columns: 1fr;\n    }\n\n    .entity-grid {\n        grid-template-columns: 1fr;\n    }\n\n    .artifact-row {\n        grid-template-columns: 64px minmax(0, 1fr);\n    }\n\n    .artifact-thumb {\n        width: 64px;\n        height: 46px;\n    }\n\n    .view-head {\n        align-items: flex-start;\n        flex-direction: column;\n    }\n\n    .modal {\n        padding: 8px;\n    }\n\n    .modal-panel {\n        max-height: calc(100vh - 16px);\n        border-radius: 12px;\n    }\n\n    .event {\n        grid-template-columns: 38px 100px minmax(0, 1fr);\n    }\n}\n';
+  }
+});
+
+// src/commands/web.mts
+import { spawn as spawn7 } from "child_process";
+function parseArgs4(args) {
+  const out = { open: false };
+  for (let i = 0; i < args.length; i++) {
+    const { name, inline } = splitInlineFlag(args[i] ?? "");
+    if (name === "--host") {
+      const v = takeValue(args, i, inline, "--host");
+      out.host = v.value;
+      i += v.skip;
+      continue;
+    }
+    if (name === "--port") {
+      const v = takeValue(args, i, inline, "--port");
+      const port = Number(v.value);
+      if (!Number.isInteger(port) || port < 0 || port > MAX_PORT) {
+        usageError(`--port \u9700\u8981 0-${MAX_PORT} \u7684\u6574\u6570\uFF080 \u8868\u793A\u7CFB\u7EDF\u5206\u914D\uFF09`);
+      }
+      out.port = port;
+      i += v.skip;
+      continue;
+    }
+    if (name === "--open") {
+      out.open = true;
+      continue;
+    }
+    usageError(`\u672A\u77E5\u53C2\u6570 ${name}`);
+  }
+  return out;
+}
+function openBrowser(url) {
+  let command = "xdg-open";
+  let args = [url];
+  if (process.platform === "darwin") command = "open";
+  if (process.platform === "win32") {
+    command = "cmd";
+    args = ["/c", "start", "", url];
+  }
+  try {
+    const child = spawn7(command, args, { detached: true, stdio: "ignore" });
+    child.on("error", () => {
+      warn(`\u65E0\u6CD5\u81EA\u52A8\u6253\u5F00\u6D4F\u89C8\u5668\uFF08${command}\uFF09\uFF1B\u8BF7\u624B\u52A8\u8BBF\u95EE ${url}`);
+    });
+    child.unref();
+    return true;
+  } catch (e) {
+    warn(`\u65E0\u6CD5\u81EA\u52A8\u6253\u5F00\u6D4F\u89C8\u5668\uFF1A${e instanceof Error ? e.message : String(e)}`);
+    return false;
+  }
+}
+function isLoopbackHost2(host) {
+  return host === "127.0.0.1" || host === "localhost" || host === "::1" || host === "[::1]";
+}
+async function runWeb(ctx2, args) {
+  const flags = parseArgs4(args);
+  const { root, config: project } = requireProject(ctx2);
+  const machine = loadMachineIfExists(root);
+  const shots = loadShotsIfExists(root);
+  const { COMMANDS: COMMANDS2 } = await Promise.resolve().then(() => (init_registry(), registry_exports));
+  const host = flags.host ?? DEFAULT_HOST2;
+  if (!isLoopbackHost2(host)) {
+    warn(`\u76D1\u542C ${host}\uFF1A\u5C40\u57DF\u7F51\u5185\u53EF\u8BBF\u95EE\u9879\u76EE\u4EA7\u51FA\u7269\uFF0C\u8BF7\u786E\u8BA4\u7F51\u7EDC\u73AF\u5883\u53EF\u4FE1`);
+  }
+  let handle;
+  try {
+    handle = await startWebServer({
+      root,
+      project,
+      machine,
+      shots,
+      commands: COMMANDS2,
+      assets: { index_html: ui_default, app_js: app_default, style_css: style_default },
+      host,
+      port: flags.port ?? DEFAULT_PORT
+    });
+  } catch (e) {
+    throw new DaoyanCliError({
+      code: "web_start_failed",
+      message: `\u65E0\u6CD5\u542F\u52A8 Web \u670D\u52A1\uFF1A${e instanceof Error ? e.message : String(e)}`,
+      hint: START_FAILED_HINT
+    });
+  }
+  if (ctx2.json) {
+    emitData({
+      url: handle.url,
+      host: handle.host,
+      port: handle.port,
+      project: project.name,
+      mode: machine?.engine.mode ?? null
+    });
+  } else {
+    say(`daoyan web \xB7 ${project.name} \xB7 ${machine?.engine.mode ?? "\u672A\u7ED1\u5B9A\u672C\u673A"}`);
+    say(`  ${handle.url}`);
+    say("  Ctrl+C \u505C\u6B62");
+  }
+  if (flags.open) openBrowser(handle.url);
+  async function shutdown() {
+    try {
+      await handle.close();
+    } catch (e) {
+      warn(`\u5173\u95ED Web \u670D\u52A1\u5931\u8D25\uFF1A${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  const offSignal = onSignal(() => {
+    void shutdown();
+  });
+  await handle.closed;
+  offSignal();
+  if (!ctx2.json) say("\u5DF2\u505C\u6B62");
+  return 0;
+}
+var DEFAULT_HOST2, DEFAULT_PORT, MAX_PORT, START_FAILED_HINT;
+var init_web = __esm({
+  "src/commands/web.mts"() {
+    "use strict";
+    init_errors();
+    init_json();
+    init_log();
+    init_args();
+    init_config();
+    init_signals();
+    init_server();
+    init_ui();
+    init_app();
+    init_style();
+    DEFAULT_HOST2 = "127.0.0.1";
+    DEFAULT_PORT = 0;
+    MAX_PORT = 65535;
+    START_FAILED_HINT = "\u68C0\u67E5\u76D1\u542C\u5730\u5740\u4E0E\u7AEF\u53E3\u5360\u7528\uFF1B\u7AEF\u53E3\u51B2\u7A81\u65F6\u7701\u7565 --port \u8BA9\u7CFB\u7EDF\u5206\u914D\uFF0C\u6216\u6539\u7528 --port <n>\u3002";
+  }
+});
+
 // src/commands/registry.mts
 var registry_exports = {};
 __export(registry_exports, {
@@ -12502,6 +13945,7 @@ var init_registry = __esm({
     init_workflow();
     init_run();
     init_skill2();
+    init_web();
     TASK_START_SHAPE = {
       task_id: "string",
       state: "queued|running|succeeded|failed|cancelled|interrupted",
@@ -12852,6 +14296,47 @@ var init_registry = __esm({
         ],
         implemented: true,
         run: (ctx2, args) => runLogs(ctx2, args)
+      },
+      {
+        name: "web",
+        group: "ops",
+        summary: "\u542F\u52A8\u4E34\u65F6\u53EA\u8BFB Web UI\uFF0C\u67E5\u770B\u9879\u76EE\u3001\u5206\u955C\u3001\u4EFB\u52A1\u4E0E\u4EA7\u51FA\u7269\uFF08Ctrl+C \u505C\u6B62\uFF09",
+        usage: "daoyan web [--port <n>] [--host <addr>] [--open] [--json]",
+        flags: [
+          {
+            name: "--port",
+            type: "integer",
+            default: 0,
+            description: "\u76D1\u542C\u7AEF\u53E3\uFF1B0 \u8868\u793A\u7531\u7CFB\u7EDF\u5206\u914D\u53EF\u7528\u7AEF\u53E3"
+          },
+          {
+            name: "--host",
+            type: "string",
+            default: "127.0.0.1",
+            description: "\u76D1\u542C\u5730\u5740\uFF1B\u9ED8\u8BA4\u4EC5\u672C\u673A\u8BBF\u95EE"
+          },
+          {
+            name: "--open",
+            type: "boolean",
+            default: false,
+            description: "\u542F\u52A8\u540E\u5C1D\u8BD5\u7528\u7CFB\u7EDF\u9ED8\u8BA4\u6D4F\u89C8\u5668\u6253\u5F00"
+          }
+        ],
+        examples: ["daoyan web", "daoyan web --port 8080 --open", "daoyan web --json"],
+        detail: [
+          "\u53EA\u8BFB\u67E5\u770B\u5668\uFF1B\u4E0D\u542F\u52A8 ComfyUI\u3001\u4E0D\u5360 machine lock\u3001\u4E0D\u5199\u9879\u76EE\u6587\u4EF6\u3002",
+          "\u652F\u6301\u9879\u76EE\u6982\u89C8\u3001\u5206\u955C\u3001\u4EFB\u52A1\u3001\u5DE5\u4F5C\u6D41\u3001run \u4EA7\u51FA\u7269\u4E0E final \u6210\u7247\uFF1B\u89C6\u9891\u652F\u6301\u62D6\u52A8\u8FDB\u5EA6\u3002",
+          "--json \u8F93\u51FA\u4E00\u6B21\u542F\u52A8\u4FE1\u5C01\u540E\u7EE7\u7EED\u9A7B\u7559\uFF1BCtrl+C / SIGTERM \u4F18\u96C5\u5173\u95ED\u3002"
+        ],
+        implemented: true,
+        jsonShape: {
+          url: "string",
+          host: "string",
+          port: "number",
+          project: "string",
+          mode: "local|remote|null"
+        },
+        run: (ctx2, args) => runWeb(ctx2, args)
       },
       // ---- 引擎 ----
       {

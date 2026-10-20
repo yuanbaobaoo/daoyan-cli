@@ -18,6 +18,7 @@ export const ERROR_CODES = [
     "update_failed",
     "provision_failed",
     "artifact_download_failed",
+    "web_start_failed",
     // 引擎
     "engine_not_ready",
     "engine_start_failed",
@@ -103,6 +104,10 @@ export const ERROR_META: Record<ErrCode, ErrorMeta> = {
     artifact_download_failed: {
         retryable: true,
         hint: "引擎产物仍在 scratch 中；检查 /view 可达性后重试，或手动取回。",
+    },
+    web_start_failed: {
+        retryable: false,
+        hint: "检查监听地址与端口占用；端口冲突时省略 --port 让系统分配，或改用 --port <n>。",
     },
 
     engine_not_ready: { retryable: true, retryAfterMs: 5_000, hint: "确认引擎可达后再执行任务。" },

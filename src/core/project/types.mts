@@ -195,6 +195,37 @@ export interface MachineConfig {
 export type FirstFrame = string | { relay: string } | undefined;
 
 /**
+ * 角色 / 场景等可复用设定（仅展示与复用，不直接注入 workflow）。
+ */
+export interface StoryEntity {
+    /**
+     * 稳定 id（镜头通过 id 引用）。
+     */
+    id?: string;
+    /**
+     * 展示名。
+     */
+    name: string;
+    /**
+     * 设定描述。
+     */
+    description?: string;
+    /**
+     * 参考图（项目内相对路径）。
+     */
+    reference?: string;
+    /**
+     * 允许扩展字段。
+     */
+    [k: string]: unknown;
+}
+
+/**
+ * 设定引用：字符串（id 或名称）或完整对象。
+ */
+export type StoryEntityRef = string | StoryEntity;
+
+/**
  * 分镜表中的单个镜头（recipe）。
  */
 export interface ShotSpec {
@@ -206,6 +237,38 @@ export interface ShotSpec {
      * 镜头短名（产物命名 / 展示用）。
      */
     slug?: string;
+    /**
+     * 镜头标题（展示用，缺省用 slug / 镜号）。
+     */
+    title?: string;
+    /**
+     * 内容摘要（展示用；缺省用 prompt）。
+     */
+    summary?: string;
+    /**
+     * 内容描述（summary 的别名）。
+     */
+    description?: string;
+    /**
+     * 出场人物（id/名称或对象）。
+     */
+    characters?: StoryEntityRef[];
+    /**
+     * 场景（id/名称或对象）。
+     */
+    scene?: StoryEntityRef;
+    /**
+     * 场景别名（与 scene 二选一）。
+     */
+    location?: string;
+    /**
+     * 期望时长（秒；缺省可按 length / fps 推导）。
+     */
+    duration?: number;
+    /**
+     * 制作备注。
+     */
+    notes?: string;
     /**
      * 随机种子（通过 bindings 的 seed 注入）。
      */
@@ -246,6 +309,10 @@ export interface ShotSpec {
      * 额外的逻辑输入（键必须出现在 bindings 中）。
      */
     params?: Record<string, JsonValue>;
+    /**
+     * 允许扩展字段。
+     */
+    [k: string]: unknown;
 }
 
 /**
@@ -256,6 +323,22 @@ export interface ShotsMeta {
      * 片名（可选，仅展示用）。
      */
     title?: string;
+    /**
+     * 剧情简介（展示用）。
+     */
+    synopsis?: string;
+    /**
+     * 全片人物设定。
+     */
+    characters?: StoryEntityRef[];
+    /**
+     * 全片场景设定。
+     */
+    scenes?: StoryEntityRef[];
+    /**
+     * 帧率（用于 length -> 时长展示）。
+     */
+    fps?: number;
     /**
      * 生成宽度（建议为 32 的倍数）。
      */
@@ -282,6 +365,10 @@ export interface ShotsDefaults {
      * 默认帧数。
      */
     length?: number;
+    /**
+     * 默认帧率（用于时长展示）。
+     */
+    fps?: number;
     /**
      * 默认采样步数。
      */

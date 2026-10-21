@@ -120,8 +120,13 @@ function Get-TgzName {
     param([string]$Location)
     # 去掉查询串
     $clean = $Location.Split("?")[0]
-    # 最后一个路径分隔符
+    # 最后一个路径分隔符（兼容 / 与 Windows 的 \）
     $index = $clean.LastIndexOf("/")
+    # 反斜杠位置
+    $backslash = $clean.LastIndexOf("\")
+    if ($backslash -gt $index) {
+        $index = $backslash
+    }
     # 文件名
     $name = $clean
     if ($index -ge 0) {

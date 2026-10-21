@@ -72,22 +72,34 @@ jobs:
       - name: 构建
         run: npm.cmd run build
 
+      - name: install.ps1 语法检查（PowerShell 5.1）
+        shell: powershell
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path ./install.ps1), [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Host "::error::install.ps1 $($_.Extent.StartLineNumber):$($_.Extent.StartColumnNumber) $($_.Message)" }
+            exit 1
+          }
+          Write-Host "install.ps1 PowerShell 5.1 syntax OK"
+
       - name: 打包并用 install.ps1 安装（Windows PowerShell 5.1）
         shell: powershell
         run: |
           try {
             $ErrorActionPreference = "Stop"
             $packJson = npm.cmd pack --json --silent
-            if ($LASTEXITCODE -ne 0) { throw "npm pack 失败（exit $LASTEXITCODE）" }
+            if ($LASTEXITCODE -ne 0) { throw "npm pack failed (exit $LASTEXITCODE)" }
             $pack = @($packJson | ConvertFrom-Json)
             $tgzName = [string]$pack[0].filename
-            if ([string]::IsNullOrEmpty($tgzName)) { throw "npm pack 未返回文件名" }
+            if ([string]::IsNullOrEmpty($tgzName)) { throw "npm pack returned no filename" }
             $tgz = (Resolve-Path $tgzName).Path
             $sha = (Get-FileHash $tgz -Algorithm SHA256).Hash.ToLowerInvariant()
             $prefix = Join-Path $env:RUNNER_TEMP "npm-global"
             New-Item -ItemType Directory -Path $prefix -Force | Out-Null
             npm.cmd config set prefix $prefix
-            if ($LASTEXITCODE -ne 0) { throw "npm config set prefix 失败（exit $LASTEXITCODE）" }
+            if ($LASTEXITCODE -ne 0) { throw "npm config set prefix failed (exit $LASTEXITCODE)" }
             $env:PATH = "$prefix;$env:PATH"
             $env:DAYOAN_TGZ_URL = $tgz
             $env:DAYOAN_SHA256 = $sha
@@ -96,12 +108,15 @@ jobs:
             $output | ForEach-Object { Write-Host $_ }
             if ($code -ne 0) {
               $tail = (($output | Select-Object -Last 15) -join " | ")
-              throw "install.ps1 失败（exit $code）：$tail"
+              throw "install.ps1 failed (exit $code): $tail"
             }
             dycli.cmd --version
-            if ($LASTEXITCODE -ne 0) { throw "dycli.cmd --version 失败（exit $LASTEXITCODE）" }
+            if ($LASTEXITCODE -ne 0) { throw "dycli.cmd --version failed (exit $LASTEXITCODE)" }
           } catch {
-            $message = $_.Exception.Message -replace "`r?`n", " | "
+            $message = $_.Exception.Message -replace "\r?\n", " | "
             Write-Host "::error::$message"
+            if (-not [string]::IsNullOrEmpty($env:GITHUB_STEP_SUMMARY)) {
+              Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "### install.ps1 smoke failed`n``````text`n$message`n``````"
+            }
             exit 1
           }

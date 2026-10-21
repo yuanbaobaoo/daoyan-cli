@@ -98,6 +98,24 @@ const TASK_KIND_LABEL = {
 const MAX_PLAYLIST = 200;
 // 文本预览上限
 const TEXT_PREVIEW_LIMIT = 200_000;
+// SVG 命名空间
+const SVG_NS = "http://www.w3.org/2000/svg";
+// 图谱节点宽度
+const MAP_NODE_WIDTH = 190;
+// 图谱节点高度
+const MAP_NODE_HEIGHT = 48;
+// 图谱行高
+const MAP_ROW_HEIGHT = 76;
+// 图谱顶部留白
+const MAP_TOP = 32;
+// 图谱左列 x
+const MAP_LEFT_X = 32;
+// 图谱右列 x
+const MAP_RIGHT_X = 470;
+// 图谱画布宽度
+const MAP_WIDTH = 700;
+// 图谱最大共现弧数量
+const MAP_MAX_ARCS = 15;
 // 任务详情缓存时间（毫秒）
 const TASK_DETAIL_CACHE_MS = 2000;
 // 时间格式器
@@ -154,6 +172,16 @@ let pollTimer = null;
 let artifactFilters = { label: "", status: "", kind: "", search: "" };
 // 当前分镜筛选
 let shotFilters = { character: "", scene: "", status: "", search: "" };
+// 图谱 Tab（graph | timeline）
+let mapTab = "graph";
+// 图谱聚合模式（character | form）
+let mapMode = "character";
+// 图谱筛选（{ kind, id } | null）
+let mapFocus = null;
+// 只显示关键事件
+let mapOnlyMajor = false;
+// 只显示阻塞事件
+let mapBlockedOnly = false;
 // 当前展开的 task id
 let openTaskId = null;
 // 任务详情缓存
@@ -630,6 +658,11 @@ function onHashChange() {
     }
     currentView = view;
     currentEpisodeId = episodeId;
+    mapTab = "graph";
+    mapMode = "character";
+    mapFocus = null;
+    mapOnlyMajor = false;
+    mapBlockedOnly = false;
     loaded = false;
     lastSignature = "";
     openTaskId = null;
@@ -716,12 +749,21 @@ function assetNode(asset, compact) {
         return box;
     }
     if (asset.kind === "image") {
+        // 图片预览按钮
+        const button = createElement("button", "asset-thumb");
+        button.type = "button";
+        button.title = "点击预览";
+        button.setAttribute("aria-label", `预览 ${asset.path}`);
         // 图片
         const img = document.createElement("img");
         img.src = asset.media_url;
         img.alt = asset.path;
         img.loading = "lazy";
-        box.append(img);
+        button.append(img);
+        button.addEventListener("click", () => {
+            openImageUrl(asset.media_url, asset.path);
+        });
+        box.append(button);
     } else if (asset.kind === "audio") {
         // 音频
         const audio = document.createElement("audio");
@@ -835,6 +877,8 @@ function renderEpisode(data) {
         callout.append(list);
         viewRoot.append(callout);
     }
+    // 剧情图谱
+    viewRoot.append(renderStoryMap(data.map));
     // 剧本
     const scriptHead = createElement("div", "section-head");
     scriptHead.append(createElement("h3", "section-title", "剧本"));
@@ -932,6 +976,995 @@ function renderEpisode(data) {
         }
         viewRoot.append(list);
     }
+}
+
+/**
+ * 图谱重要度徽标。
+ */
+function mapImportanceBadge(importance) {
+    // 文案
+    const label = importance === "major" ? "关键" : importance === "minor" ? "过场" : "常规";
+    return badge(label, `importance-${importance}`);
+}
+
+/**
+ * 图谱就绪徽标。
+ */
+function mapReadyBadge(gen) {
+    if (gen === undefined) return badge("无上下文", "map-unknown");
+    if (gen.ready) return badge("可生成", "map-ready");
+    // 阻塞数
+    const blockers = gen.gaps.filter((gap) => gap.severity === "blocker").length;
+    return badge(`阻塞 ${blockers}`, "map-blocked");
+}
+
+/**
+ * 图谱渲染徽标。
+ */
+function mapRenderBadge(gen) {
+    // 状态
+    const status = gen?.render?.latest_status;
+    if (status === "succeeded") return badge("已生成", "map-rendered");
+    if (status === "failed") return badge("失败", "map-failed");
+    if (status === "cancelled" || status === "interrupted") return badge(STATUS_LABEL[status] ?? status, "map-failed");
+    return badge("未生成", "map-pending");
+}
+
+/**
+ * SVG 节点。
+ */
+function svgNode(tag, attrs) {
+    // 节点
+    const node = document.createElementNS(SVG_NS, tag);
+    if (attrs !== undefined) {
+        for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, String(value));
+    }
+    return node;
+}
+
+/**
+ * 时间码。
+ */
+function formatTimecode(seconds) {
+    // 数值
+    const value = Math.max(0, Math.round(Number(seconds) || 0));
+    // 分钟
+    const minutes = Math.floor(value / 60);
+    // 秒
+    const rest = value % 60;
+    return `${String(minutes).padStart(2, "0")}:${String(rest).padStart(2, "0")}`;
+}
+
+/**
+ * 图谱索引。
+ */
+function mapIndexes(map) {
+    // 角色
+    const characters = new Map();
+    for (const item of map.catalog.characters) characters.set(item.id, item);
+    // 场景
+    const scenes = new Map();
+    for (const item of map.catalog.scenes) scenes.set(item.id, item);
+    // 音色
+    const voices = new Map();
+    for (const item of map.catalog.voices) voices.set(item.id, item);
+    // 生成事件
+    const generation = new Map();
+    for (const item of map.generation.events) generation.set(item.shot_id, item);
+    return { characters, scenes, voices, generation };
+}
+
+/**
+ * 查找形态。
+ */
+function formOf(character, formId) {
+    if (character === undefined || character === null) return null;
+    return character.forms.find((form) => form.id === formId) ?? null;
+}
+
+/**
+ * 资产状态。
+ */
+function assetStatus(asset) {
+    if (asset === null || asset === undefined) return "missing";
+    if (asset.lfs_pointer) return "lfs";
+    if (!asset.present) return "absent";
+    return "ready";
+}
+
+/**
+ * 资产状态文案。
+ */
+function assetStatusLabel(status) {
+    if (status === "lfs") return "LFS 未拉取";
+    if (status === "absent") return "文件缺失";
+    if (status === "missing") return "未指定";
+    return "可用";
+}
+
+/**
+ * 资产缩略 / 预览。
+ */
+function mapAssetNode(asset, compact) {
+    // 容器
+    const box = createElement("span", compact === true ? "map-asset compact" : "map-asset");
+    if (asset === null || asset === undefined) {
+        box.append(createElement("span", "map-asset-missing", "未指定"));
+        return box;
+    }
+    // 状态
+    const status = assetStatus(asset);
+    if (status !== "ready") {
+        box.append(createElement("span", "map-asset-missing", `${asset.id} · ${assetStatusLabel(status)}`));
+        return box;
+    }
+    // 内容类型
+    const contentType = typeof asset.content_type === "string" ? asset.content_type : "";
+    if (contentType.startsWith("image/")) {
+        // 预览按钮
+        const button = createElement("button", "map-asset-thumb");
+        button.type = "button";
+        button.title = `预览 ${asset.id}`;
+        button.setAttribute("aria-label", `预览 ${asset.id}`);
+        // 图片
+        const image = document.createElement("img");
+        image.src = asset.media_url;
+        image.alt = asset.id;
+        image.loading = "lazy";
+        button.append(image);
+        button.append(createElement("span", "mono", asset.id));
+        button.addEventListener("click", () => openImageUrl(asset.media_url, asset.path));
+        box.append(button);
+        return box;
+    }
+    if (contentType.startsWith("audio/")) {
+        // 试听按钮
+        const button = createElement("button", "map-asset-thumb", `♪ ${asset.id}`);
+        button.type = "button";
+        button.addEventListener("click", () => {
+            openPlayer([{ title: asset.path, url: asset.media_url, kind: "audio" }], 0);
+        });
+        box.append(button);
+        return box;
+    }
+    box.append(createElement("span", "mono", asset.id));
+    return box;
+}
+
+/**
+ * 资产列表。
+ */
+function mapAssetList(container, assets) {
+    // 列表
+    const row = createElement("div", "map-assets");
+    if (!Array.isArray(assets) || assets.length === 0) {
+        row.append(createElement("span", "muted", "无"));
+        container.append(row);
+        return;
+    }
+    for (const asset of assets) row.append(mapAssetNode(asset, true));
+    container.append(row);
+}
+
+/**
+ * 图谱筛选文案。
+ */
+function mapFocusLabel(map, focus) {
+    if (focus === null) return "";
+    if (focus.kind === "scene") {
+        // 场景
+        const scene = map.catalog.scenes.find((item) => item.id === focus.id);
+        return scene !== undefined ? `场景：${scene.name}` : `场景：${focus.id}`;
+    }
+    // 角色
+    const character = map.catalog.characters.find((item) => item.id === focus.id);
+    return character !== undefined ? `角色：${character.name}` : `角色：${focus.id}`;
+}
+
+/**
+ * 场景色调。
+ */
+function sceneTone(indexes, sceneId) {
+    if (sceneId === undefined || sceneId === null) return "tone-other";
+    // 场景
+    const scene = indexes.scenes.get(sceneId);
+    // 时间
+    const value = typeof scene?.time_of_day === "string" ? scene.time_of_day.toLowerCase() : "";
+    if (value.includes("night") || value.includes("夜")) return "tone-night";
+    if (value.includes("dusk") || value.includes("黄昏")) return "tone-dusk";
+    if (value.includes("dawn") || value.includes("晨")) return "tone-dawn";
+    if (value.includes("day") || value.includes("日")) return "tone-day";
+    return "tone-other";
+}
+
+/**
+ * 图谱行。
+ */
+function mapRow(label, value) {
+    // 行
+    const row = createElement("div", "map-row");
+    row.append(createElement("span", "map-row-label", label));
+    row.append(createElement("span", "map-row-value", value));
+    return row;
+}
+
+/**
+ * 图谱详情。
+ */
+function renderMapDetail(container, map, refresh) {
+    // 索引
+    const indexes = mapIndexes(map);
+    // 面板
+    const panel = createElement("div", "map-detail");
+    if (mapFocus === null) {
+        panel.append(createElement("p", "muted", "点击角色、形态或场景节点查看详情；点击后可在时序图中筛选。"));
+        container.append(panel);
+        return;
+    }
+    // 头部
+    const head = createElement("div", "map-detail-head");
+    head.append(createElement("strong", "", mapFocusLabel(map, mapFocus)));
+    // 清除
+    const clear = createElement("button", "button ghost", "清除筛选");
+    clear.type = "button";
+    clear.addEventListener("click", () => {
+        mapFocus = null;
+        refresh();
+    });
+    head.append(clear);
+    // 时序
+    const timeline = createElement("button", "button", "在时序中筛选");
+    timeline.type = "button";
+    timeline.addEventListener("click", () => {
+        mapTab = "timeline";
+        refresh();
+    });
+    head.append(timeline);
+    panel.append(head);
+    if (mapFocus.kind === "scene") {
+        // 场景
+        const scene = indexes.scenes.get(mapFocus.id);
+        if (scene === undefined) {
+            panel.append(createElement("p", "muted", "场景不在本集资产目录中。"));
+            container.append(panel);
+            return;
+        }
+        panel.append(mapRow("时间", `${scene.time_of_day ?? "未标注"} · ${scene.interior_exterior ?? "未标注"}`));
+        panel.append(mapRow("使用", `${scene.event_count} 镜`));
+        panel.append(createElement("p", "map-detail-label", "主参考 / 资产"));
+        mapAssetList(
+            panel,
+            [scene.reference_asset, ...scene.assets.filter((asset) => asset.id !== scene.reference_asset?.id)].filter(
+                (asset) => asset !== null,
+            ),
+        );
+        // 角色
+        const graphScene = map.graph.scenes.find((node) => String(node.id) === scene.id);
+        // 角色名
+        const names = (graphScene?.character_ids ?? [])
+            .map((id) => indexes.characters.get(String(id))?.name ?? String(id))
+            .join("、");
+        panel.append(mapRow("出场角色", names === "" ? "无" : names));
+        container.append(panel);
+        return;
+    }
+    // 角色
+    const character = indexes.characters.get(mapFocus.id);
+    if (character === undefined) {
+        panel.append(createElement("p", "muted", "角色不在本集资产目录中。"));
+        container.append(panel);
+        return;
+    }
+    panel.append(mapRow("角色定位", character.role ?? "未标注"));
+    // 形态
+    const forms =
+        mapFocus.form === null || mapFocus.form === undefined
+            ? character.forms
+            : character.forms.filter((form) => form.id === mapFocus.form);
+    for (const form of forms) {
+        const section = createElement("div", "map-detail-section");
+        section.append(
+            createElement(
+                "p",
+                "map-detail-label",
+                `${form.name} · ${form.id}${form.used ? `（${form.event_count} 镜）` : "（本集未使用）"}`,
+            ),
+        );
+        section.append(mapRow("主参考", assetStatusLabel(assetStatus(form.reference_asset))));
+        mapAssetList(
+            section,
+            [form.reference_asset, ...form.assets.filter((asset) => asset.id !== form.reference_asset?.id)].filter(
+                (asset) => asset !== null,
+            ),
+        );
+        panel.append(section);
+    }
+    // 场景
+    const graphCharacter = map.graph.characters.find((node) => String(node.id) === character.id);
+    // 场景名
+    const sceneNames = (graphCharacter?.scene_ids ?? [])
+        .map((id) => indexes.scenes.get(String(id))?.name ?? String(id))
+        .join("、");
+    panel.append(mapRow("出现场景", sceneNames === "" ? "无" : sceneNames));
+    // 共现
+    const cooccur = map.graph.cooccurrence_edges.filter((edge) => edge.a === character.id || edge.b === character.id);
+    // 共现文案
+    const cooccurText = cooccur
+        .map((edge) => {
+            // 对方
+            const other = edge.a === character.id ? String(edge.b) : String(edge.a);
+            return `${indexes.characters.get(other)?.name ?? other}（${edge.event_count} 镜）`;
+        })
+        .join("、");
+    panel.append(mapRow("共现角色", cooccurText === "" ? "无" : cooccurText));
+    // 生成使用
+    const related = map.generation.events.filter((event) => event.cast.some((cast) => cast.id === character.id));
+    // 就绪数
+    const ready = related.filter((event) => event.ready).length;
+    panel.append(mapRow("生成上下文", `${related.length} 镜相关 · ${ready} 可生成 · ${related.length - ready} 阻塞`));
+    container.append(panel);
+}
+
+/**
+ * 拓扑节点。
+ */
+function renderTopologyNode(svg, x, y, node, refresh) {
+    // 分组
+    const group = svgNode("g", {
+        class: `map-node status-${node.status}`,
+        tabindex: "0",
+        role: "button",
+        "aria-label": `${node.kind === "scene" ? "场景" : "角色"} ${node.name}`,
+    });
+    // 背景
+    group.append(
+        svgNode("rect", { x, y, width: MAP_NODE_WIDTH, height: MAP_NODE_HEIGHT, rx: 10, class: "map-node-bg" }),
+    );
+    // 头像
+    group.append(svgNode("circle", { cx: x + 22, cy: y + 24, r: 13, class: "map-node-avatar" }));
+    // 首字
+    const initial = svgNode("text", { x: x + 22, y: y + 28, class: "map-node-initial", "text-anchor": "middle" });
+    initial.textContent = node.name.slice(0, 1);
+    group.append(initial);
+    // 名称
+    const name = svgNode("text", { x: x + 42, y: y + 21, class: "map-node-name" });
+    name.textContent = node.name;
+    group.append(name);
+    // 副标题
+    const subtitle = svgNode("text", { x: x + 42, y: y + 37, class: "map-node-sub" });
+    subtitle.textContent = node.subtitle;
+    group.append(subtitle);
+    // 提示
+    const title = svgNode("title");
+    title.textContent = `${node.name} · ${node.status === "warn" ? "资产异常" : "就绪"}`;
+    group.append(title);
+    // 焦点
+    const focus = () => {
+        mapFocus = { kind: node.kind === "scene" ? "scene" : "character", id: node.id, form: node.form ?? null };
+        refresh();
+    };
+    group.addEventListener("click", focus);
+    group.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            focus();
+        }
+    });
+    // 聚焦 / 淡出
+    if (node.kind === "scene") {
+        if (mapFocus !== null && mapFocus.kind === "scene")
+            group.classList.add(mapFocus.id === node.id ? "is-focus" : "is-dim");
+    } else if (mapFocus !== null && mapFocus.kind === "character") {
+        group.classList.add(mapFocus.id === node.id ? "is-focus" : "is-dim");
+    }
+    svg.append(group);
+}
+
+/**
+ * 拓扑图。
+ */
+function renderMapTopology(container, map, refresh) {
+    // 索引
+    const indexes = mapIndexes(map);
+    // 左列节点
+    const left = [];
+    for (const node of map.graph.characters) {
+        // 角色
+        const character = indexes.characters.get(String(node.id));
+        // 形态节点
+        const forms = Array.isArray(node.forms) ? node.forms : [];
+        if (mapMode === "form") {
+            for (const formNode of forms) {
+                // 形态
+                const form = formOf(character, String(formNode.id));
+                left.push({
+                    key: `form:${node.id}/${formNode.id}`,
+                    kind: "form",
+                    id: String(node.id),
+                    form: String(formNode.id),
+                    name: `${String(node.name ?? node.id)} · ${String(formNode.name ?? formNode.id)}`,
+                    subtitle: character?.role ?? "",
+                    status:
+                        form !== null && form.used && assetStatus(form.reference_asset) !== "ready" ? "warn" : "ready",
+                });
+            }
+            continue;
+        }
+        // 使用形态
+        const usedForms = forms
+            .map((formNode) => formOf(character, String(formNode.id)))
+            .filter((form) => form !== null && form.used);
+        left.push({
+            key: `character:${node.id}`,
+            kind: "character",
+            id: String(node.id),
+            form: null,
+            name: String(node.name ?? node.id),
+            subtitle: forms.map((formNode) => String(formNode.name ?? formNode.id)).join(" / "),
+            status: usedForms.some((form) => assetStatus(form.reference_asset) !== "ready") ? "warn" : "ready",
+        });
+    }
+    // 场景节点
+    const scenes = map.graph.scenes.map((node) => {
+        // 场景
+        const scene = indexes.scenes.get(String(node.id));
+        return {
+            key: `scene:${node.id}`,
+            kind: "scene",
+            id: String(node.id),
+            form: null,
+            name: String(node.name ?? node.id),
+            subtitle: scene?.time_of_day ?? "",
+            status:
+                scene !== undefined && scene.used && assetStatus(scene.reference_asset) !== "ready" ? "warn" : "ready",
+        };
+    });
+    // 行数
+    const rows = Math.max(left.length, scenes.length);
+    // 高度
+    const height = MAP_TOP * 2 + rows * MAP_ROW_HEIGHT;
+    // SVG
+    const svg = svgNode("svg", {
+        viewBox: `0 0 ${MAP_WIDTH} ${height}`,
+        class: "map-graph",
+        role: "img",
+        "aria-label": "角色、形态与场景关系图",
+    });
+    // 左列位置
+    const leftPositions = new Map();
+    for (const [index, node] of left.entries()) {
+        leftPositions.set(node.key, { x: MAP_LEFT_X, y: MAP_TOP + index * MAP_ROW_HEIGHT, node });
+    }
+    // 右列位置
+    const rightPositions = new Map();
+    for (const [index, node] of scenes.entries()) {
+        rightPositions.set(node.key, { x: MAP_RIGHT_X, y: MAP_TOP + index * MAP_ROW_HEIGHT, node });
+    }
+    // 边
+    const edges = mapMode === "form" ? map.graph.form_scene_edges : map.graph.character_scene_edges;
+    for (const edge of edges) {
+        // 左键
+        const leftKey =
+            mapMode === "form" ? `form:${edge.character_id}/${edge.form_id}` : `character:${edge.character_id}`;
+        // 端点
+        const from = leftPositions.get(leftKey);
+        const to = rightPositions.get(`scene:${edge.scene_id}`);
+        if (from === undefined || to === undefined) continue;
+        // 次数
+        const count = Number(edge.event_count) || 1;
+        // 路径
+        const path = svgNode("path", {
+            d: `M ${from.x + MAP_NODE_WIDTH} ${from.y + MAP_NODE_HEIGHT / 2} C ${(from.x + MAP_NODE_WIDTH + to.x) / 2} ${from.y + MAP_NODE_HEIGHT / 2}, ${(from.x + MAP_NODE_WIDTH + to.x) / 2} ${to.y + MAP_NODE_HEIGHT / 2}, ${to.x} ${to.y + MAP_NODE_HEIGHT / 2}`,
+            class: "map-edge",
+            "stroke-width": 1.5 + Math.min(4, Math.sqrt(count) * 1.2),
+            opacity: 0.25 + Math.min(0.55, count * 0.08),
+        });
+        // 提示
+        const title = svgNode("title");
+        title.textContent = `${from.node.name} → ${to.node.name}：${count} 镜`;
+        path.append(title);
+        // 聚焦
+        if (mapFocus !== null) {
+            // 是否相关
+            const related = mapFocus.kind === "scene" ? to.node.id === mapFocus.id : from.node.id === mapFocus.id;
+            if (!related) path.classList.add("is-dim");
+        }
+        svg.append(path);
+    }
+    // 共现弧
+    if (mapMode === "character") {
+        const arcs = map.graph.cooccurrence_edges.slice(0, MAP_MAX_ARCS);
+        for (const edge of arcs) {
+            // 端点
+            const from = leftPositions.get(`character:${edge.a}`);
+            const to = leftPositions.get(`character:${edge.b}`);
+            if (from === undefined || to === undefined) continue;
+            // 路径
+            const path = svgNode("path", {
+                d: `M ${from.x} ${from.y + MAP_NODE_HEIGHT / 2} C ${Math.max(4, from.x - 30)} ${from.y + MAP_NODE_HEIGHT / 2}, ${Math.max(4, to.x - 30)} ${to.y + MAP_NODE_HEIGHT / 2}, ${to.x} ${to.y + MAP_NODE_HEIGHT / 2}`,
+                class: "map-cooccur",
+            });
+            // 提示
+            const title = svgNode("title");
+            title.textContent = `共现：${from.node.name} / ${to.node.name}（${edge.event_count} 镜）`;
+            path.append(title);
+            svg.append(path);
+        }
+        // 叙事关系
+        for (const relation of map.relations.slice(0, MAP_MAX_ARCS)) {
+            // 端点
+            const from = leftPositions.get(`character:${relation.from}`);
+            const to = leftPositions.get(`character:${relation.to}`);
+            if (from === undefined || to === undefined) continue;
+            // 路径
+            const path = svgNode("path", {
+                d: `M ${from.x} ${from.y + MAP_NODE_HEIGHT / 2} C ${Math.max(4, from.x - 50)} ${from.y + MAP_NODE_HEIGHT / 2}, ${Math.max(4, to.x - 50)} ${to.y + MAP_NODE_HEIGHT / 2}, ${to.x} ${to.y + MAP_NODE_HEIGHT / 2}`,
+                class: "map-relation",
+            });
+            // 标签
+            const label = svgNode("text", {
+                x: Math.max(12, MAP_LEFT_X - 120),
+                y: (from.y + to.y) / 2 + MAP_NODE_HEIGHT / 2,
+                class: "map-relation-label",
+            });
+            label.textContent = relation.label;
+            svg.append(path, label);
+        }
+    }
+    // 节点
+    for (const node of left) {
+        // 位置
+        const position = leftPositions.get(node.key);
+        if (position !== undefined) renderTopologyNode(svg, position.x, position.y, node, refresh);
+    }
+    for (const node of scenes) {
+        // 位置
+        const position = rightPositions.get(node.key);
+        if (position !== undefined) renderTopologyNode(svg, position.x, position.y, node, refresh);
+    }
+    // 容器
+    const wrap = createElement("div", "map-graph-wrap");
+    wrap.append(svg);
+    container.append(wrap);
+    // 图例
+    const legend = createElement("div", "map-legend");
+    legend.append(createElement("span", "", "实线：角色 / 形态出现在场景"));
+    legend.append(createElement("span", "", "虚线：共现或叙事关系"));
+    legend.append(createElement("span", "", "线宽：出场镜头数"));
+    container.append(legend);
+    // 详情
+    renderMapDetail(container, map, refresh);
+}
+
+/**
+ * 时序事件详情。
+ */
+function renderTimelineDetail(container, event, gen, map, indexes) {
+    // 内容
+    const body = createElement("div", "map-event-detail");
+    // workflow
+    body.append(mapRow("Workflow", gen?.assigned_workflow ?? "未指定"));
+    body.append(mapRow("来源", gen?.workflow_source ?? "none"));
+    // 槽位
+    if (gen?.workflow !== null && gen?.workflow !== undefined) {
+        const slots = createElement("div", "map-slots");
+        for (const slot of gen.workflow.slots) {
+            // 槽位
+            const row = createElement("div", "map-slot");
+            row.append(createElement("span", "mono", `${slot.slot} → ${slot.target}`));
+            row.append(createElement("span", "", `${slot.owner ?? "—"} · ${slot.asset?.id ?? "—"}`));
+            row.append(badge(slot.status, `map-slot-${slot.status}`));
+            slots.append(row);
+        }
+        if (gen.workflow.slots.length > 0) {
+            body.append(createElement("p", "map-detail-label", "资产槽位"));
+            body.append(slots);
+        }
+    }
+    // 候选 workflow
+    if (gen !== undefined && gen.candidate_workflows.length > 0) {
+        const section = createElement("div", "map-detail-section");
+        section.append(createElement("p", "map-detail-label", "候选 workflow"));
+        for (const candidate of gen.candidate_workflows) {
+            // 候选行
+            const row = createElement("div", "map-slot");
+            row.append(createElement("span", "mono", candidate.name));
+            row.append(badge(candidate.fit, `map-fit-${candidate.fit}`));
+            if (candidate.reasons.length > 0) row.append(createElement("span", "muted", candidate.reasons.join("；")));
+            section.append(row);
+        }
+        body.append(section);
+    }
+    // 角色资产
+    const cast = createElement("div", "map-detail-section");
+    cast.append(createElement("p", "map-detail-label", "角色与形态"));
+    for (const item of event.characters) {
+        // 角色
+        const character = indexes.characters.get(item.id);
+        // 形态
+        const form = formOf(character, item.form);
+        cast.append(
+            mapRow(
+                `${item.name} · ${item.form_name}`,
+                `${assetStatusLabel(assetStatus(form?.reference_asset))} · ${form?.assets.length ?? 0} 个资产`,
+            ),
+        );
+        mapAssetList(
+            cast,
+            [
+                form?.reference_asset,
+                ...(form?.assets ?? []).filter((asset) => asset.id !== form?.reference_asset?.id),
+            ].filter((asset) => asset !== null && asset !== undefined),
+        );
+    }
+    body.append(cast);
+    // 场景资产
+    const scene = indexes.scenes.get(event.scene?.id ?? "");
+    if (scene !== undefined) {
+        const section = createElement("div", "map-detail-section");
+        section.append(createElement("p", "map-detail-label", `场景 · ${scene.name}`));
+        mapAssetList(
+            section,
+            [scene.reference_asset, ...scene.assets.filter((asset) => asset.id !== scene.reference_asset?.id)].filter(
+                (asset) => asset !== null,
+            ),
+        );
+        body.append(section);
+    }
+    // 音色
+    if (gen !== undefined && gen.voices.length > 0) {
+        const section = createElement("div", "map-detail-section");
+        section.append(createElement("p", "map-detail-label", "音色"));
+        for (const voice of gen.voices)
+            section.append(mapRow(voice.voice_id, voice.reference_present ? "参考音频可用" : "参考音频缺失"));
+        body.append(section);
+    }
+    // 连续性
+    if (gen !== undefined) {
+        const section = createElement("div", "map-detail-section");
+        section.append(createElement("p", "map-detail-label", "连续性"));
+        section.append(mapRow("场景", gen.continuity.scene_changed ? "切换" : "延续"));
+        section.append(
+            mapRow(
+                "形态变化",
+                gen.continuity.form_changes.length === 0
+                    ? "无"
+                    : gen.continuity.form_changes
+                          .map((change) => `${change.character_id}: ${change.from} → ${change.to}`)
+                          .join("；"),
+            ),
+        );
+        section.append(
+            mapRow(
+                "Relay",
+                `${gen.continuity.relay_from ?? "无"} → ${gen.continuity.relay_targets.join(" / ") || "无"}`,
+            ),
+        );
+        section.append(mapRow("Anchor", gen.continuity.anchor?.path ?? "无"));
+        body.append(section);
+    }
+    // 渲染
+    if (gen !== undefined) {
+        const section = createElement("div", "map-detail-section");
+        section.append(createElement("p", "map-detail-label", "渲染"));
+        section.append(mapRow("Run", `${gen.render.runs_count} 次 · ${gen.render.succeeded_count} 成功`));
+        section.append(mapRow("最新状态", gen.render.latest_status ?? "未生成"));
+        if (gen.render.latest_error !== null) section.append(mapRow("错误", gen.render.latest_error));
+        // 产物
+        const outputs = createElement("div", "map-assets");
+        for (const output of gen.render.latest_outputs) {
+            // 打开按钮
+            const button = createElement(
+                "button",
+                "button ghost",
+                `${output.kind === "video" ? "播放" : output.kind === "image" ? "查看" : "打开"} ${output.name}`,
+            );
+            button.type = "button";
+            button.addEventListener("click", () => {
+                if (output.kind === "video" || output.kind === "audio")
+                    openPlayer([{ title: output.name, url: output.media_url, kind: output.kind }], 0);
+                else if (output.kind === "image") openImageUrl(output.media_url, output.name);
+                else window.open(output.media_url, "_blank", "noopener");
+            });
+            outputs.append(button);
+        }
+        if (outputs.childElementCount > 0) section.append(outputs);
+        body.append(section);
+    }
+    // 缺口
+    if (gen !== undefined && gen.gaps.length > 0) {
+        const section = createElement("div", "map-detail-section");
+        section.append(createElement("p", "map-detail-label", "缺口"));
+        for (const gap of gen.gaps) {
+            // 缺口
+            const row = createElement("div", `map-gap ${gap.severity === "blocker" ? "is-blocker" : ""}`);
+            row.append(createElement("span", "mono", gap.code));
+            row.append(createElement("span", "", gap.message));
+            row.append(createElement("span", "muted", gap.hint));
+            section.append(row);
+        }
+        body.append(section);
+    }
+    container.append(body);
+}
+
+/**
+ * 时序事件。
+ */
+function renderTimelineEvent(event, gen, map, indexes, refresh) {
+    // 容器
+    const item = createElement("article", "timeline-event");
+    if (event.importance === "major") item.classList.add("is-major");
+    if (gen !== undefined && !gen.ready) item.classList.add("is-blocked");
+    // 时间
+    const time = createElement("div", "timeline-time");
+    // 时间文案
+    const timecode =
+        map.time.basis === "order"
+            ? `#${event.shot_id}`
+            : `${event.at_estimated ? "~" : ""}${formatTimecode(event.at_seconds)}`;
+    time.append(createElement("span", "timeline-timecode mono", timecode));
+    time.append(
+        createElement(
+            "span",
+            "muted",
+            event.duration_seconds !== null ? formatSeconds(event.duration_seconds) : "时长未知",
+        ),
+    );
+    if (event.story_time !== null) time.append(createElement("span", "timeline-story-time", event.story_time));
+    item.append(time);
+    // 主体
+    const main = createElement("div", "timeline-main");
+    const titleRow = createElement("div", "timeline-title-row");
+    titleRow.append(createElement("span", "shot-id", event.shot_id));
+    titleRow.append(createElement("h4", "timeline-title", event.title));
+    titleRow.append(mapImportanceBadge(event.importance));
+    titleRow.append(badge(gen?.assigned_workflow ?? "未指定", "map-workflow"));
+    titleRow.append(mapReadyBadge(gen));
+    titleRow.append(mapRenderBadge(gen));
+    main.append(titleRow);
+    main.append(createElement("p", "timeline-summary", event.summary));
+    // chips
+    const chips = createElement("div", "chip-row");
+    if (event.scene !== null) {
+        // 场景 chip
+        const sceneChip = createElement("button", "chip chip-scene map-chip-button", event.scene.name);
+        sceneChip.type = "button";
+        sceneChip.addEventListener("click", () => {
+            mapFocus = { kind: "scene", id: event.scene.id };
+            refresh();
+        });
+        chips.append(sceneChip);
+    }
+    for (const character of event.characters) {
+        // 角色 chip
+        const chip = createElement(
+            "button",
+            "chip chip-character map-chip-button",
+            `${character.name} · ${character.form_name}`,
+        );
+        chip.type = "button";
+        chip.addEventListener("click", () => {
+            mapFocus = { kind: "character", id: character.id };
+            refresh();
+        });
+        chips.append(chip);
+    }
+    for (const beat of event.beats) {
+        chips.append(badge(beat.id, "map-beat"));
+    }
+    if (event.dialogue_count > 0) chips.append(createElement("span", "muted", `${event.dialogue_count} 句台词`));
+    main.append(chips);
+    // 操作
+    const actions = createElement("div", "timeline-actions");
+    const locate = createElement("button", "button ghost", "定位分镜");
+    locate.type = "button";
+    locate.addEventListener("click", () => {
+        // 目标任务
+        const target = document.getElementById(`shot-${event.shot_id}`);
+        if (target !== null) target.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    actions.append(locate);
+    main.append(actions);
+    // 详情
+    const details = createElement("details", "timeline-details");
+    details.append(createElement("summary", "", "生成上下文"));
+    // 详情容器
+    const detailBody = createElement("div");
+    renderTimelineDetail(detailBody, event, gen, map, indexes);
+    details.append(detailBody);
+    main.append(details);
+    item.append(main);
+    return item;
+}
+
+/**
+ * 时序图。
+ */
+function renderMapTimeline(container, map, refresh) {
+    // 索引
+    const indexes = mapIndexes(map);
+    // 过滤
+    let events = map.events.slice();
+    if (mapFocus !== null && mapFocus.kind === "character")
+        events = events.filter((event) => event.characters.some((character) => character.id === mapFocus.id));
+    if (mapFocus !== null && mapFocus.kind === "scene")
+        events = events.filter((event) => event.scene?.id === mapFocus.id);
+    if (mapOnlyMajor) events = events.filter((event) => event.importance === "major");
+    if (mapBlockedOnly) events = events.filter((event) => indexes.generation.get(event.shot_id)?.ready !== true);
+    if (events.length === 0) {
+        container.append(emptyNode("当前筛选没有事件", "清除筛选后查看全部事件。"));
+        return;
+    }
+    // 总览
+    const overview = createElement("div", "timeline-overview");
+    for (const event of map.events) {
+        // 片段
+        const segment = createElement("button", `timeline-seg ${sceneTone(indexes, event.scene?.id)}`);
+        segment.type = "button";
+        segment.style.flexGrow = String(event.duration_seconds ?? 1);
+        segment.title = `${formatTimecode(event.at_seconds)} ${event.title}`;
+        if (event.importance === "major") segment.classList.add("is-major");
+        segment.addEventListener("click", () => {
+            // 目标任务
+            const target = document.getElementById(`map-event-${event.shot_id}`);
+            if (target !== null) target.scrollIntoView({ behavior: "smooth", block: "center" });
+        });
+        overview.append(segment);
+    }
+    container.append(overview);
+    // 列表
+    const list = createElement("div", "timeline-list");
+    for (const event of events) {
+        // 生成上下文
+        const gen = indexes.generation.get(event.shot_id);
+        // 事件节点
+        const item = renderTimelineEvent(event, gen, map, indexes, refresh);
+        item.id = `map-event-${event.shot_id}`;
+        list.append(item);
+    }
+    container.append(list);
+}
+
+/**
+ * 剧情图谱区块。
+ */
+function renderStoryMap(map) {
+    // 区块
+    const section = createElement("section", "map-section");
+    if (map === null || map === undefined) {
+        section.append(emptyNode("剧情图谱不可用", "当前剧集还没有可解析的图谱数据。"));
+        return section;
+    }
+    // 头部
+    const head = createElement("div", "section-head");
+    // 标题区
+    const heading = createElement("div");
+    heading.append(createElement("h3", "section-title", "剧情图谱"));
+    // 统计
+    const counts = map.generation.readiness.counts;
+    heading.append(
+        createElement(
+            "p",
+            "map-subtitle",
+            `${map.events.length} 事件 · ${map.catalog.characters.length} 角色 · ${map.catalog.scenes.length} 场景 · 可生成 ${counts.ready} / 阻塞 ${counts.blocked} / 已生成 ${counts.rendered}`,
+        ),
+    );
+    head.append(heading);
+    // Tab
+    const tabs = createElement("div", "map-tabs");
+    const graphTab = createElement("button", "map-tab", "拓扑图");
+    graphTab.type = "button";
+    const timelineTab = createElement("button", "map-tab", "时序图");
+    timelineTab.type = "button";
+    tabs.append(graphTab, timelineTab);
+    head.append(tabs);
+    section.append(head);
+    // 来源
+    const origin = createElement(
+        "p",
+        "map-origin",
+        `${map.origin.annotated ? `含 ${map.origin.author} 叙事标注` : "dycli 自动推导"}${map.origin.stale ? " · 标注基于旧分镜" : ""}`,
+    );
+    section.append(origin);
+    // 警告
+    if (map.warnings.length > 0) {
+        const callout = createElement("div", "callout warn map-warning");
+        callout.append(createElement("strong", "", `图谱提示 ${map.warnings.length} 项`));
+        const list = createElement("ul", "mini-list");
+        for (const warning of map.warnings.slice(0, 8)) list.append(createElement("li", "", warning.message));
+        callout.append(list);
+        section.append(callout);
+    }
+    // 主体
+    const body = createElement("div", "map-body");
+    section.append(body);
+    /**
+     * 刷新主体。
+     */
+    function refresh() {
+        // Tab 状态
+        graphTab.classList.toggle("is-active", mapTab === "graph");
+        graphTab.setAttribute("aria-selected", mapTab === "graph" ? "true" : "false");
+        timelineTab.classList.toggle("is-active", mapTab === "timeline");
+        timelineTab.setAttribute("aria-selected", mapTab === "timeline" ? "true" : "false");
+        clearNode(body);
+        if (map.events.length === 0) {
+            body.append(emptyNode("还没有可分析的镜头", "先写入本集分镜，再查看角色、形态、场景与生成上下文。"));
+            return;
+        }
+        body.append(renderMapToolbar(map, refresh));
+        if (mapTab === "timeline") renderMapTimeline(body, map, refresh);
+        else renderMapTopology(body, map, refresh);
+    }
+    graphTab.addEventListener("click", () => {
+        mapTab = "graph";
+        refresh();
+    });
+    timelineTab.addEventListener("click", () => {
+        mapTab = "timeline";
+        refresh();
+    });
+    refresh();
+    return section;
+}
+
+/**
+ * 图谱工具栏。
+ */
+function renderMapToolbar(map, refresh) {
+    // 工具栏
+    const bar = createElement("div", "map-toolbar");
+    // 筛选 chip
+    if (mapFocus !== null) {
+        const chip = createElement("span", "map-filter", mapFocusLabel(map, mapFocus));
+        const clear = createElement("button", "map-filter-clear", "×");
+        clear.type = "button";
+        clear.setAttribute("aria-label", "清除图谱筛选");
+        clear.addEventListener("click", () => {
+            mapFocus = null;
+            refresh();
+        });
+        chip.append(clear);
+        bar.append(chip);
+    }
+    // 模式 / 过滤
+    const group = createElement("div", "map-toolbar-group");
+    if (mapTab === "graph") {
+        const characterButton = createElement("button", "button ghost map-toggle", "按角色");
+        characterButton.type = "button";
+        characterButton.classList.toggle("is-active", mapMode === "character");
+        characterButton.addEventListener("click", () => {
+            mapMode = "character";
+            refresh();
+        });
+        const formButton = createElement("button", "button ghost map-toggle", "按形态");
+        formButton.type = "button";
+        formButton.classList.toggle("is-active", mapMode === "form");
+        formButton.addEventListener("click", () => {
+            mapMode = "form";
+            refresh();
+        });
+        group.append(characterButton, formButton);
+    } else {
+        const majorButton = createElement("button", "button ghost map-toggle", "只看关键事件");
+        majorButton.type = "button";
+        majorButton.classList.toggle("is-active", mapOnlyMajor);
+        majorButton.addEventListener("click", () => {
+            mapOnlyMajor = !mapOnlyMajor;
+            refresh();
+        });
+        const blockedButton = createElement("button", "button ghost map-toggle", "只看阻塞");
+        blockedButton.type = "button";
+        blockedButton.classList.toggle("is-active", mapBlockedOnly);
+        blockedButton.addEventListener("click", () => {
+            mapBlockedOnly = !mapBlockedOnly;
+            refresh();
+        });
+        group.append(majorButton, blockedButton);
+    }
+    bar.append(group);
+    return bar;
 }
 
 /**
@@ -1684,6 +2717,7 @@ function filterShots(shots) {
 function renderShotCard(shot) {
     // 卡片
     const card = createElement("article", "card shot-card shot-card-rich");
+    card.id = `shot-${shot.id}`;
     // 卡片头
     const cardHead = createElement("div", "shot-head");
     // 标题容器
@@ -2509,16 +3543,23 @@ function renderPlayerItem() {
 }
 
 /**
- * 打开图片。
+ * 打开图片预览。
  */
-function openImage(item) {
+function openImageUrl(url, title) {
     // 图片元素
     const image = document.createElement("img");
-    image.src = item.output.media_url;
-    image.alt = item.output.name;
-    setModal(item.output.name, image, "图片");
+    image.src = url;
+    image.alt = title;
+    setModal(title, image, "图片");
     modalPrev.disabled = true;
     modalNext.disabled = true;
+}
+
+/**
+ * 打开产物图片。
+ */
+function openImage(item) {
+    openImageUrl(item.output.media_url, item.output.name);
 }
 
 /**

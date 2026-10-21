@@ -1660,6 +1660,7 @@ daoyan story validate --verify-hashes --json
    - 剧本：渲染 `script.md`，显示 revision、status、synced_at、approved_at、changelog；
    - 拆解：角色 + 形态（允许清单）、场景、音色、beats；
    - 分镜：每镜引用的角色/形态、场景、台词与音色；参考资产缩略图；历史 run 与产物播放；
+   - 剧情图谱：拓扑图（角色 / 形态 ↔ 场景）与时序图（时间、事件、场景、角色形态、workflow、就绪 / 渲染状态）；每镜可展开生成上下文（参考资产、workflow 槽位、连续性、run、缺口）；
    - 成片：`final/<episode-id>/` 列表与播放。
 
 3. **设定集**
@@ -1686,6 +1687,7 @@ GET /api/episodes/:id
 GET /api/episodes/:id/script
 GET /api/episodes/:id/breakdown
 GET /api/episodes/:id/shots
+GET /api/episodes/:id/map
 GET /api/episodes/:id/tasks
 GET /api/episodes/:id/runs
 GET /api/episodes/:id/finals

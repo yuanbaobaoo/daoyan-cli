@@ -4,7 +4,7 @@ import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { ProjectConfig, ShotsFile, StoryEntityRef } from "../project/types.mts";
 import { classifyArtifact, buildShotsView, listArtifacts, listFinals, listRunsView, listTasksView } from "./data.mts";
-import { listAssets, isLfsPointerFile } from "../story/assets.mts";
+import { isLfsPointerFile, listAssets, storyMediaUrl } from "../story/assets.mts";
 import { episodeDir, listEpisodeMetas, readEpisodeMeta, readSeries } from "../story/paths.mts";
 import {
     loadBreakdown,
@@ -16,21 +16,10 @@ import {
     loadVoices,
 } from "../story/store.mts";
 import { computeEpisodeStoryStatus, computeSeriesStoryStatus } from "../story/validate.mts";
+import { buildStoryMap } from "../story/map.mts";
 import type { StoryAsset } from "../story/types.mts";
 
-// story 媒体前缀
-const STORY_MEDIA_PREFIX = "/media/story";
-
-/**
- * story 资产媒体地址。
- */
-export function storyMediaUrl(path: string): string {
-    // 去掉 story/assets/ 前缀，URL 只保留 owner 相对路径
-    const prefix = "story/assets/";
-    // 局部值
-    const rel = path.startsWith(prefix) ? path.slice(prefix.length) : path;
-    return `${STORY_MEDIA_PREFIX}/${rel.split("/").map(encodeURIComponent).join("/")}`;
-}
+export { storyMediaUrl } from "../story/assets.mts";
 
 /**
  * 资产 DTO。
@@ -252,6 +241,7 @@ export function buildStoryEpisodeView(
         script: { meta: script, content },
         breakdown,
         shots,
+        map: buildStoryMap(root, episodeId, project),
         tasks: tasks.items,
         runs,
         artifacts: artifacts.items,

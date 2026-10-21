@@ -517,6 +517,134 @@ export interface BreakdownFile {
 }
 
 /**
+ * 剧情图谱重要度。
+ */
+export type StoryMapImportance = "major" | "normal" | "minor";
+
+/**
+ * 剧情图谱事件标注（仅叙事字段）。
+ */
+export interface StoryMapEvent {
+    /**
+     * 镜头 id。
+     */
+    shot_id: string;
+    /**
+     * 事件标题覆盖。
+     */
+    title?: string;
+    /**
+     * 事件摘要覆盖。
+     */
+    summary?: string;
+    /**
+     * 重要度覆盖。
+     */
+    importance?: StoryMapImportance;
+    /**
+     * 故事时间标签。
+     */
+    story_time?: string;
+    /**
+     * 备注。
+     */
+    note?: string;
+    /**
+     * 允许扩展字段。
+     */
+    [k: string]: unknown;
+}
+
+/**
+ * 剧情图谱角色关系标注。
+ */
+export interface StoryMapRelation {
+    /**
+     * 起点角色 id。
+     */
+    from: string;
+    /**
+     * 终点角色 id。
+     */
+    to: string;
+    /**
+     * 关系类型（自由文本）。
+     */
+    kind?: string;
+    /**
+     * 关系标签。
+     */
+    label: string;
+    /**
+     * 备注。
+     */
+    note?: string;
+    /**
+     * 允许扩展字段。
+     */
+    [k: string]: unknown;
+}
+
+/**
+ * 剧情图谱叙事标注文件。
+ */
+export interface StoryMapFile {
+    /**
+     * schema 版本。
+     */
+    version: 1;
+    /**
+     * 剧集 id。
+     */
+    episode_id: string;
+    /**
+     * 最后写入者。
+     */
+    author: "dycli" | "ai" | "user" | "import";
+    /**
+     * 最后更新时间。
+     */
+    updated_at: string;
+    /**
+     * 生成 / 写入时的事实快照。
+     */
+    source: {
+        /**
+         * 剧本 revision。
+         */
+        script_revision: number;
+        /**
+         * 剧本 sha256。
+         */
+        script_sha256: string;
+        /**
+         * 拆解文件 sha256。
+         */
+        breakdown_sha256: string;
+        /**
+         * 分镜文件 sha256。
+         */
+        shots_sha256: string;
+    };
+    /**
+     * 事件标注。
+     */
+    events: StoryMapEvent[];
+    /**
+     * 角色关系标注。
+     */
+    relations: StoryMapRelation[];
+    /**
+     * 整集备注。
+     */
+    notes?: string;
+    /**
+     * 允许扩展字段。
+     */
+    [k: string]: unknown;
+}
+
+/**
  * 剧集执行上下文。
  */
 export interface EpisodeContext {

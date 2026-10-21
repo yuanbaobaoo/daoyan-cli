@@ -50,7 +50,7 @@
 | `episode_not_found` | 否 | — | 剧集不存在；`story episode list` |
 | `episode_required` | 否 | — | 多集项目缺少 `--episode`；`details.episodes` 列出可用集 |
 | `story_conflict` | 是 | 0 | `--base-revision` / `--base-sha256` 不匹配；重新读取后重试 |
-| `story_invalid` | 否 | — | 剧本/设定集/拆解/分镜结构或引用错误；看 `details.issues` / `details.references` |
+| `story_invalid` | 否 | — | 剧本/设定集/拆解/分镜/剧情图谱结构或引用错误；看 `details.issues` / `details.references` |
 | `story_stale` | 否 | — | 单集拆解/分镜基于旧剧本；重新拆解或更新分镜 |
 | `story_gate_failed` | 否 | — | 拍摄门禁未通过；看 `details.blockers` / `details.stage` |
 | `asset_not_found` | 否 | — | owner / 资产 / run 产物不存在 |

@@ -5,6 +5,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { MachineConfig, ProjectConfig, ShotsFile } from "../project/types.mts";
+import { buildAccessUrls, isLoopbackHost, normalizeHost, type AccessUrls } from "./addresses.mts";
 import type { SkillCommand } from "../agent/skill.mts";
 import { SCHEMA_VERSION } from "../../shared/json.mts";
 import { VERSION } from "../../shared/version.mts";
@@ -96,9 +97,13 @@ export interface WebServerOptions {
  */
 export interface WebServerHandle {
     /**
-     * 可访问地址。
+     * 可访问地址（本机优先）。
      */
     url: string;
+    /**
+     * 全部可访问地址。
+     */
+    urls: AccessUrls;
     /**
      * 实际监听地址。
      */
@@ -196,23 +201,6 @@ const CONTENT_SECURITY_POLICY = [
     "form-action 'none'",
     "frame-ancestors 'none'",
 ].join("; ");
-
-/**
- * 判断是否 loopback 地址。
- */
-function isLoopbackHost(host: string): boolean {
-    return host === "127.0.0.1" || host === "localhost" || host === "::1" || host === "[::1]";
-}
-
-/**
- * 计算浏览器访问地址里的 host。
- */
-function displayHost(host: string): string {
-    if (host === "0.0.0.0") return "127.0.0.1";
-    if (host === "::" || host === "::1") return "[::1]";
-    if (host.includes(":") && !host.startsWith("[")) return `[${host}]`;
-    return host;
-}
 
 /**
  * 写入统一安全响应头。
@@ -466,6 +454,7 @@ async function handleRequest(
                 script: view.script,
                 breakdown: view.breakdown,
                 shots: view.shots,
+                map: view.map,
                 tasks: view.tasks,
                 runs: view.runs,
                 artifacts: view.artifacts,
@@ -715,7 +704,7 @@ async function handleRequest(
  */
 export async function startWebServer(options: WebServerOptions): Promise<WebServerHandle> {
     // 监听地址
-    const host = options.host ?? DEFAULT_HOST;
+    const host = normalizeHost(options.host ?? DEFAULT_HOST);
     // 监听端口
     const port = options.port ?? 0;
     // 概览缓存
@@ -771,10 +760,12 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
     // 实际端口
     const actualPort = (address as AddressInfo).port;
     ctx.port = actualPort;
-    // 展示地址
-    const urlHost = displayHost(host);
-    // 可访问 URL
-    const url = `http://${urlHost}:${actualPort}`;
+    // 实际监听协议族
+    const family = (address as AddressInfo).family === "IPv6" ? "IPv6" : "IPv4";
+    // 全部可访问地址
+    const urls = buildAccessUrls({ host, port: actualPort, family });
+    // 可访问 URL（本机优先）
+    const url = urls.local[0] ?? urls.network[0] ?? `http://${host}:${actualPort}`;
 
     // 关闭 Promise（幂等）
     let closePromise: Promise<void> | null = null;
@@ -800,6 +791,7 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
 
     return {
         url,
+        urls,
         host,
         port: actualPort,
         close,

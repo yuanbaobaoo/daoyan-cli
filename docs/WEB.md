@@ -21,16 +21,19 @@ daoyan web
 
 ```text
 daoyan web · demo · local
-  http://127.0.0.1:53217
+  Local:   http://127.0.0.1:53217
+  Network: http://192.168.1.23:53217
   Ctrl+C 停止
 ```
+
+`--host 0.0.0.0` 会列出全部非 internal 的 IPv4 网卡地址；`--host ::` 额外列出可达的 IPv6 地址（过滤 `fe80::/10` 链路本地地址）。
 
 ### flags
 
 | flag | 默认 | 说明 |
 |---|---|---|
 | `--port <n>` | `0` | 0 表示系统分配；也可指定 1–65535 |
-| `--host <addr>` | `127.0.0.1` | 监听地址；非 loopback 时页面数据可能被局域网访问 |
+| `--host <addr>` | `127.0.0.1` | 监听地址；非 loopback 时页面数据可能被局域网访问；`0.0.0.0` / `::` 表示监听全部网卡 |
 | `--open` | false | 启动后尝试用系统默认浏览器打开 |
 | `--json` | 全局参数 | 输出一次启动信封后继续驻留 |
 
@@ -42,13 +45,19 @@ daoyan web · demo · local
   "schema_version": 1,
   "data": {
     "url": "http://127.0.0.1:53217",
-    "host": "127.0.0.1",
+    "urls": {
+      "local": ["http://127.0.0.1:53217"],
+      "network": ["http://192.168.1.23:53217"]
+    },
+    "host": "0.0.0.0",
     "port": 53217,
     "project": "demo",
     "mode": "local"
   }
 }
 ```
+
+`url` 保留为「本机优先」的单个地址；`urls.local` / `urls.network` 是完整列表。
 
 启动信封只输出一次；后续日志走 stderr。服务会一直运行，直到收到 SIGINT / SIGTERM。
 
@@ -63,7 +72,7 @@ daoyan web · demo · local
 | 页面 | 内容 |
 |---|---|
 | 概览 | 系列标题、剧集卡片（stage / 剧本 revision / blockers / 下一步） |
-| 剧集详情 | 单集剧本、拆解、分镜、本集任务与成片；hash 路由 `#/episode/<id>` |
+| 剧集详情 | 单集剧本、拆解、分镜、本集任务与成片；含剧情图谱（拓扑 / 时序 / 生成上下文）；hash 路由 `#/episode/<id>` |
 | 角色 | 全局角色、形态、主参考图与其它资产 |
 | 场景 | 全局场景与参考图 |
 | 音色 | 音色档案、参考音频与试听 |
@@ -74,12 +83,28 @@ story API：
 
 ```text
 GET /api/episodes                     剧集列表
-GET /api/episodes/:id                 单集完整视图
-GET /api/episodes/:id/{script,breakdown,shots,tasks,runs,artifacts,finals}
+GET /api/episodes/:id                 单集完整视图（含 map）
+GET /api/episodes/:id/{script,breakdown,shots,map,tasks,runs,artifacts,finals}
 GET /api/story/{characters,scenes,voices,assets}
 GET /media/story/<owner-relative-path>   参考图 / 音频
 GET /media/final/<episode>/<name>        单集成片
 ```
+
+### 剧情图谱与生成上下文
+
+剧集详情页的「剧情图谱」区块有「拓扑图 / 时序图」两个视图：
+
+- **拓扑图**：角色 / 形态与场景的关系，边宽表示出场镜头数；可切换「按角色 / 按形态」，点击节点筛选时序；
+- **时序图**：按屏幕时间展示每镜的事件、场景、角色与形态、workflow、就绪状态、渲染状态；
+- **生成上下文**：每镜解析到具体参考资产、workflow 资产槽位、连续性（场景 / 形态 / relay / anchor）、最新 run 与缺口；
+- 缺参考图、缺文件、LFS 未拉取、缺 workflow、槽位不可解析等问题会显示为 warning / blocker，并给出 CLI 修复 hint。
+
+数据分两层：
+
+- **事实层**：每次从 `story/`、`episodes/<id>/breakdown.json`、`shots.json`、`workflows/`、`runs/` 实时推导，不落盘；
+- **叙事层**：可选 `episodes/<id>/story-map.json`，只保存标题 / 摘要 / 重要度 / 故事时间 / 关系标签，通过 `daoyan story map set` 写入；Web 只读。
+
+AI 通过 `daoyan story map show --episode <id> --json` 获取同一份生成上下文，决定每镜的 workflow、`asset_slots`、`first_frame` 与 prompt，再用 `daoyan story shots set` 写回。
 
 legacy 项目继续使用原有 `/api/shots`、`/api/finals`、`/media/final/<name>`。
 
@@ -131,6 +156,11 @@ legacy 项目继续使用原有 `/api/shots`、`/api/finals`、`/media/final/<na
 |---|---|---|
 | GET | `/api/health` | 健康检查与项目名/模式 |
 | GET | `/api/overview` | 概览数据（2 秒内存缓存，引擎探测超时 1.5 秒）；含 `storyboard` 项目档案 |
+| GET | `/api/episodes` | story 模式剧集列表 |
+| GET | `/api/episodes/:id` | 单集完整视图；含 `map` 剧情图谱与生成上下文 |
+| GET | `/api/episodes/:id/map` | 剧情图谱 + 生成上下文（workflow 候选 / 槽位 / 连续性 / 渲染状态 / 缺口） |
+| GET | `/api/episodes/:id/{script,breakdown,shots,tasks,runs,artifacts,finals}` | 单集子资源 |
+| GET | `/api/story/{characters,scenes,voices,assets}` | 全局设定与资产 |
 | GET | `/api/shots` | 分镜视图：人物/场景聚合、统计、每镜全部历史产物与 run；无 `shots.json` 时 data 为 `null` |
 | GET | `/api/artifacts?limit=&label=&status=&kind=&search=` | 扁平化产物列表 |
 | GET | `/api/runs/:run_id` | run 详情、inputs、outputs、task 事件 |

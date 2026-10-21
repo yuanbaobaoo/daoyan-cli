@@ -1,6 +1,6 @@
 /** Story 存储 —— 系列、剧集、剧本、拆解、设定集与分镜的读取 / 原子写入。
  *  结构校验与业务门禁在 validate.mts；本模块只负责确定性的文件操作。 */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { DaoyanCliError } from "../../shared/errors.mts";
 import { ensureDir, nowIso, readJsonIfExists, sha256, writeFileAtomic, writeJsonAtomic } from "../../shared/fs.mts";
@@ -14,6 +14,7 @@ import {
     SHOTS_FILE,
     STORY_ASSETS_DIR,
     STORY_DIR,
+    STORY_MAP_FILE,
     WORKFLOWS_DIR,
 } from "../project/types.mts";
 import type { ShotsFile } from "../project/types.mts";
@@ -28,6 +29,7 @@ import {
     seriesPath,
     STORY_ID_RE,
     storyAssetsDir,
+    storyMapPath,
     voicesPath,
 } from "./paths.mts";
 import type {
@@ -36,6 +38,7 @@ import type {
     ScriptMeta,
     StoryCharactersFile,
     StoryEpisodeMeta,
+    StoryMapFile,
     StoryScenesFile,
     StorySeriesFile,
     StoryVoicesFile,
@@ -188,6 +191,13 @@ export function loadEpisodeShots(root: string, episodeId: string): ShotsFile | n
 }
 
 /**
+ * 读取剧情图谱标注；不存在返回 null。
+ */
+export function loadStoryMap(root: string, episodeId: string): StoryMapFile | null {
+    return readJsonIfExists<StoryMapFile>(storyMapPath(root, episodeId));
+}
+
+/**
  * 写入角色文件（更新 updated_at）。
  */
 export function saveCharacters(root: string, doc: StoryCharactersFile): void {
@@ -227,6 +237,24 @@ export function saveBreakdown(root: string, episodeId: string, doc: BreakdownFil
  */
 export function saveEpisodeShots(root: string, episodeId: string, shots: ShotsFile): void {
     writeJsonAtomic(join(episodeDir(root, episodeId), SHOTS_FILE), shots);
+}
+
+/**
+ * 写入剧情图谱标注。
+ */
+export function saveStoryMap(root: string, episodeId: string, doc: StoryMapFile): void {
+    writeJsonAtomic(storyMapPath(root, episodeId), doc);
+}
+
+/**
+ * 删除剧情图谱标注；返回是否删除。
+ */
+export function removeStoryMap(root: string, episodeId: string): boolean {
+    // 标注路径
+    const file = storyMapPath(root, episodeId);
+    if (!existsSync(file)) return false;
+    rmSync(file, { force: true });
+    return true;
 }
 
 /**

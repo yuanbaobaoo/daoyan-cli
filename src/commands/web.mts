@@ -11,6 +11,7 @@ import { splitInlineFlag, takeValue, usageError } from "../shared/args.mts";
 import { loadMachineIfExists, loadShotsIfExists, requireProject } from "../core/project/config.mts";
 import { onSignal } from "../shared/signals.mts";
 import { startWebServer } from "../core/web/server.mts";
+import { isLoopbackHost } from "../core/web/addresses.mts";
 import indexHtml from "../core/web/ui/index.html";
 import appJs from "../core/web/ui/app.client";
 import styleCss from "../core/web/ui/style.css";
@@ -107,13 +108,6 @@ function openBrowser(url: string): boolean {
 }
 
 /**
- * 判断是否 loopback 监听地址。
- */
-function isLoopbackHost(host: string): boolean {
-    return host === "127.0.0.1" || host === "localhost" || host === "::1" || host === "[::1]";
-}
-
-/**
  * web 命令入口。
  */
 export async function runWeb(ctx: CliContext, args: string[]): Promise<number> {
@@ -158,6 +152,7 @@ export async function runWeb(ctx: CliContext, args: string[]): Promise<number> {
     if (ctx.json) {
         emitData({
             url: handle.url,
+            urls: handle.urls,
             host: handle.host,
             port: handle.port,
             project: project.name,
@@ -165,7 +160,8 @@ export async function runWeb(ctx: CliContext, args: string[]): Promise<number> {
         });
     } else {
         say(`daoyan web · ${project.name} · ${machine?.engine.mode ?? "未绑定本机"}`);
-        say(`  ${handle.url}`);
+        for (const url of handle.urls.local) say(`  Local:   ${url}`);
+        for (const url of handle.urls.network) say(`  Network: ${url}`);
         say("  Ctrl+C 停止");
     }
     // 自动打开

@@ -31,6 +31,8 @@ export const SCRIPT_TEXT_FILE = "script.md";
 export const SCRIPT_FILE = "script.json";
 // 分集：拆解
 export const BREAKDOWN_FILE = "breakdown.json";
+// 分集：剧情图谱叙事标注
+export const STORY_MAP_FILE = "story-map.json";
 // 共享：工作流目录
 export const WORKFLOWS_DIR = "workflows";
 // 共享：逻辑输入映射（<name>.bindings.json 与同目录）

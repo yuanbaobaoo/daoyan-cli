@@ -106,9 +106,25 @@ test("web story：系列 / 剧集 / 设定资产 / 媒体", async () => {
         assert.equal(episodeList.data.episodes[0]?.id, "ep01");
         const detail = await fetch(`${handle.url}/api/episodes/ep01`);
         assert.equal(detail.status, 200);
-        const detailData = (await detail.json()) as { data: { episode: { id: string }; script: { content: string } } };
+        const detailData = (await detail.json()) as {
+            data: { episode: { id: string }; script: { content: string }; map: { episode_id: string } };
+        };
         assert.equal(detailData.data.episode.id, "ep01");
         assert.match(detailData.data.script.content, /第一集/);
+        assert.equal(detailData.data.map.episode_id, "ep01");
+        // 生成上下文
+        const mapResponse = await fetch(`${handle.url}/api/episodes/ep01/map`);
+        assert.equal(mapResponse.status, 200);
+        const mapData = (await mapResponse.json()) as {
+            data: {
+                episode_id: string;
+                events: unknown[];
+                generation: { readiness: { counts: { shots: number } } };
+            };
+        };
+        assert.equal(mapData.data.episode_id, "ep01");
+        assert.equal(mapData.data.events.length, 0);
+        assert.equal(mapData.data.generation.readiness.counts.shots, 0);
         // legacy shots API 在 story 模式不可用
         const legacyShots = await fetch(`${handle.url}/api/shots`);
         assert.equal(legacyShots.status, 410);

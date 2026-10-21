@@ -9,7 +9,7 @@ import type { CliContext } from "../shared/context.mts";
 import { splitInlineFlag, takeValue, usageError } from "../shared/args.mts";
 import { nowIso, sha256File, writeJsonAtomic } from "../shared/fs.mts";
 import { requireProject } from "../core/project/config.mts";
-import type { ShotsFile } from "../core/project/types.mts";
+import { SHOTS_FILE, STORY_MAP_FILE, type ShotsFile } from "../core/project/types.mts";
 import {
     episodeDir,
     listEpisodeMetas,
@@ -18,6 +18,7 @@ import {
     resolveEpisodeContext,
     seriesPath,
     storyEnabled,
+    storyMapPath,
 } from "../core/story/paths.mts";
 import {
     addEpisode,
@@ -25,14 +26,18 @@ import {
     initStory,
     loadBreakdown,
     loadCharacters,
+    loadEpisodeShots,
     loadScenes,
     loadScriptMeta,
     loadScriptText,
+    loadStoryMap,
     loadVoices,
+    removeStoryMap,
     saveBreakdown,
     saveCharacters,
     saveEpisodeShots,
     saveScenes,
+    saveStoryMap,
     saveVoices,
     syncScript,
     updateEpisode,
@@ -54,7 +59,14 @@ import {
     removeAsset,
     setReferenceAsset,
 } from "../core/story/assets.mts";
-import type { BreakdownFile, StoryCharactersFile, StoryScenesFile, StoryVoicesFile } from "../core/story/types.mts";
+import { buildStoryMap, materializeStoryMap, normalizeStoryMapDoc, storyMapSource } from "../core/story/map.mts";
+import type {
+    BreakdownFile,
+    StoryCharactersFile,
+    StoryMapFile,
+    StoryScenesFile,
+    StoryVoicesFile,
+} from "../core/story/types.mts";
 
 /**
  * 解析后的 flag。
@@ -816,7 +828,35 @@ async function storyAsset(ctx: CliContext, args: string[]): Promise<number> {
 async function storyShots(ctx: CliContext, args: string[]): Promise<number> {
     // 解构值
     const [action, ...rest] = args;
-    if (action !== "set") usageError("用法：daoyan story shots set --episode <id> --file <shots.json>");
+    if (action === "show") {
+        // 解析结果
+        const parsed = parseFlags(rest, { "--episode": "string" });
+        if (parsed.positionals.length > 0) usageError(`未知参数 ${parsed.positionals.join(" ")}`);
+        // 解构值
+        const { root } = requireProject(ctx);
+        if (!storyEnabled(root)) {
+            throw new DaoyanCliError({ code: "story_not_found", message: "story 模式未启用" });
+        }
+        // 上下文
+        const context = resolveEpisodeContext(root, strFlag(parsed, "--episode"));
+        if (context.legacy || context.episode_id === null) {
+            throw new DaoyanCliError({ code: "story_not_found", message: "story 模式未启用" });
+        }
+        // 分镜
+        const shots = loadEpisodeShots(root, context.episode_id);
+        if (shots === null) {
+            throw new DaoyanCliError({
+                code: "story_invalid",
+                message: `剧集 ${context.episode_id} 没有 shots.json`,
+                hint: `先执行 story shots set --episode ${context.episode_id} --file <shots.json>。`,
+            });
+        }
+        output(ctx, { episode_id: context.episode_id, path: `${context.rel_dir}/${SHOTS_FILE}`, shots }, [
+            `分镜 ${context.episode_id}：${shots.shots.length} 镜（script revision ${shots.meta.script_revision ?? 0}）`,
+        ]);
+        return 0;
+    }
+    if (action !== "set") usageError("用法：daoyan story shots show|set --episode <id> [--file <shots.json>]");
     // 解构值
     const { root } = requireProject(ctx);
     if (!storyEnabled(root)) {
@@ -884,6 +924,171 @@ async function storyShots(ctx: CliContext, args: string[]): Promise<number> {
         `下一步：daoyan status --episode ${context.episode_id} --json`,
     ]);
     return 0;
+}
+
+/**
+ * story map build/show/set/clear。
+ */
+async function storyMap(ctx: CliContext, args: string[]): Promise<number> {
+    // 解构值
+    const [action, ...rest] = args;
+    // 解构值
+    const { root, config } = requireProject(ctx);
+    if (!storyEnabled(root)) {
+        throw new DaoyanCliError({ code: "story_not_found", message: "story 模式未启用" });
+    }
+    if (action === "show") {
+        // 解析结果
+        const parsed = parseFlags(rest, { "--episode": "string", "--raw": "boolean" });
+        if (parsed.positionals.length > 0) usageError(`未知参数 ${parsed.positionals.join(" ")}`);
+        // 上下文
+        const context = resolveEpisodeContext(root, strFlag(parsed, "--episode"));
+        if (context.legacy || context.episode_id === null) {
+            throw new DaoyanCliError({ code: "story_not_found", message: "story 模式未启用" });
+        }
+        // 标注路径
+        const path = `${context.rel_dir}/${STORY_MAP_FILE}`;
+        if (boolFlag(parsed, "--raw")) {
+            // 标注文件
+            const doc = loadStoryMap(root, context.episode_id);
+            if (doc === null) {
+                throw new DaoyanCliError({
+                    code: "story_invalid",
+                    message: `剧集 ${context.episode_id} 没有 story-map.json`,
+                    hint: `先执行 story map build --episode ${context.episode_id}。`,
+                });
+            }
+            output(ctx, { episode_id: context.episode_id, path, story_map: doc }, [
+                `标注文件 ${path}：${doc.events.length} 事件 / ${doc.relations.length} 关系`,
+            ]);
+            return 0;
+        }
+        // 解析结果
+        const map = buildStoryMap(root, context.episode_id, config);
+        if (map === null) {
+            throw new DaoyanCliError({ code: "episode_not_found", message: `未找到剧集 ${context.episode_id}` });
+        }
+        output(ctx, { episode_id: context.episode_id, map }, [
+            `剧情图谱 ${context.episode_id}：${map.events.length} 事件 / ${map.catalog.characters.length} 角色 / ${map.catalog.scenes.length} 场景`,
+            `可生成 ${map.generation.readiness.counts.ready} / 阻塞 ${map.generation.readiness.counts.blocked} / 已生成 ${map.generation.readiness.counts.rendered}`,
+            `来源：${map.origin.annotated ? `${map.origin.author} 标注` : "dycli 推导"}${map.origin.stale ? "（stale）" : ""}`,
+            ...map.warnings.slice(0, 5).map((warning) => `  ! [${warning.code}] ${warning.message}`),
+        ]);
+        return 0;
+    }
+    if (action === "build") {
+        // 解析结果
+        const parsed = parseFlags(rest, { "--episode": "string", "--force": "boolean" });
+        if (parsed.positionals.length > 0) usageError(`未知参数 ${parsed.positionals.join(" ")}`);
+        // 上下文
+        const context = resolveEpisodeContext(root, strFlag(parsed, "--episode"));
+        if (context.legacy || context.episode_id === null) {
+            throw new DaoyanCliError({ code: "story_not_found", message: "story 模式未启用" });
+        }
+        // 骨架
+        const result = materializeStoryMap(root, context.episode_id, { force: boolFlag(parsed, "--force") });
+        saveStoryMap(root, context.episode_id, result.doc);
+        output(
+            ctx,
+            {
+                episode_id: context.episode_id,
+                path: `${context.rel_dir}/${STORY_MAP_FILE}`,
+                events: result.doc.events.length,
+                preserved_annotations: result.preserved,
+                dropped_events: result.dropped,
+                relations: result.doc.relations.length,
+                warnings: result.warnings,
+            },
+            [
+                `图谱骨架已写入 ${context.episode_id}：${result.doc.events.length} 事件（保留 ${result.preserved} 条标注，丢弃 ${result.dropped.length} 条）`,
+                ...result.warnings.map((warning) => `  ! [${warning.code}] ${warning.message}`),
+            ],
+        );
+        return 0;
+    }
+    if (action === "set") {
+        // 解析结果
+        const parsed = parseFlags(rest, {
+            "--episode": "string",
+            "--file": "string",
+            "--source": "string",
+            "--base-sha256": "string",
+        });
+        if (parsed.positionals.length > 0) usageError(`未知参数 ${parsed.positionals.join(" ")}`);
+        // 来源
+        const sourceText = strFlag(parsed, "--source") ?? "ai";
+        if (sourceText !== "ai" && sourceText !== "user" && sourceText !== "import") {
+            usageError("--source 必须是 ai|user|import");
+        }
+        // 上下文
+        const context = resolveEpisodeContext(root, strFlag(parsed, "--episode"));
+        if (context.legacy || context.episode_id === null) {
+            throw new DaoyanCliError({ code: "story_not_found", message: "story 模式未启用" });
+        }
+        // 并发检查
+        const baseSha = strFlag(parsed, "--base-sha256");
+        const file = storyMapPath(root, context.episode_id);
+        if (baseSha !== undefined && existsSync(file) && sha256File(file) !== baseSha) {
+            throw new DaoyanCliError({ code: "story_conflict", message: "story-map.json 已被其它修改" });
+        }
+        // 分镜
+        const shots = loadEpisodeShots(root, context.episode_id);
+        if (shots === null) {
+            throw new DaoyanCliError({
+                code: "story_invalid",
+                message: `剧集 ${context.episode_id} 没有 shots.json`,
+                hint: `先执行 story shots set --episode ${context.episode_id} --file <shots.json>。`,
+            });
+        }
+        // 角色
+        const characters = loadCharacters(root);
+        // 输入
+        const raw = requireRecord(readJsonInput(strFlag(parsed, "--file"), "--file <story-map.json|->"), "story-map");
+        // 剧本
+        const script = loadScriptMeta(root, context.episode_id);
+        // 归一化
+        const doc = normalizeStoryMapDoc(
+            raw,
+            context.episode_id,
+            sourceText as StoryMapFile["author"],
+            storyMapSource(root, context.episode_id, script),
+            shots,
+            characters,
+        );
+        saveStoryMap(root, context.episode_id, doc);
+        output(
+            ctx,
+            {
+                episode_id: context.episode_id,
+                path: `${context.rel_dir}/${STORY_MAP_FILE}`,
+                events: doc.events.length,
+                annotated_events: doc.events.filter((event) => Object.keys(event).length > 1).length,
+                relations: doc.relations.length,
+            },
+            [
+                `图谱标注已写入 ${context.episode_id}：${doc.events.length} 事件 / ${doc.relations.length} 关系`,
+                `下一步：story map show --episode ${context.episode_id} --json`,
+            ],
+        );
+        return 0;
+    }
+    if (action === "clear") {
+        // 解析结果
+        const parsed = parseFlags(rest, { "--episode": "string" });
+        if (parsed.positionals.length > 0) usageError(`未知参数 ${parsed.positionals.join(" ")}`);
+        // 上下文
+        const context = resolveEpisodeContext(root, strFlag(parsed, "--episode"));
+        if (context.legacy || context.episode_id === null) {
+            throw new DaoyanCliError({ code: "story_not_found", message: "story 模式未启用" });
+        }
+        // 删除
+        const removed = removeStoryMap(root, context.episode_id);
+        output(ctx, { episode_id: context.episode_id, removed }, [
+            removed ? `已删除 ${context.rel_dir}/${STORY_MAP_FILE}` : `没有可删除的 story-map.json`,
+        ]);
+        return 0;
+    }
+    usageError("用法：daoyan story map build|show|set|clear --episode <id>");
 }
 
 /**
@@ -976,9 +1181,10 @@ export async function runStory(ctx: CliContext, args: string[]): Promise<number>
     if (sub === "voices") return storyGlobal(ctx, "voices", rest);
     if (sub === "asset") return storyAsset(ctx, rest);
     if (sub === "shots") return storyShots(ctx, rest);
+    if (sub === "map") return storyMap(ctx, rest);
     if (sub === "status") return storyStatus(ctx, rest);
     if (sub === "validate") return storyValidate(ctx, rest);
     usageError(
-        "用法：daoyan story init|series|episode|script|breakdown|characters|scenes|voices|asset|shots|status|validate",
+        "用法：daoyan story init|series|episode|script|breakdown|characters|scenes|voices|asset|shots|map|status|validate",
     );
 }

@@ -5,7 +5,7 @@
  *  - 显式 asset_slots 映射可写成 owner 或 owner@asset。 */
 import { existsSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import { DaoyanCliError } from "../../shared/errors.mts";
+import { asCliError, DaoyanCliError, type ErrCode } from "../../shared/errors.mts";
 import type { ShotSpec, ShotsFile } from "../project/types.mts";
 import type { UploadSpec } from "../task/plans.mts";
 import { loadGraphFile } from "../workflow/load.mts";
@@ -58,6 +58,113 @@ export interface ResolvedWorkflowAssets {
      * run 记录。
      */
     records: RunAssetRecord[];
+}
+
+/**
+ * 槽位映射来源。
+ */
+export type WorkflowAssetMappingSource = "explicit" | "cast_order" | "dialogue_order" | "scene";
+
+/**
+ * 规划后的槽位。
+ */
+export interface PlannedWorkflowSlot {
+    /**
+     * 槽位名。
+     */
+    slot: string;
+    /**
+     * 资产类型。
+     */
+    kind: StoryOwnerKind;
+    /**
+     * 是否必填。
+     */
+    required: boolean;
+    /**
+     * 目标节点输入。
+     */
+    target: string;
+    /**
+     * owner 引用。
+     */
+    owner: string | null;
+    /**
+     * 资产 id。
+     */
+    asset_id: string | null;
+    /**
+     * 资产记录。
+     */
+    asset: StoryAsset | null;
+    /**
+     * 映射来源。
+     */
+    mapping_source: WorkflowAssetMappingSource;
+    /**
+     * 槽位状态。
+     */
+    status: "ready" | "blocker" | "optional";
+}
+
+/**
+ * 资产槽位规划缺口。
+ */
+export interface WorkflowAssetGap {
+    /**
+     * 地图 / 预检使用的稳定 code。
+     */
+    code: string;
+    /**
+     * 严格执行时抛出的错误码。
+     */
+    error_code: ErrCode;
+    /**
+     * 严重级别。
+     */
+    severity: "blocker" | "warning";
+    /**
+     * 槽位名。
+     */
+    slot: string | null;
+    /**
+     * owner 引用。
+     */
+    owner: string | null;
+    /**
+     * 说明。
+     */
+    message: string;
+    /**
+     * 修复建议。
+     */
+    hint: string;
+    /**
+     * 结构化补充。
+     */
+    details?: Record<string, unknown>;
+}
+
+/**
+ * 非抛错的槽位规划结果。
+ */
+export interface PlannedWorkflowAssets {
+    /**
+     * 待上传文件。
+     */
+    uploads: UploadSpec[];
+    /**
+     * run 记录。
+     */
+    records: RunAssetRecord[];
+    /**
+     * 槽位明细。
+     */
+    slots: PlannedWorkflowSlot[];
+    /**
+     * 缺口。
+     */
+    gaps: WorkflowAssetGap[];
 }
 
 /**
@@ -337,13 +444,29 @@ function resolveSceneAsset(root: string, slot: WorkflowAssetSlot, shot: ShotSpec
 }
 
 /**
+ * 台词音色规划。
+ */
+interface DialogueVoicePlan {
+    /**
+     * 按台词顺序去重后的音色 id。
+     */
+    voices: string[];
+    /**
+     * 角色有多个音色但台词未显式指定的角色 id。
+     */
+    ambiguous: string[];
+}
+
+/**
  * 镜头台词中出现的音色（去重、保持顺序）。
  */
-function dialogueVoices(root: string, shot: ShotSpec): string[] {
+function dialogueVoices(root: string, shot: ShotSpec): DialogueVoicePlan {
     // 角色
     const characters = loadCharacters(root);
-    // 结果
-    const out: string[] = [];
+    // 音色
+    const voices: string[] = [];
+    // 歧义角色
+    const ambiguous: string[] = [];
     for (const line of shot.dialogue ?? []) {
         // 音色
         let voice = line.voice;
@@ -351,13 +474,14 @@ function dialogueVoices(root: string, shot: ShotSpec): string[] {
             // 角色
             const character = characters.characters.find((c) => c.id === line.character);
             // 音色列表
-            const voices = character?.voice_ids ?? [];
-            if (voices.length !== 1) continue;
-            voice = voices[0];
+            const list = character?.voice_ids ?? [];
+            if (list.length > 1 && !ambiguous.includes(line.character)) ambiguous.push(line.character);
+            if (list.length !== 1) continue;
+            voice = list[0];
         }
-        if (voice !== undefined && voice !== "" && !out.includes(voice)) out.push(voice);
+        if (voice !== undefined && voice !== "" && !voices.includes(voice)) voices.push(voice);
     }
-    return out;
+    return { voices, ambiguous };
 }
 
 /**
@@ -384,60 +508,125 @@ function resolveVoiceAsset(
 }
 
 /**
- * 解析一个镜头的资产槽位。
+ * 错误转槽位缺口。
  */
-export function resolveWorkflowAssets(opts: {
-    root: string;
-    shot: ShotSpec;
-    workflowAbs: string;
-}): ResolvedWorkflowAssets {
+function gapFromError(err: DaoyanCliError, slot: string | null, owner: string | null): WorkflowAssetGap {
+    return {
+        code: err.code,
+        error_code: err.code,
+        severity: "blocker",
+        slot,
+        owner,
+        message: err.message,
+        hint: err.hint,
+        ...(err.details !== undefined ? { details: err.details } : {}),
+    };
+}
+
+/**
+ * 规划一个镜头的资产槽位（不抛错，返回缺口）。
+ */
+export function planWorkflowAssets(opts: { root: string; shot: ShotSpec; workflowAbs: string }): PlannedWorkflowAssets {
+    // 空结果
+    const empty: PlannedWorkflowAssets = { uploads: [], records: [], slots: [], gaps: [] };
     // 槽位文件
-    const file = loadWorkflowAssets(opts.workflowAbs);
-    if (file === null) return { uploads: [], records: [] };
+    let file: WorkflowAssetsFile | null;
+    try {
+        file = loadWorkflowAssets(opts.workflowAbs);
+    } catch (e) {
+        // 错误
+        const err = asCliError(e, "story_invalid");
+        return { ...empty, gaps: [gapFromError(err, null, null)] };
+    }
+    if (file === null) return empty;
     // 图（用于校验目标节点）
-    const loaded = loadGraphFile(opts.workflowAbs, opts.workflowAbs);
-    // 目标节点检查
-    for (const slot of file.slots) {
-        // 节点 id
-        const node = slot.target.slice(0, slot.target.indexOf("."));
-        if (loaded.graph[node] === undefined) {
-            throw new DaoyanCliError({
-                code: "story_gate_failed",
-                message: `资产槽位 ${slot.name} 指向不存在的节点 ${node}`,
-                details: { blockers: [{ code: "workflow_unresolved", message: `槽位 ${slot.name} 节点不存在` }] },
-            });
-        }
+    let loaded: ReturnType<typeof loadGraphFile>;
+    try {
+        loaded = loadGraphFile(opts.workflowAbs, opts.workflowAbs);
+    } catch (e) {
+        // 错误
+        const err = asCliError(e, "workflow_invalid");
+        return { ...empty, gaps: [gapFromError(err, null, null)] };
     }
     // 全局设定
-    const characters = loadCharacters(opts.root);
-    // 角色槽位按 cast 顺序取
-    let characterIndex = 0;
-    // 音色槽位按台词顺序取
-    const voices = dialogueVoices(opts.root, opts.shot);
-    // 音色序号
-    let voiceIndex = 0;
-    // 结果
+    let characters: ReturnType<typeof loadCharacters>;
+    try {
+        characters = loadCharacters(opts.root);
+    } catch (e) {
+        // 错误
+        const err = asCliError(e, "story_invalid");
+        return { ...empty, gaps: [gapFromError(err, null, null)] };
+    }
+    // 台词音色
+    let dialogue: DialogueVoicePlan;
+    try {
+        dialogue = dialogueVoices(opts.root, opts.shot);
+    } catch (e) {
+        // 错误
+        const err = asCliError(e, "story_invalid");
+        return { ...empty, gaps: [gapFromError(err, null, null)] };
+    }
+    // 待上传
     const uploads: UploadSpec[] = [];
     // 资产记录
     const records: RunAssetRecord[] = [];
+    // 槽位明细
+    const slots: PlannedWorkflowSlot[] = [];
+    // 缺口
+    const gaps: WorkflowAssetGap[] = [];
+    // 角色槽位按 cast 顺序取
+    let characterIndex = 0;
+    // 音色槽位按台词顺序取
+    let voiceIndex = 0;
+    // 角色引用
+    const cast = opts.shot.characters ?? [];
     for (const slot of file.slots) {
+        // 必填
+        const required = slot.required !== false;
+        // 节点 id
+        const node = slot.target.slice(0, slot.target.indexOf("."));
+        if (loaded.graph[node] === undefined) {
+            gaps.push({
+                code: "workflow_unresolved",
+                error_code: "story_gate_failed",
+                severity: "blocker",
+                slot: slot.name,
+                owner: null,
+                message: `资产槽位 ${slot.name} 指向不存在的节点 ${node}`,
+                hint: "修正 workflows/<name>.assets.json 的 target，或先添加节点。",
+                details: { blockers: [{ code: "workflow_unresolved", message: `槽位 ${slot.name} 节点不存在` }] },
+            });
+            slots.push({
+                slot: slot.name,
+                kind: slot.kind,
+                required,
+                target: slot.target,
+                owner: null,
+                asset_id: null,
+                asset: null,
+                mapping_source:
+                    slot.kind === "character" ? "cast_order" : slot.kind === "scene" ? "scene" : "dialogue_order",
+                status: "blocker",
+            });
+            continue;
+        }
         // 显式映射
         const mapping = opts.shot.asset_slots?.[slot.name];
-        // 解析结果
-        let resolved: ResolvedSlotAsset | null = null;
+        // owner
+        let owner: string | null = null;
+        // 显式资产
+        let explicitAsset: string | null = null;
+        // 映射来源
+        let mappingSource: WorkflowAssetMappingSource;
         if (slot.kind === "character") {
-            // 角色 owner
-            let owner: string | null = null;
-            // 显式资产
-            let explicitAsset: string | null = null;
             if (mapping !== undefined && mapping !== "") {
                 // 解析结果
                 const parsed = parseSlotMapping(mapping);
                 owner = parsed.owner;
                 explicitAsset = parsed.asset;
+                mappingSource = "explicit";
             } else {
-                // 下一个 cast
-                const cast = opts.shot.characters ?? [];
+                mappingSource = "cast_order";
                 // 引用
                 const ref = cast[characterIndex];
                 characterIndex++;
@@ -448,61 +637,167 @@ export function resolveWorkflowAssets(opts: {
                     const character = characters.characters.find((c) => c.id === parsed.id);
                     owner = `${parsed.id}/${parsed.form ?? character?.default_form ?? ""}`;
                 }
+                if (cast.length > 1) {
+                    gaps.push({
+                        code: "slot_ambiguous",
+                        error_code: "story_gate_failed",
+                        severity: "warning",
+                        slot: slot.name,
+                        owner,
+                        message: `角色槽位 ${slot.name} 按出场顺序隐式匹配，当前候选 ${cast.length} 个`,
+                        hint: `在 shots.json 的 asset_slots 中显式指定 ${slot.name}。`,
+                    });
+                }
             }
-            if (owner === null || owner === "") {
-                if (slot.required === false) continue;
-                throw new DaoyanCliError({
-                    code: "story_gate_failed",
-                    message: `槽位 ${slot.name} 没有可用的角色`,
-                });
-            }
-            resolved = resolveCharacterAsset(opts.root, slot, owner, explicitAsset, characters, opts.shot);
         } else if (slot.kind === "scene") {
-            resolved = resolveSceneAsset(opts.root, slot, opts.shot);
+            owner = parseSceneRef(opts.shot.scene);
+            // 显式场景资产
+            const explicit = (opts.shot as unknown as Record<string, unknown>).scene_asset;
+            explicitAsset = typeof explicit === "string" && explicit !== "" ? explicit : null;
+            mappingSource = explicitAsset !== null ? "explicit" : "scene";
         } else {
-            // 音色 owner
-            let owner: string | null = null;
-            // 显式资产
-            let explicitAsset: string | null = null;
             if (mapping !== undefined && mapping !== "") {
                 // 解析结果
                 const parsed = parseSlotMapping(mapping);
                 owner = parsed.owner;
                 explicitAsset = parsed.asset;
+                mappingSource = "explicit";
             } else {
-                owner = voices[voiceIndex] ?? null;
+                mappingSource = "dialogue_order";
+                owner = dialogue.voices[voiceIndex] ?? null;
                 voiceIndex++;
+                if (dialogue.voices.length > 1) {
+                    gaps.push({
+                        code: "slot_ambiguous",
+                        error_code: "story_gate_failed",
+                        severity: "warning",
+                        slot: slot.name,
+                        owner,
+                        message: `音色槽位 ${slot.name} 按台词顺序隐式匹配，当前候选 ${dialogue.voices.length} 个`,
+                        hint: `在 shots.json 的 asset_slots 中显式指定 ${slot.name}。`,
+                    });
+                }
             }
-            if (owner === null || owner === "") {
-                if (slot.required === false) continue;
-                throw new DaoyanCliError({
-                    code: "story_gate_failed",
-                    message: `槽位 ${slot.name} 没有可用的音色`,
-                });
-            }
-            resolved = resolveVoiceAsset(opts.root, slot, owner, explicitAsset);
         }
-        // 文件
-        const abs = ensureAssetFile(opts.root, resolved.asset, `槽位 ${slot.name}`);
-        // 记录
-        records.push({
-            slot: slot.name,
-            kind: slot.kind,
-            owner: resolved.owner,
-            asset_id: resolved.asset.id,
-            path: resolved.asset.path,
-            sha256: resolved.asset.sha256,
-            bytes: resolved.asset.bytes,
-        });
-        // 上传
-        uploads.push({
-            logical: `asset:${slot.name}`,
-            source: abs,
-            desiredName: `${slot.name}_${resolved.asset.id}${extOf(resolved.asset.path)}`,
-            target: splitTarget(slot.target),
+        if ((owner === null || owner === "") && !required) {
+            slots.push({
+                slot: slot.name,
+                kind: slot.kind,
+                required,
+                target: slot.target,
+                owner: null,
+                asset_id: null,
+                asset: null,
+                mapping_source: mappingSource,
+                status: "optional",
+            });
+            continue;
+        }
+        try {
+            // 解析结果
+            let resolved: ResolvedSlotAsset;
+            if (slot.kind === "character") {
+                if (owner === null || owner === "") {
+                    throw new DaoyanCliError({
+                        code: "story_gate_failed",
+                        message: `槽位 ${slot.name} 没有可用的角色`,
+                    });
+                }
+                resolved = resolveCharacterAsset(opts.root, slot, owner, explicitAsset, characters, opts.shot);
+            } else if (slot.kind === "scene") {
+                resolved = resolveSceneAsset(opts.root, slot, opts.shot);
+            } else {
+                if (owner === null || owner === "") {
+                    throw new DaoyanCliError({
+                        code: "story_gate_failed",
+                        message: `槽位 ${slot.name} 没有可用的音色`,
+                    });
+                }
+                resolved = resolveVoiceAsset(opts.root, slot, owner, explicitAsset);
+            }
+            // 文件
+            const abs = ensureAssetFile(opts.root, resolved.asset, `槽位 ${slot.name}`);
+            // 记录
+            records.push({
+                slot: slot.name,
+                kind: slot.kind,
+                owner: resolved.owner,
+                asset_id: resolved.asset.id,
+                path: resolved.asset.path,
+                sha256: resolved.asset.sha256,
+                bytes: resolved.asset.bytes,
+            });
+            // 上传
+            uploads.push({
+                logical: `asset:${slot.name}`,
+                source: abs,
+                desiredName: `${slot.name}_${resolved.asset.id}${extOf(resolved.asset.path)}`,
+                target: splitTarget(slot.target),
+            });
+            slots.push({
+                slot: slot.name,
+                kind: slot.kind,
+                required,
+                target: slot.target,
+                owner: resolved.owner,
+                asset_id: resolved.asset.id,
+                asset: resolved.asset,
+                mapping_source: mappingSource,
+                status: "ready",
+            });
+        } catch (e) {
+            // 错误
+            const err = asCliError(e, "story_gate_failed");
+            gaps.push(gapFromError(err, slot.name, owner));
+            slots.push({
+                slot: slot.name,
+                kind: slot.kind,
+                required,
+                target: slot.target,
+                owner,
+                asset_id: null,
+                asset: null,
+                mapping_source: mappingSource,
+                status: "blocker",
+            });
+        }
+    }
+    // 台词音色歧义
+    for (const characterId of dialogue.ambiguous) {
+        gaps.push({
+            code: "voice_ambiguous",
+            error_code: "story_gate_failed",
+            severity: "warning",
+            slot: null,
+            owner: characterId,
+            message: `角色 ${characterId} 有多个音色，但台词未指定 voice`,
+            hint: `在 shots.json 的 dialogue[] 中为 ${characterId} 显式写 voice。`,
         });
     }
-    return { uploads, records };
+    return { uploads, records, slots, gaps };
+}
+
+/**
+ * 解析一个镜头的资产槽位（严格模式）。
+ */
+export function resolveWorkflowAssets(opts: {
+    root: string;
+    shot: ShotSpec;
+    workflowAbs: string;
+}): ResolvedWorkflowAssets {
+    // 规划结果
+    const plan = planWorkflowAssets(opts);
+    // 第一个阻断缺口
+    const blocker = plan.gaps.find((gap) => gap.severity === "blocker");
+    if (blocker !== undefined) {
+        throw new DaoyanCliError({
+            code: blocker.error_code,
+            message: blocker.message,
+            hint: blocker.hint,
+            ...(blocker.details !== undefined ? { details: blocker.details } : {}),
+        });
+    }
+    return { uploads: plan.uploads, records: plan.records };
 }
 
 /**

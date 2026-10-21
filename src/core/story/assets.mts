@@ -28,6 +28,19 @@ const MAX_ASSET_BYTES = 200 * 1024 * 1024;
 const LFS_POINTER_PREFIX = "version https://git-lfs.github.com/spec/v1";
 // 文件头读取长度
 const MAGIC_READ_BYTES = 64;
+// Story 媒体 URL 前缀
+const STORY_MEDIA_PREFIX = "/media/story";
+
+/**
+ * story 资产媒体地址。
+ */
+export function storyMediaUrl(path: string): string {
+    // 资产根前缀
+    const prefix = `${STORY_ASSETS_DIR}/`;
+    // owner 相对路径
+    const rel = path.startsWith(prefix) ? path.slice(prefix.length) : path;
+    return `${STORY_MEDIA_PREFIX}/${rel.split("/").map(encodeURIComponent).join("/")}`;
+}
 
 /**
  * 资产 owner 解析结果。

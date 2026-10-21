@@ -15,6 +15,7 @@ import {
     SCRIPT_TEXT_FILE,
     SHOTS_FILE,
     STORY_ASSETS_DIR,
+    STORY_MAP_FILE,
     STORY_CHARACTERS_FILE,
     STORY_DIR,
     STORY_SCENES_FILE,
@@ -80,6 +81,13 @@ export function episodesRoot(root: string): string {
  */
 export function episodeDir(root: string, episodeId: string): string {
     return join(root, EPISODES_DIR, episodeId);
+}
+
+/**
+ * 单集剧情图谱标注文件绝对路径。
+ */
+export function storyMapPath(root: string, episodeId: string): string {
+    return join(episodeDir(root, episodeId), STORY_MAP_FILE);
 }
 
 /**

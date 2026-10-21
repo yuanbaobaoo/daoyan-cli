@@ -444,7 +444,7 @@ var init_fs = __esm({
 function isTerminalStatus(status) {
   return status === "succeeded" || status === "failed" || status === "cancelled" || status === "interrupted";
 }
-var PROJECT_FILE, GITIGNORE_FILE, SHOTS_FILE, STORY_DIR, STORY_SERIES_FILE, STORY_CHARACTERS_FILE, STORY_SCENES_FILE, STORY_VOICES_FILE, STORY_ASSETS_DIR, EPISODES_DIR, EPISODE_META_FILE, SCRIPT_TEXT_FILE, SCRIPT_FILE, BREAKDOWN_FILE, WORKFLOWS_DIR, BINDINGS_SUFFIX, INPUTS_DIR, TASKS_DIR, RUNS_DIR, FINAL_DIR, SKILL_DIR, AGENTS_FILE, MACHINE_FILE, CATALOG_FILE, EXTRA_MODELS_FILE, LOG_DIR, ENGINE_PID_FILE, TASK_FILE, EVENTS_FILE, RUN_FILE, RUN_WORKFLOW_FILE, RUN_INPUTS_FILE, CANCEL_FILE, CONCAT_LIST_FILE, RELAY_DIR;
+var PROJECT_FILE, GITIGNORE_FILE, SHOTS_FILE, STORY_DIR, STORY_SERIES_FILE, STORY_CHARACTERS_FILE, STORY_SCENES_FILE, STORY_VOICES_FILE, STORY_ASSETS_DIR, EPISODES_DIR, EPISODE_META_FILE, SCRIPT_TEXT_FILE, SCRIPT_FILE, BREAKDOWN_FILE, STORY_MAP_FILE, WORKFLOWS_DIR, BINDINGS_SUFFIX, INPUTS_DIR, TASKS_DIR, RUNS_DIR, FINAL_DIR, SKILL_DIR, AGENTS_FILE, MACHINE_FILE, CATALOG_FILE, EXTRA_MODELS_FILE, LOG_DIR, ENGINE_PID_FILE, TASK_FILE, EVENTS_FILE, RUN_FILE, RUN_WORKFLOW_FILE, RUN_INPUTS_FILE, CANCEL_FILE, CONCAT_LIST_FILE, RELAY_DIR;
 var init_types = __esm({
   "src/core/project/types.mts"() {
     "use strict";
@@ -462,6 +462,7 @@ var init_types = __esm({
     SCRIPT_TEXT_FILE = "script.md";
     SCRIPT_FILE = "script.json";
     BREAKDOWN_FILE = "breakdown.json";
+    STORY_MAP_FILE = "story-map.json";
     WORKFLOWS_DIR = "workflows";
     BINDINGS_SUFFIX = ".bindings.json";
     INPUTS_DIR = "inputs";
@@ -675,6 +676,10 @@ function resolveWorkflowRef(root, ref) {
   }
   const rel = clean.includes("/") || clean.endsWith(".json") ? clean : join(WORKFLOWS_DIR, `${clean}.json`);
   return { abs: join(root, rel), rel: rel.split("\\").join("/") };
+}
+function workflowNameOf(rel) {
+  const base = rel.split("/").pop() ?? rel;
+  return base.endsWith(".json") ? base.slice(0, -".json".length) : base;
 }
 function defaultMachineId() {
   try {
@@ -1822,7 +1827,8 @@ function storyMd() {
     "episodes/<id>/episode.json        \u5267\u96C6\u5143\u6570\u636E",
     "episodes/<id>/script.md|json      \u5355\u96C6\u5267\u672C\u4E0E revision",
     "episodes/<id>/breakdown.json      \u5355\u96C6\u62C6\u89E3\uFF08\u5236\u4F5C\u8303\u56F4\u4E0E\u5141\u8BB8\u6E05\u5355\uFF09",
-    "episodes/<id>/shots.json          \u5355\u96C6\u5206\u955C",
+    "episodes/<id>/shots.json          \u5355\u96C6\u5206\u955C\uFF08AI \u751F\u6210\u51B3\u7B56\u5199\u56DE\u70B9\uFF09",
+    "episodes/<id>/story-map.json      \u53EF\u9009\uFF1A\u5267\u60C5\u56FE\u8C31\u53D9\u4E8B\u6807\u6CE8\uFF08\u6807\u9898 / \u91CD\u8981\u5EA6 / \u6545\u4E8B\u65F6\u95F4 / \u5173\u7CFB\uFF09",
     "final/<id>/cut-*                  \u5355\u96C6\u6210\u7247",
     "```",
     "",
@@ -1840,6 +1846,11 @@ function storyMd() {
     "10. \u591A\u96C6\u9879\u76EE `shot` / `batch` / `wrap` / \u5355\u96C6\u5199\u5165\u5FC5\u987B\u5E26 --episode\uFF1B\u4E0D\u5F97\u5047\u8BBE\u5F53\u524D\u96C6\u3002",
     "11. \u7528\u6237\u786E\u8BA4\u67D0\u4E00\u96C6\u5267\u672C\u540E\u624D `story script approve`\uFF1BAI \u4E0D\u80FD\u4EE3\u66FF\u7528\u6237\u786E\u8BA4\u3002",
     "12. \u4E0D\u8981\u628A A \u96C6\u7684 run / final \u5F53\u6210 B \u96C6\u7684\u3002",
+    "13. \u505A\u751F\u6210\u51B3\u7B56\u524D\u5148\u8BFB `story map show --json`\uFF1A\u53EA\u7528\u5176\u4E2D catalog \u7684\u89D2\u8272 / \u5F62\u6001 / \u573A\u666F / \u8D44\u4EA7 id\uFF0C\u4E0D\u5F97\u7F16\u9020\u3002",
+    "14. \u540C\u4E00\u89D2\u8272\u6709\u591A\u4E2A\u5F62\u6001\u6216\u591A\u4E2A\u8D44\u4EA7\u65F6\uFF0C\u5FC5\u987B\u5728 shots.json \u4E2D\u663E\u5F0F\u5199 form \u4E0E asset_slots\uFF1B\u4E0D\u8981\u4F9D\u8D56\u9ED8\u8BA4\u5F62\u6001\u6216\u69FD\u4F4D\u987A\u5E8F\u3002",
+    "15. \u540C\u4E00\u573A\u666F\u7684\u8FDE\u7EED\u955C\u5934\u4F18\u5148\u4FDD\u6301\u540C\u4E00\u5F62\u6001\u4E0E\u573A\u666F\u53C2\u8003\uFF1B\u9700\u8981\u8FDE\u7EED\u6027\u65F6\u4F18\u5148 relay / \u9996\u5E27\u63A5\u529B\u3002",
+    "16. \u6709 blocker \u7EA7 gaps \u65F6\u5148\u8865\u8D44\u4EA7 / \u4FEE workflow \u69FD\u4F4D\uFF0C\u4E0D\u8981\u7528\u300C\u6362\u4E00\u5F20\u56FE\u51D1\u300D\u7ED5\u8FC7\u3002",
+    "17. `story-map.json` \u53EA\u653E\u53D9\u4E8B\u6807\u6CE8\uFF1B\u751F\u6210\u51B3\u7B56\uFF08workflow / asset_slots / first_frame / prompt\uFF09\u53EA\u5199 shots.json\u3002",
     "",
     "## \u6807\u51C6\u987A\u5E8F",
     "",
@@ -1850,6 +1861,7 @@ function storyMd() {
     "\u2192 \u6BCF\u96C6 breakdown set",
     "\u2192 story asset add\uFF08\u53C2\u8003\u56FE / \u97F3\u9891\uFF0C\u663E\u5F0F set-reference\uFF09",
     "\u2192 \u6BCF\u96C6 shots set",
+    "\u2192 story map show\uFF08\u8BFB\u751F\u6210\u4E0A\u4E0B\u6587\uFF09\u2192 \u9009\u62E9 workflow / asset_slots / first_frame / prompt \u2192 \u66F4\u65B0 shots",
     "\u2192 workflow + bindings + <workflow>.assets.json",
     "\u2192 shot / retake / batch --episode",
     "\u2192 wrap --episode",
@@ -1872,6 +1884,9 @@ function storyMd() {
     "daoyan story asset add --owner scene:rain-city --id establishing --from ./city.png --set-reference --json",
     "daoyan story asset add --owner voice:lin-mo-default --id sample --from ./voice.wav --set-reference --json",
     "daoyan story shots set --episode ep01 --file ./ep01-shots.json --json",
+    "daoyan story shots show --episode ep01 --json",
+    "daoyan story map show --episode ep01 --json",
+    "daoyan story map build --episode ep01 --json",
     "daoyan story status --episode ep01 --json",
     "daoyan shot 01 --episode ep01 --json",
     "daoyan wrap --episode ep01 --json",
@@ -1924,6 +1939,31 @@ function storyMd() {
     "```",
     "",
     '\u5206\u955C\u53EF\u7528 asset_slots \u8986\u76D6\uFF1A`"hero": "lin-mo/night@front"`\uFF08owner@asset-id\uFF09\uFF1B`reference` \u8868\u793A\u4F7F\u7528\u663E\u5F0F\u4E3B\u53C2\u8003\u3002',
+    "",
+    "## \u751F\u6210\u4E0A\u4E0B\u6587\uFF08story map\uFF09",
+    "",
+    "`daoyan story map show --episode <id> --json` \u8FD4\u56DE AI \u505A\u751F\u6210\u51B3\u7B56\u6240\u9700\u7684\u4E0A\u4E0B\u6587\uFF1A",
+    "",
+    "- `events`\uFF1A\u6BCF\u955C\u65F6\u95F4\u3001\u573A\u666F\u3001\u89D2\u8272\u4E0E\u5F62\u6001\uFF1B",
+    "- `catalog`\uFF1A\u6BCF\u4E2A\u5F62\u6001 / \u573A\u666F / \u97F3\u8272\u7684\u5168\u90E8\u8D44\u4EA7\uFF08present / LFS / \u5C3A\u5BF8 / \u4E3B\u53C2\u8003\uFF09\uFF1B",
+    "- `generation.workflows`\uFF1A\u53EF\u9009 workflow\u3001bindings\u3001\u8D44\u4EA7\u69FD\u4F4D\u8981\u6C42\uFF1B",
+    "- `generation.events[].workflow`\uFF1A\u5F53\u524D\u6307\u6D3E\u4E0E\u9010\u69FD\u4F4D\u89E3\u6790\uFF1B",
+    "- `generation.events[].continuity`\uFF1A\u573A\u666F / \u5F62\u6001\u53D8\u5316\u3001relay\u3001anchor\uFF1B",
+    "- `generation.events[].render`\uFF1A\u6700\u65B0 run / \u4EA7\u7269 / \u5931\u8D25\uFF1B",
+    "- `generation.gaps`\uFF1A\u7F3A\u53C2\u8003\u56FE\u3001\u7F3A\u6587\u4EF6\u3001\u7F3A workflow\u3001\u69FD\u4F4D\u4E0D\u53EF\u89E3\u6790\u7B49\u3002",
+    "",
+    "\u63A8\u8350\u95ED\u73AF\uFF1A",
+    "",
+    "```bash",
+    "daoyan story map show --episode ep01 --json > context.json",
+    "daoyan story shots show --episode ep01 --json > shots.current.json",
+    "# AI \u57FA\u4E8E context + current shots \u4EA7\u51FA shots.next.json\uFF08workflow / asset_slots / first_frame / prompt\uFF09",
+    "daoyan story shots set --episode ep01 --file ./shots.next.json --json",
+    "daoyan story map show --episode ep01 --json",
+    "daoyan shot 01 02 --episode ep01 --json",
+    "```",
+    "",
+    "\u6CA1\u6709\u5019\u9009 workflow \u6EE1\u8DB3\u65F6\uFF1A\u7528 `workflow nodes` / `workflow node` \u67E5\u8282\u70B9\u5951\u7EA6\uFF0C`workflow apply` \u6539\u56FE\uFF0C\u8865 `.assets.json` \u69FD\u4F4D\uFF0C`workflow validate` \u901A\u8FC7\u540E\u518D\u5199\u56DE `shot.workflow`\u3002",
     "",
     "## \u6062\u590D",
     "",
@@ -8720,6 +8760,9 @@ function episodesRoot(root) {
 function episodeDir(root, episodeId) {
   return join14(root, EPISODES_DIR, episodeId);
 }
+function storyMapPath(root, episodeId) {
+  return join14(episodeDir(root, episodeId), STORY_MAP_FILE);
+}
 function storyEnabled(root) {
   return existsSync17(seriesPath(root));
 }
@@ -8837,7 +8880,7 @@ var init_paths = __esm({
 });
 
 // src/core/story/store.mts
-import { existsSync as existsSync18, readFileSync as readFileSync14 } from "fs";
+import { existsSync as existsSync18, readFileSync as readFileSync14, rmSync as rmSync10 } from "fs";
 import { join as join15 } from "path";
 function emptyCharactersFile() {
   return { version: 1, updated_at: nowIso(), characters: [] };
@@ -8923,6 +8966,9 @@ function loadBreakdown(root, episodeId) {
 function loadEpisodeShots(root, episodeId) {
   return readJsonIfExists(join15(episodeDir(root, episodeId), SHOTS_FILE));
 }
+function loadStoryMap(root, episodeId) {
+  return readJsonIfExists(storyMapPath(root, episodeId));
+}
 function saveCharacters(root, doc) {
   writeJsonAtomic(charactersPath(root), { ...doc, version: 1, updated_at: nowIso() });
 }
@@ -8940,6 +8986,15 @@ function saveBreakdown(root, episodeId, doc) {
 }
 function saveEpisodeShots(root, episodeId, shots) {
   writeJsonAtomic(join15(episodeDir(root, episodeId), SHOTS_FILE), shots);
+}
+function saveStoryMap(root, episodeId, doc) {
+  writeJsonAtomic(storyMapPath(root, episodeId), doc);
+}
+function removeStoryMap(root, episodeId) {
+  const file = storyMapPath(root, episodeId);
+  if (!existsSync18(file)) return false;
+  rmSync10(file, { force: true });
+  return true;
 }
 function normalizeScriptText(text) {
   return text.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
@@ -9258,8 +9313,13 @@ var init_store3 = __esm({
 });
 
 // src/core/story/assets.mts
-import { existsSync as existsSync20, readFileSync as readFileSync16, renameSync as renameSync4, rmSync as rmSync10, statSync as statSync4, writeFileSync as writeFileSync7 } from "fs";
+import { existsSync as existsSync20, readFileSync as readFileSync16, renameSync as renameSync4, rmSync as rmSync11, statSync as statSync4, writeFileSync as writeFileSync7 } from "fs";
 import { dirname as dirname9, isAbsolute as isAbsolute4, join as join17 } from "path";
+function storyMediaUrl(path) {
+  const prefix = `${STORY_ASSETS_DIR}/`;
+  const rel = path.startsWith(prefix) ? path.slice(prefix.length) : path;
+  return `${STORY_MEDIA_PREFIX}/${rel.split("/").map(encodeURIComponent).join("/")}`;
+}
 function parseAssetOwner(owner, form) {
   const colon = owner.indexOf(":");
   if (colon <= 0 || colon === owner.length - 1) {
@@ -9593,7 +9653,7 @@ function removeFromList(root, list, holder, assetId, force) {
     });
   }
   const abs = join17(root, asset.path);
-  if (existsSync20(abs)) rmSync10(abs, { force: true });
+  if (existsSync20(abs)) rmSync11(abs, { force: true });
   const index = list.findIndex((a) => a.id === assetId);
   if (index >= 0) list.splice(index, 1);
   if (holder.reference_asset === assetId) holder.reference_asset = null;
@@ -9644,7 +9704,7 @@ function listAssets(root) {
   }
   return out;
 }
-var MAX_ASSET_BYTES, LFS_POINTER_PREFIX, MAGIC_READ_BYTES;
+var MAX_ASSET_BYTES, LFS_POINTER_PREFIX, MAGIC_READ_BYTES, STORY_MEDIA_PREFIX;
 var init_assets = __esm({
   "src/core/story/assets.mts"() {
     "use strict";
@@ -9657,6 +9717,7 @@ var init_assets = __esm({
     MAX_ASSET_BYTES = 200 * 1024 * 1024;
     LFS_POINTER_PREFIX = "version https://git-lfs.github.com/spec/v1";
     MAGIC_READ_BYTES = 64;
+    STORY_MEDIA_PREFIX = "/media/story";
   }
 });
 
@@ -9853,18 +9914,20 @@ function resolveSceneAsset(root, slot, shot) {
 }
 function dialogueVoices(root, shot) {
   const characters = loadCharacters(root);
-  const out = [];
+  const voices = [];
+  const ambiguous = [];
   for (const line of shot.dialogue ?? []) {
     let voice = line.voice;
     if (voice === void 0 || voice === "") {
       const character = characters.characters.find((c) => c.id === line.character);
-      const voices = character?.voice_ids ?? [];
-      if (voices.length !== 1) continue;
-      voice = voices[0];
+      const list = character?.voice_ids ?? [];
+      if (list.length > 1 && !ambiguous.includes(line.character)) ambiguous.push(line.character);
+      if (list.length !== 1) continue;
+      voice = list[0];
     }
-    if (voice !== void 0 && voice !== "" && !out.includes(voice)) out.push(voice);
+    if (voice !== void 0 && voice !== "" && !voices.includes(voice)) voices.push(voice);
   }
-  return out;
+  return { voices, ambiguous };
 }
 function resolveVoiceAsset(root, slot, owner, explicitAsset) {
   const voices = loadVoices(root);
@@ -9876,38 +9939,95 @@ function resolveVoiceAsset(root, slot, owner, explicitAsset) {
   const asset = selectAsset(voice.assets, voice.reference_asset, selector, `\u97F3\u8272 ${owner}`);
   return { slot, asset, owner };
 }
-function resolveWorkflowAssets(opts) {
-  const file = loadWorkflowAssets(opts.workflowAbs);
-  if (file === null) return { uploads: [], records: [] };
-  const loaded = loadGraphFile(opts.workflowAbs, opts.workflowAbs);
-  for (const slot of file.slots) {
-    const node = slot.target.slice(0, slot.target.indexOf("."));
-    if (loaded.graph[node] === void 0) {
-      throw new DaoyanCliError({
-        code: "story_gate_failed",
-        message: `\u8D44\u4EA7\u69FD\u4F4D ${slot.name} \u6307\u5411\u4E0D\u5B58\u5728\u7684\u8282\u70B9 ${node}`,
-        details: { blockers: [{ code: "workflow_unresolved", message: `\u69FD\u4F4D ${slot.name} \u8282\u70B9\u4E0D\u5B58\u5728` }] }
-      });
-    }
+function gapFromError(err, slot, owner) {
+  return {
+    code: err.code,
+    error_code: err.code,
+    severity: "blocker",
+    slot,
+    owner,
+    message: err.message,
+    hint: err.hint,
+    ...err.details !== void 0 ? { details: err.details } : {}
+  };
+}
+function planWorkflowAssets(opts) {
+  const empty = { uploads: [], records: [], slots: [], gaps: [] };
+  let file;
+  try {
+    file = loadWorkflowAssets(opts.workflowAbs);
+  } catch (e) {
+    const err = asCliError(e, "story_invalid");
+    return { ...empty, gaps: [gapFromError(err, null, null)] };
   }
-  const characters = loadCharacters(opts.root);
-  let characterIndex = 0;
-  const voices = dialogueVoices(opts.root, opts.shot);
-  let voiceIndex = 0;
+  if (file === null) return empty;
+  let loaded;
+  try {
+    loaded = loadGraphFile(opts.workflowAbs, opts.workflowAbs);
+  } catch (e) {
+    const err = asCliError(e, "workflow_invalid");
+    return { ...empty, gaps: [gapFromError(err, null, null)] };
+  }
+  let characters;
+  try {
+    characters = loadCharacters(opts.root);
+  } catch (e) {
+    const err = asCliError(e, "story_invalid");
+    return { ...empty, gaps: [gapFromError(err, null, null)] };
+  }
+  let dialogue;
+  try {
+    dialogue = dialogueVoices(opts.root, opts.shot);
+  } catch (e) {
+    const err = asCliError(e, "story_invalid");
+    return { ...empty, gaps: [gapFromError(err, null, null)] };
+  }
   const uploads = [];
   const records = [];
+  const slots = [];
+  const gaps = [];
+  let characterIndex = 0;
+  let voiceIndex = 0;
+  const cast = opts.shot.characters ?? [];
   for (const slot of file.slots) {
+    const required = slot.required !== false;
+    const node = slot.target.slice(0, slot.target.indexOf("."));
+    if (loaded.graph[node] === void 0) {
+      gaps.push({
+        code: "workflow_unresolved",
+        error_code: "story_gate_failed",
+        severity: "blocker",
+        slot: slot.name,
+        owner: null,
+        message: `\u8D44\u4EA7\u69FD\u4F4D ${slot.name} \u6307\u5411\u4E0D\u5B58\u5728\u7684\u8282\u70B9 ${node}`,
+        hint: "\u4FEE\u6B63 workflows/<name>.assets.json \u7684 target\uFF0C\u6216\u5148\u6DFB\u52A0\u8282\u70B9\u3002",
+        details: { blockers: [{ code: "workflow_unresolved", message: `\u69FD\u4F4D ${slot.name} \u8282\u70B9\u4E0D\u5B58\u5728` }] }
+      });
+      slots.push({
+        slot: slot.name,
+        kind: slot.kind,
+        required,
+        target: slot.target,
+        owner: null,
+        asset_id: null,
+        asset: null,
+        mapping_source: slot.kind === "character" ? "cast_order" : slot.kind === "scene" ? "scene" : "dialogue_order",
+        status: "blocker"
+      });
+      continue;
+    }
     const mapping = opts.shot.asset_slots?.[slot.name];
-    let resolved = null;
+    let owner = null;
+    let explicitAsset = null;
+    let mappingSource;
     if (slot.kind === "character") {
-      let owner = null;
-      let explicitAsset = null;
       if (mapping !== void 0 && mapping !== "") {
         const parsed = parseSlotMapping(mapping);
         owner = parsed.owner;
         explicitAsset = parsed.asset;
+        mappingSource = "explicit";
       } else {
-        const cast = opts.shot.characters ?? [];
+        mappingSource = "cast_order";
         const ref = cast[characterIndex];
         characterIndex++;
         const parsed = castRefOf(ref);
@@ -9915,55 +10035,149 @@ function resolveWorkflowAssets(opts) {
           const character = characters.characters.find((c) => c.id === parsed.id);
           owner = `${parsed.id}/${parsed.form ?? character?.default_form ?? ""}`;
         }
+        if (cast.length > 1) {
+          gaps.push({
+            code: "slot_ambiguous",
+            error_code: "story_gate_failed",
+            severity: "warning",
+            slot: slot.name,
+            owner,
+            message: `\u89D2\u8272\u69FD\u4F4D ${slot.name} \u6309\u51FA\u573A\u987A\u5E8F\u9690\u5F0F\u5339\u914D\uFF0C\u5F53\u524D\u5019\u9009 ${cast.length} \u4E2A`,
+            hint: `\u5728 shots.json \u7684 asset_slots \u4E2D\u663E\u5F0F\u6307\u5B9A ${slot.name}\u3002`
+          });
+        }
       }
-      if (owner === null || owner === "") {
-        if (slot.required === false) continue;
-        throw new DaoyanCliError({
-          code: "story_gate_failed",
-          message: `\u69FD\u4F4D ${slot.name} \u6CA1\u6709\u53EF\u7528\u7684\u89D2\u8272`
-        });
-      }
-      resolved = resolveCharacterAsset(opts.root, slot, owner, explicitAsset, characters, opts.shot);
     } else if (slot.kind === "scene") {
-      resolved = resolveSceneAsset(opts.root, slot, opts.shot);
+      owner = parseSceneRef(opts.shot.scene);
+      const explicit = opts.shot.scene_asset;
+      explicitAsset = typeof explicit === "string" && explicit !== "" ? explicit : null;
+      mappingSource = explicitAsset !== null ? "explicit" : "scene";
     } else {
-      let owner = null;
-      let explicitAsset = null;
       if (mapping !== void 0 && mapping !== "") {
         const parsed = parseSlotMapping(mapping);
         owner = parsed.owner;
         explicitAsset = parsed.asset;
+        mappingSource = "explicit";
       } else {
-        owner = voices[voiceIndex] ?? null;
+        mappingSource = "dialogue_order";
+        owner = dialogue.voices[voiceIndex] ?? null;
         voiceIndex++;
+        if (dialogue.voices.length > 1) {
+          gaps.push({
+            code: "slot_ambiguous",
+            error_code: "story_gate_failed",
+            severity: "warning",
+            slot: slot.name,
+            owner,
+            message: `\u97F3\u8272\u69FD\u4F4D ${slot.name} \u6309\u53F0\u8BCD\u987A\u5E8F\u9690\u5F0F\u5339\u914D\uFF0C\u5F53\u524D\u5019\u9009 ${dialogue.voices.length} \u4E2A`,
+            hint: `\u5728 shots.json \u7684 asset_slots \u4E2D\u663E\u5F0F\u6307\u5B9A ${slot.name}\u3002`
+          });
+        }
       }
-      if (owner === null || owner === "") {
-        if (slot.required === false) continue;
-        throw new DaoyanCliError({
-          code: "story_gate_failed",
-          message: `\u69FD\u4F4D ${slot.name} \u6CA1\u6709\u53EF\u7528\u7684\u97F3\u8272`
-        });
-      }
-      resolved = resolveVoiceAsset(opts.root, slot, owner, explicitAsset);
     }
-    const abs = ensureAssetFile(opts.root, resolved.asset, `\u69FD\u4F4D ${slot.name}`);
-    records.push({
-      slot: slot.name,
-      kind: slot.kind,
-      owner: resolved.owner,
-      asset_id: resolved.asset.id,
-      path: resolved.asset.path,
-      sha256: resolved.asset.sha256,
-      bytes: resolved.asset.bytes
-    });
-    uploads.push({
-      logical: `asset:${slot.name}`,
-      source: abs,
-      desiredName: `${slot.name}_${resolved.asset.id}${extOf(resolved.asset.path)}`,
-      target: splitTarget(slot.target)
+    if ((owner === null || owner === "") && !required) {
+      slots.push({
+        slot: slot.name,
+        kind: slot.kind,
+        required,
+        target: slot.target,
+        owner: null,
+        asset_id: null,
+        asset: null,
+        mapping_source: mappingSource,
+        status: "optional"
+      });
+      continue;
+    }
+    try {
+      let resolved;
+      if (slot.kind === "character") {
+        if (owner === null || owner === "") {
+          throw new DaoyanCliError({
+            code: "story_gate_failed",
+            message: `\u69FD\u4F4D ${slot.name} \u6CA1\u6709\u53EF\u7528\u7684\u89D2\u8272`
+          });
+        }
+        resolved = resolveCharacterAsset(opts.root, slot, owner, explicitAsset, characters, opts.shot);
+      } else if (slot.kind === "scene") {
+        resolved = resolveSceneAsset(opts.root, slot, opts.shot);
+      } else {
+        if (owner === null || owner === "") {
+          throw new DaoyanCliError({
+            code: "story_gate_failed",
+            message: `\u69FD\u4F4D ${slot.name} \u6CA1\u6709\u53EF\u7528\u7684\u97F3\u8272`
+          });
+        }
+        resolved = resolveVoiceAsset(opts.root, slot, owner, explicitAsset);
+      }
+      const abs = ensureAssetFile(opts.root, resolved.asset, `\u69FD\u4F4D ${slot.name}`);
+      records.push({
+        slot: slot.name,
+        kind: slot.kind,
+        owner: resolved.owner,
+        asset_id: resolved.asset.id,
+        path: resolved.asset.path,
+        sha256: resolved.asset.sha256,
+        bytes: resolved.asset.bytes
+      });
+      uploads.push({
+        logical: `asset:${slot.name}`,
+        source: abs,
+        desiredName: `${slot.name}_${resolved.asset.id}${extOf(resolved.asset.path)}`,
+        target: splitTarget(slot.target)
+      });
+      slots.push({
+        slot: slot.name,
+        kind: slot.kind,
+        required,
+        target: slot.target,
+        owner: resolved.owner,
+        asset_id: resolved.asset.id,
+        asset: resolved.asset,
+        mapping_source: mappingSource,
+        status: "ready"
+      });
+    } catch (e) {
+      const err = asCliError(e, "story_gate_failed");
+      gaps.push(gapFromError(err, slot.name, owner));
+      slots.push({
+        slot: slot.name,
+        kind: slot.kind,
+        required,
+        target: slot.target,
+        owner,
+        asset_id: null,
+        asset: null,
+        mapping_source: mappingSource,
+        status: "blocker"
+      });
+    }
+  }
+  for (const characterId of dialogue.ambiguous) {
+    gaps.push({
+      code: "voice_ambiguous",
+      error_code: "story_gate_failed",
+      severity: "warning",
+      slot: null,
+      owner: characterId,
+      message: `\u89D2\u8272 ${characterId} \u6709\u591A\u4E2A\u97F3\u8272\uFF0C\u4F46\u53F0\u8BCD\u672A\u6307\u5B9A voice`,
+      hint: `\u5728 shots.json \u7684 dialogue[] \u4E2D\u4E3A ${characterId} \u663E\u5F0F\u5199 voice\u3002`
     });
   }
-  return { uploads, records };
+  return { uploads, records, slots, gaps };
+}
+function resolveWorkflowAssets(opts) {
+  const plan = planWorkflowAssets(opts);
+  const blocker2 = plan.gaps.find((gap) => gap.severity === "blocker");
+  if (blocker2 !== void 0) {
+    throw new DaoyanCliError({
+      code: blocker2.error_code,
+      message: blocker2.message,
+      hint: blocker2.hint,
+      ...blocker2.details !== void 0 ? { details: blocker2.details } : {}
+    });
+  }
+  return { uploads: plan.uploads, records: plan.records };
 }
 function validateWorkflowAssetsGraph(file, graph, label) {
   const issues = [];
@@ -16214,6 +16428,76 @@ var init_skill2 = __esm({
   }
 });
 
+// src/core/web/addresses.mts
+import { networkInterfaces as osNetworkInterfaces } from "os";
+function normalizeHost(host) {
+  const trimmed = host.trim();
+  if (trimmed.startsWith("[") && trimmed.endsWith("]")) return trimmed.slice(1, -1);
+  return trimmed;
+}
+function isLoopbackHost(host) {
+  const normalized = normalizeHost(host).toLowerCase();
+  return normalized === LOCALHOST || normalized === LOOPBACK_IPV4 || normalized === LOOPBACK_IPV6;
+}
+function isWildcardHost(host) {
+  return host === WILDCARD_IPV4 || host === WILDCARD_IPV6;
+}
+function isLinkLocalIpv6(address) {
+  const first = Number.parseInt(address.split(":")[0] ?? "", 16);
+  if (!Number.isFinite(first)) return false;
+  return (first & LINK_LOCAL_IPV6_MASK) === LINK_LOCAL_IPV6_PREFIX;
+}
+function toUrl(host, port) {
+  return host.includes(":") ? `http://[${host}]:${port}` : `http://${host}:${port}`;
+}
+function pushUnique(list, url) {
+  if (!list.includes(url)) list.push(url);
+}
+function buildAccessUrls(options) {
+  const host = normalizeHost(options.host);
+  const port = options.port;
+  let localHost;
+  if (host === WILDCARD_IPV4) localHost = LOOPBACK_IPV4;
+  else if (host === WILDCARD_IPV6) localHost = LOOPBACK_IPV6;
+  else localHost = host;
+  const local = [toUrl(localHost, port)];
+  if (!isWildcardHost(host)) {
+    if (isLoopbackHost(host)) return { local, network: [] };
+    return { local: [], network: [toUrl(host, port)] };
+  }
+  const interfaces = options.interfaces ?? osNetworkInterfaces();
+  const ipv4 = [];
+  const ipv6 = [];
+  for (const list of Object.values(interfaces)) {
+    if (list === void 0) continue;
+    for (const info of list) {
+      if (info.internal) continue;
+      if (info.family === "IPv4") {
+        pushUnique(ipv4, toUrl(info.address, port));
+        continue;
+      }
+      if (host === WILDCARD_IPV4) continue;
+      if (isLinkLocalIpv6(info.address)) continue;
+      pushUnique(ipv6, toUrl(info.address, port));
+    }
+  }
+  const network = [...ipv4, ...ipv6];
+  return { local, network };
+}
+var WILDCARD_IPV4, WILDCARD_IPV6, LOCALHOST, LOOPBACK_IPV4, LOOPBACK_IPV6, LINK_LOCAL_IPV6_MASK, LINK_LOCAL_IPV6_PREFIX;
+var init_addresses = __esm({
+  "src/core/web/addresses.mts"() {
+    "use strict";
+    WILDCARD_IPV4 = "0.0.0.0";
+    WILDCARD_IPV6 = "::";
+    LOCALHOST = "localhost";
+    LOOPBACK_IPV4 = "127.0.0.1";
+    LOOPBACK_IPV6 = "::1";
+    LINK_LOCAL_IPV6_MASK = 65472;
+    LINK_LOCAL_IPV6_PREFIX = 65152;
+  }
+});
+
 // src/core/web/data.mts
 import { existsSync as existsSync34, readdirSync as readdirSync12, readFileSync as readFileSync24, statSync as statSync9 } from "fs";
 import { basename as basename10, join as join32, resolve as resolve8, sep as sep2 } from "path";
@@ -17156,15 +17440,42 @@ var init_media = __esm({
   }
 });
 
-// src/core/web/story-data.mts
-import { existsSync as existsSync36, statSync as statSync11 } from "fs";
+// src/core/story/map.mts
+import { existsSync as existsSync36, readFileSync as readFileSync25, readdirSync as readdirSync13, statSync as statSync11 } from "fs";
 import { join as join34 } from "path";
-function storyMediaUrl(path) {
-  const prefix = "story/assets/";
-  const rel = path.startsWith(prefix) ? path.slice(prefix.length) : path;
-  return `${STORY_MEDIA_PREFIX}/${rel.split("/").map(encodeURIComponent).join("/")}`;
+function hashIfExists(file) {
+  return existsSync36(file) ? sha256File(file) : "";
 }
-function assetView(root, asset) {
+function projectOf(root) {
+  const file = join34(root, PROJECT_FILE);
+  if (!existsSync36(file)) return null;
+  try {
+    return JSON.parse(readFileSync25(file, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function recordOf3(value) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  return value;
+}
+function arrayOf2(value) {
+  if (value === null || value === void 0) return [];
+  return Array.isArray(value) ? value : [value];
+}
+function stringOf3(value) {
+  return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
+}
+function outputKind(name) {
+  const ext = name.slice(name.lastIndexOf(".")).toLowerCase();
+  if (VIDEO_EXTENSIONS2.has(ext)) return "video";
+  if (IMAGE_EXTENSIONS2.has(ext)) return "image";
+  if (AUDIO_EXTENSIONS2.has(ext)) return "audio";
+  if (JSON_EXTENSIONS2.has(ext)) return "json";
+  if (TEXT_EXTENSIONS2.has(ext)) return "text";
+  return "other";
+}
+function assetRefOf(root, asset) {
   const abs = join34(root, asset.path);
   const present = existsSync36(abs);
   let bytes = asset.bytes;
@@ -17172,6 +17483,1449 @@ function assetView(root, asset) {
   if (present) {
     try {
       const stat = statSync11(abs);
+      bytes = stat.size;
+      lfsPointer = isLfsPointerFile(abs);
+    } catch {
+    }
+  }
+  return {
+    id: asset.id,
+    role: asset.role ?? null,
+    path: asset.path,
+    media_url: storyMediaUrl(asset.path),
+    present,
+    lfs_pointer: lfsPointer,
+    width: asset.width ?? null,
+    height: asset.height ?? null,
+    content_type: asset.content_type,
+    bytes
+  };
+}
+function referenceAssetOf(root, assets, referenceId) {
+  if (referenceId === void 0 || referenceId === null || referenceId === "") return null;
+  const asset = assets.find((item) => item.id === referenceId);
+  return asset !== void 0 ? assetRefOf(root, asset) : null;
+}
+function parseCastRef2(value) {
+  if (typeof value === "string") {
+    const slash = value.indexOf("/");
+    if (slash > 0) return { id: value.slice(0, slash), name: null, form: value.slice(slash + 1) };
+    return { id: value, name: null, form: null };
+  }
+  const record = recordOf3(value);
+  if (record === null) return null;
+  const id = stringOf3(record.id);
+  const name = stringOf3(record.name);
+  const form = stringOf3(record.form);
+  if (id === null && name === null) return null;
+  return { id, name, form };
+}
+function matchCharacter(characters, ref) {
+  if (ref.id !== null) {
+    const byId = characters.characters.find((item) => item.id === ref.id);
+    if (byId !== void 0) return byId;
+  }
+  if (ref.name !== null) {
+    const byName = characters.characters.find(
+      (item) => item.name === ref.name || (item.aliases ?? []).includes(ref.name)
+    );
+    if (byName !== void 0) return byName;
+  }
+  return null;
+}
+function resolveCast(root, value, characters, shotId, gaps) {
+  const ref = parseCastRef2(value);
+  if (ref === null) return null;
+  const character = matchCharacter(characters, ref);
+  if (character === null) {
+    const id = ref.id ?? ref.name ?? "unknown";
+    gaps.push({
+      code: "unknown_character",
+      severity: BLOCKER,
+      shot_id: shotId,
+      ref: `character:${id}`,
+      message: `\u955C\u5934 ${shotId} \u5F15\u7528\u4E86\u4E0D\u5B58\u5728\u7684\u89D2\u8272 ${id}`,
+      hint: "\u4FEE\u6B63 shots.json\uFF0C\u6216\u5728 story/characters.json \u4E2D\u8865\u89D2\u8272\u3002"
+    });
+    return {
+      id,
+      name: ref.name ?? id,
+      form: ref.form ?? "default",
+      form_name: ref.form ?? "default",
+      form_source: "unknown",
+      reference_asset_id: null,
+      reference_present: false,
+      assets: [],
+      unknown: true
+    };
+  }
+  const explicitForm = ref.form;
+  const defaultForm = character.forms.find((item) => item.id === character.default_form) ?? character.forms[0];
+  let form;
+  let formSource;
+  if (explicitForm !== null) {
+    form = character.forms.find((item) => item.id === explicitForm) ?? null;
+    if (form === null) {
+      form = defaultForm ?? null;
+      formSource = "fallback";
+      gaps.push({
+        code: "unknown_form",
+        severity: WARNING,
+        shot_id: shotId,
+        ref: `character:${character.id}/form:${explicitForm}`,
+        message: `\u89D2\u8272 ${character.id} \u6CA1\u6709\u5F62\u6001 ${explicitForm}\uFF0C\u5DF2\u56DE\u9000\u9ED8\u8BA4\u5F62\u6001`,
+        hint: "\u4FEE\u6B63 shots.json \u7684\u5F62\u6001\u5F15\u7528\uFF0C\u6216\u8865\u5168\u5C40\u5F62\u6001\u3002"
+      });
+    } else {
+      formSource = "explicit";
+    }
+  } else {
+    form = defaultForm ?? null;
+    formSource = "default";
+    if (character.forms.length > 1) {
+      gaps.push({
+        code: "form_ambiguous",
+        severity: WARNING,
+        shot_id: shotId,
+        ref: `character:${character.id}`,
+        message: `\u955C\u5934 ${shotId} \u672A\u6307\u5B9A ${character.id} \u7684\u5F62\u6001\uFF0C\u5DF2\u4F7F\u7528\u9ED8\u8BA4\u5F62\u6001 ${character.default_form}`,
+        hint: "\u5728 shots.json \u4E2D\u663E\u5F0F\u5199 form\u3002"
+      });
+    }
+  }
+  const assets = (form?.assets ?? []).map((asset) => assetRefOf(root, asset));
+  const reference = referenceAssetOf(root, form?.assets ?? [], form?.reference_asset);
+  return {
+    id: character.id,
+    name: character.name,
+    form: form?.id ?? "",
+    form_name: form?.name ?? form?.id ?? "",
+    form_source: formSource,
+    reference_asset_id: reference?.id ?? null,
+    reference_present: reference !== null && reference.present && !reference.lfs_pointer,
+    assets,
+    unknown: false
+  };
+}
+function parseSceneRef2(value) {
+  if (typeof value === "string") return value.trim() === "" ? null : value.trim();
+  const record = recordOf3(value);
+  if (record === null) return null;
+  return stringOf3(record.id) ?? stringOf3(record.name);
+}
+function resolveScene(root, value, shots, shotId, gaps) {
+  const ref = parseSceneRef2(value);
+  if (ref === null) return null;
+  const scenes = loadScenes(root);
+  const scene = scenes.scenes.find((item) => item.id === ref || item.name === ref);
+  if (scene === void 0) {
+    gaps.push({
+      code: "unknown_scene",
+      severity: WARNING,
+      shot_id: shotId,
+      ref: `scene:${ref}`,
+      message: `\u955C\u5934 ${shotId} \u5F15\u7528\u4E86\u4E0D\u5B58\u5728\u7684\u573A\u666F ${ref}`,
+      hint: "\u4FEE\u6B63 shots.json\uFF0C\u6216\u5728 story/scenes.json \u4E2D\u8865\u573A\u666F\u3002"
+    });
+    return {
+      id: ref,
+      name: ref,
+      reference_asset_id: null,
+      reference_present: false,
+      assets: [],
+      unknown: true,
+      time_of_day: null,
+      interior_exterior: null
+    };
+  }
+  const assets = scene.assets.map((asset) => assetRefOf(root, asset));
+  const reference = referenceAssetOf(root, scene.assets, scene.reference_asset);
+  return {
+    id: scene.id,
+    name: scene.name,
+    reference_asset_id: reference?.id ?? null,
+    reference_present: reference !== null && reference.present && !reference.lfs_pointer,
+    assets,
+    unknown: false,
+    time_of_day: scene.time_of_day ?? null,
+    interior_exterior: scene.interior_exterior ?? null
+  };
+}
+function resolveVoices(root, shot, characters, shotId, gaps) {
+  const voicesFile = loadVoices(root);
+  const out = [];
+  for (const line of shot.dialogue ?? []) {
+    const character = characters.characters.find((item) => item.id === line.character);
+    let voiceId = line.voice;
+    if (voiceId === void 0 || voiceId === "") {
+      const ids = character?.voice_ids ?? [];
+      if (ids.length > 1) {
+        gaps.push({
+          code: "voice_ambiguous",
+          severity: WARNING,
+          shot_id: shotId,
+          ref: `character:${line.character}`,
+          message: `\u89D2\u8272 ${line.character} \u6709\u591A\u4E2A\u97F3\u8272\uFF0C\u4F46\u53F0\u8BCD\u672A\u6307\u5B9A voice`,
+          hint: "\u5728 shots.json \u7684 dialogue[] \u4E2D\u663E\u5F0F\u5199 voice\u3002"
+        });
+        continue;
+      }
+      voiceId = ids[0];
+    }
+    if (voiceId === void 0 || voiceId === "") continue;
+    if (out.some((item) => item.voice_id === voiceId)) continue;
+    const voice = voicesFile.voices.find((item) => item.id === voiceId);
+    if (voice === void 0) {
+      gaps.push({
+        code: "unknown_voice",
+        severity: WARNING,
+        shot_id: shotId,
+        ref: `voice:${voiceId}`,
+        message: `\u955C\u5934 ${shotId} \u5F15\u7528\u4E86\u4E0D\u5B58\u5728\u7684\u97F3\u8272 ${voiceId}`,
+        hint: "\u4FEE\u6B63 shots.json \u7684 dialogue\uFF0C\u6216\u8865\u5168\u5C40\u97F3\u8272\u3002"
+      });
+      continue;
+    }
+    const reference = referenceAssetOf(root, voice.assets, voice.reference_asset);
+    out.push({
+      character_id: line.character,
+      voice_id: voice.id,
+      mode: voice.mode,
+      reference_asset_id: reference?.id ?? null,
+      reference_present: reference !== null && reference.present && !reference.lfs_pointer,
+      assets: voice.assets.map((asset) => assetRefOf(root, asset))
+    });
+  }
+  return out;
+}
+function castView(cast) {
+  return {
+    id: cast.id,
+    name: cast.name,
+    form: cast.form,
+    form_name: cast.form_name,
+    form_source: cast.form_source,
+    reference_asset_id: cast.reference_asset_id,
+    reference_present: cast.reference_present,
+    asset_ids: cast.assets.map((asset) => asset.id)
+  };
+}
+function sceneView(scene) {
+  if (scene === null) return null;
+  return {
+    id: scene.id,
+    name: scene.name,
+    reference_asset_id: scene.reference_asset_id,
+    reference_present: scene.reference_present,
+    asset_ids: scene.assets.map((asset) => asset.id)
+  };
+}
+function voiceView(voice) {
+  return {
+    character_id: voice.character_id,
+    voice_id: voice.voice_id,
+    mode: voice.mode,
+    reference_asset_id: voice.reference_asset_id,
+    reference_present: voice.reference_present
+  };
+}
+function readStoryMapAnnotations(root, episodeId) {
+  const file = storyMapPath(root, episodeId);
+  if (!existsSync36(file)) return { doc: null, warnings: [] };
+  let raw;
+  try {
+    raw = JSON.parse(readFileSync25(file, "utf8"));
+  } catch (e) {
+    return {
+      doc: null,
+      warnings: [
+        {
+          code: "story_map_invalid",
+          severity: WARNING,
+          shot_id: null,
+          ref: "story-map.json",
+          message: `story-map.json \u4E0D\u662F\u5408\u6CD5 JSON\uFF1A${e instanceof Error ? e.message : String(e)}`,
+          hint: "\u4FEE\u6B63\u6587\u4EF6\uFF0C\u6216\u5220\u9664\u5B83\u56DE\u5230\u7EAF\u81EA\u52A8\u63A8\u5BFC\u3002"
+        }
+      ]
+    };
+  }
+  const record = recordOf3(raw);
+  if (record === null) {
+    return {
+      doc: null,
+      warnings: [
+        {
+          code: "story_map_invalid",
+          severity: WARNING,
+          shot_id: null,
+          ref: "story-map.json",
+          message: "story-map.json \u5FC5\u987B\u662F\u5BF9\u8C61",
+          hint: "\u4FEE\u6B63\u6587\u4EF6\uFF0C\u6216\u5220\u9664\u5B83\u56DE\u5230\u7EAF\u81EA\u52A8\u63A8\u5BFC\u3002"
+        }
+      ]
+    };
+  }
+  if (record.version !== 1 || record.episode_id !== episodeId) {
+    return {
+      doc: null,
+      warnings: [
+        {
+          code: "story_map_invalid",
+          severity: WARNING,
+          shot_id: null,
+          ref: "story-map.json",
+          message: "story-map.json \u7684 version / episode_id \u4E0D\u5339\u914D",
+          hint: "\u91CD\u65B0\u6267\u884C story map build\uFF0C\u6216\u4FEE\u6B63\u6587\u4EF6\u3002"
+        }
+      ]
+    };
+  }
+  const warnings = [];
+  const events = [];
+  for (const item of arrayOf2(record.events)) {
+    const event = recordOf3(item);
+    const shotId = event !== null ? stringOf3(event.shot_id) : null;
+    if (event === null || shotId === null) {
+      warnings.push({
+        code: "story_map_event_invalid",
+        severity: WARNING,
+        shot_id: null,
+        ref: "story-map.json",
+        message: "\u5FFD\u7565\u7F3A\u5C11 shot_id \u7684\u4E8B\u4EF6\u6807\u6CE8",
+        hint: "\u6BCF\u4E2A\u4E8B\u4EF6\u5FC5\u987B\u5305\u542B shot_id\u3002"
+      });
+      continue;
+    }
+    events.push(narrativeEventOf({ ...event, shot_id: shotId }));
+  }
+  const relations = [];
+  for (const item of arrayOf2(record.relations)) {
+    const relation = recordOf3(item);
+    const from = relation !== null ? stringOf3(relation.from) : null;
+    const to = relation !== null ? stringOf3(relation.to) : null;
+    const label = relation !== null ? stringOf3(relation.label) : null;
+    if (relation === null || from === null || to === null || label === null) {
+      warnings.push({
+        code: "story_map_relation_invalid",
+        severity: WARNING,
+        shot_id: null,
+        ref: "story-map.json",
+        message: "\u5FFD\u7565\u7F3A\u5C11 from / to / label \u7684\u5173\u7CFB\u6807\u6CE8",
+        hint: "\u5173\u7CFB\u5FC5\u987B\u5305\u542B from / to / label\u3002"
+      });
+      continue;
+    }
+    relations.push({
+      ...relation,
+      from,
+      to,
+      label
+    });
+  }
+  return {
+    doc: {
+      ...record,
+      version: 1,
+      episode_id: episodeId,
+      events,
+      relations
+    },
+    warnings
+  };
+}
+function storyMapSource(root, episodeId, script) {
+  return {
+    script_revision: script.revision,
+    script_sha256: script.sha256,
+    breakdown_sha256: hashIfExists(join34(episodeDir(root, episodeId), BREAKDOWN_FILE)),
+    shots_sha256: hashIfExists(join34(episodeDir(root, episodeId), SHOTS_FILE))
+  };
+}
+function importanceOf(index, previousSceneId, sceneId, cast, dialogueCount) {
+  if (index === 0 || sceneId !== previousSceneId) return "major";
+  if (cast.length === 0 && dialogueCount === 0) return "minor";
+  return "normal";
+}
+function buildGraph(events) {
+  const characters = /* @__PURE__ */ new Map();
+  const scenes = /* @__PURE__ */ new Map();
+  const characterSceneEdges = /* @__PURE__ */ new Map();
+  const formSceneEdges = /* @__PURE__ */ new Map();
+  const cooccurrenceEdges = /* @__PURE__ */ new Map();
+  for (const event of events) {
+    const scene = event.scene;
+    const duration = event.duration_seconds ?? 0;
+    if (scene !== null) {
+      const sceneNode = scenes.get(scene.id) ?? {
+        id: scene.id,
+        name: scene.name,
+        time_of_day: null,
+        interior_exterior: null,
+        event_count: 0,
+        duration_seconds: 0,
+        character_ids: []
+      };
+      sceneNode.event_count = Number(sceneNode.event_count) + 1;
+      sceneNode.duration_seconds = Number(sceneNode.duration_seconds) + duration;
+      scenes.set(scene.id, sceneNode);
+    }
+    const pairs = /* @__PURE__ */ new Set();
+    for (const character of event.characters) {
+      const characterNode = characters.get(character.id) ?? {
+        id: character.id,
+        name: character.name,
+        role: null,
+        event_count: 0,
+        duration_seconds: 0,
+        scene_ids: [],
+        forms: []
+      };
+      characterNode.event_count = Number(characterNode.event_count) + 1;
+      characterNode.duration_seconds = Number(characterNode.duration_seconds) + duration;
+      if (scene !== null && !characterNode.scene_ids.includes(scene.id)) {
+        characterNode.scene_ids.push(scene.id);
+      }
+      const forms = characterNode.forms;
+      const formNode = forms.find((item) => item.id === character.form) ?? {
+        id: character.form,
+        name: character.form_name,
+        event_count: 0,
+        scene_ids: []
+      };
+      formNode.event_count = Number(formNode.event_count) + 1;
+      if (scene !== null && !formNode.scene_ids.includes(scene.id)) {
+        formNode.scene_ids.push(scene.id);
+      }
+      if (!forms.includes(formNode)) forms.push(formNode);
+      characters.set(character.id, characterNode);
+      if (scene !== null) {
+        const key = `${character.id}|${scene.id}`;
+        const edge = characterSceneEdges.get(key) ?? {
+          character_id: character.id,
+          scene_id: scene.id,
+          event_count: 0,
+          duration_seconds: 0,
+          form_ids: [],
+          event_ids: []
+        };
+        edge.event_count = Number(edge.event_count) + 1;
+        edge.duration_seconds = Number(edge.duration_seconds) + duration;
+        if (!edge.form_ids.includes(character.form))
+          edge.form_ids.push(character.form);
+        if (!edge.event_ids.includes(event.shot_id))
+          edge.event_ids.push(event.shot_id);
+        characterSceneEdges.set(key, edge);
+        const formKey = `${character.id}/${character.form}|${scene.id}`;
+        const formEdge = formSceneEdges.get(formKey) ?? {
+          character_id: character.id,
+          form_id: character.form,
+          scene_id: scene.id,
+          event_count: 0,
+          duration_seconds: 0,
+          event_ids: []
+        };
+        formEdge.event_count = Number(formEdge.event_count) + 1;
+        formEdge.duration_seconds = Number(formEdge.duration_seconds) + duration;
+        if (!formEdge.event_ids.includes(event.shot_id))
+          formEdge.event_ids.push(event.shot_id);
+        formSceneEdges.set(formKey, formEdge);
+      }
+      for (const other of event.characters) {
+        if (other.id === character.id) continue;
+        const pair = [character.id, other.id].sort();
+        pairs.add(pair.join("|"));
+      }
+    }
+    for (const pair of pairs) {
+      const [a, b] = pair.split("|");
+      if (a === void 0 || b === void 0) continue;
+      const edge = cooccurrenceEdges.get(pair) ?? {
+        a,
+        b,
+        event_count: 0,
+        event_ids: []
+      };
+      edge.event_count = Number(edge.event_count) + 1;
+      if (!edge.event_ids.includes(event.shot_id)) edge.event_ids.push(event.shot_id);
+      cooccurrenceEdges.set(pair, edge);
+    }
+  }
+  for (const edge of characterSceneEdges.values()) {
+    const sceneNode = scenes.get(String(edge.scene_id));
+    if (sceneNode === void 0) continue;
+    const characterId = String(edge.character_id);
+    const ids = sceneNode.character_ids;
+    if (!ids.includes(characterId)) ids.push(characterId);
+  }
+  return {
+    characters: Array.from(characters.values()).sort(
+      (a, b) => Number(b.event_count) - Number(a.event_count) || String(a.name).localeCompare(String(b.name))
+    ),
+    scenes: Array.from(scenes.values()).sort(
+      (a, b) => Number(b.event_count) - Number(a.event_count) || String(a.name).localeCompare(String(b.name))
+    ),
+    character_scene_edges: Array.from(characterSceneEdges.values()).sort(
+      (a, b) => Number(b.event_count) - Number(a.event_count)
+    ),
+    form_scene_edges: Array.from(formSceneEdges.values()).sort(
+      (a, b) => Number(b.event_count) - Number(a.event_count)
+    ),
+    cooccurrence_edges: Array.from(cooccurrenceEdges.values()).sort(
+      (a, b) => Number(b.event_count) - Number(a.event_count)
+    )
+  };
+}
+function buildCatalog2(root, characters, events, usedVoiceIds, beats) {
+  const characterCounts = /* @__PURE__ */ new Map();
+  const formCounts = /* @__PURE__ */ new Map();
+  const sceneCounts = /* @__PURE__ */ new Map();
+  const characterMap = /* @__PURE__ */ new Map();
+  const sceneMap = /* @__PURE__ */ new Map();
+  const warnings = [];
+  for (const event of events) {
+    if (event.scene !== null) {
+      sceneCounts.set(event.scene.id, (sceneCounts.get(event.scene.id) ?? 0) + 1);
+    }
+    for (const character of event.characters) {
+      characterCounts.set(character.id, (characterCounts.get(character.id) ?? 0) + 1);
+      formCounts.set(
+        `${character.id}/${character.form}`,
+        (formCounts.get(`${character.id}/${character.form}`) ?? 0) + 1
+      );
+    }
+  }
+  for (const character of characters.characters) {
+    const forms = character.forms.map((form) => {
+      const assets = form.assets.map((asset) => assetRefOf(root, asset));
+      const reference = referenceAssetOf(root, form.assets, form.reference_asset);
+      const eventCount = formCounts.get(`${character.id}/${form.id}`) ?? 0;
+      if (eventCount > 0 && reference === null) {
+        warnings.push({
+          code: "missing_reference",
+          severity: WARNING,
+          shot_id: null,
+          ref: `character:${character.id}/form:${form.id}`,
+          message: `\u89D2\u8272\u5F62\u6001 ${character.id}/${form.id} \u6CA1\u6709\u663E\u5F0F\u4E3B\u53C2\u8003\u56FE`,
+          hint: "story asset set-reference --owner character:<id> --form <form> --id <asset>"
+        });
+      }
+      return {
+        id: form.id,
+        name: form.name,
+        description: form.description ?? null,
+        used: eventCount > 0,
+        event_count: eventCount,
+        reference_asset: reference,
+        assets
+      };
+    });
+    characterMap.set(character.id, {
+      id: character.id,
+      name: character.name,
+      role: character.role ?? null,
+      default_form: character.default_form,
+      unknown: false,
+      forms
+    });
+  }
+  for (const event of events) {
+    for (const character of event.characters) {
+      if (characterMap.has(character.id)) continue;
+      characterMap.set(character.id, {
+        id: character.id,
+        name: character.name,
+        role: null,
+        default_form: character.form,
+        unknown: true,
+        forms: [
+          {
+            id: character.form,
+            name: character.form_name,
+            description: null,
+            used: true,
+            event_count: characterCounts.get(character.id) ?? 0,
+            reference_asset: null,
+            assets: []
+          }
+        ]
+      });
+    }
+  }
+  const scenes = loadScenes(root);
+  for (const scene of scenes.scenes) {
+    const assets = scene.assets.map((asset) => assetRefOf(root, asset));
+    const reference = referenceAssetOf(root, scene.assets, scene.reference_asset);
+    const eventCount = sceneCounts.get(scene.id) ?? 0;
+    if (eventCount > 0 && reference === null) {
+      warnings.push({
+        code: "missing_reference",
+        severity: WARNING,
+        shot_id: null,
+        ref: `scene:${scene.id}`,
+        message: `\u573A\u666F ${scene.id} \u6CA1\u6709\u663E\u5F0F\u4E3B\u53C2\u8003\u56FE`,
+        hint: "story asset set-reference --owner scene:<id> --id <asset>"
+      });
+    }
+    sceneMap.set(scene.id, {
+      id: scene.id,
+      name: scene.name,
+      description: scene.description ?? null,
+      time_of_day: scene.time_of_day ?? null,
+      interior_exterior: scene.interior_exterior ?? null,
+      mood: scene.mood ?? null,
+      used: eventCount > 0,
+      event_count: eventCount,
+      unknown: false,
+      reference_asset: reference,
+      assets
+    });
+  }
+  for (const event of events) {
+    if (event.scene === null || sceneMap.has(event.scene.id)) continue;
+    sceneMap.set(event.scene.id, {
+      id: event.scene.id,
+      name: event.scene.name,
+      description: null,
+      time_of_day: null,
+      interior_exterior: null,
+      mood: null,
+      used: true,
+      event_count: sceneCounts.get(event.scene.id) ?? 0,
+      unknown: true,
+      reference_asset: null,
+      assets: []
+    });
+  }
+  const voicesFile = loadVoices(root);
+  const voices = voicesFile.voices.map((voice) => {
+    const assets = voice.assets.map((asset) => assetRefOf(root, asset));
+    const reference = referenceAssetOf(root, voice.assets, voice.reference_asset);
+    if (usedVoiceIds.has(voice.id) && voice.mode === "reference" && reference === null) {
+      warnings.push({
+        code: "missing_reference",
+        severity: WARNING,
+        shot_id: null,
+        ref: `voice:${voice.id}`,
+        message: `\u97F3\u8272 ${voice.id} \u662F reference \u6A21\u5F0F\uFF0C\u4F46\u6CA1\u6709\u663E\u5F0F\u53C2\u8003\u97F3\u9891`,
+        hint: "story asset set-reference --owner voice:<id> --id <asset>"
+      });
+    }
+    return {
+      id: voice.id,
+      character_id: voice.character_id,
+      name: voice.name,
+      mode: voice.mode,
+      description: voice.description ?? null,
+      used: usedVoiceIds.has(voice.id),
+      reference_asset: reference,
+      assets
+    };
+  });
+  return {
+    catalog: {
+      characters: Array.from(characterMap.values()).sort(
+        (a, b) => (characterCounts.get(b.id) ?? 0) - (characterCounts.get(a.id) ?? 0) || a.name.localeCompare(b.name)
+      ),
+      scenes: Array.from(sceneMap.values()).sort(
+        (a, b) => (sceneCounts.get(b.id) ?? 0) - (sceneCounts.get(a.id) ?? 0) || a.name.localeCompare(b.name)
+      ),
+      voices,
+      beats
+    },
+    warnings
+  };
+}
+function shotCastRefs(shot) {
+  const direct = shot.characters;
+  if (direct !== void 0) return arrayOf2(direct);
+  const params = recordOf3(shot.params);
+  return arrayOf2(params?.characters);
+}
+function shotSceneRef(shot) {
+  const record = shot;
+  const params = recordOf3(shot.params);
+  return record.scene ?? record.location ?? record.set ?? params?.scene ?? params?.location ?? params?.set;
+}
+function relayOf(shot) {
+  const first = shot.first_frame;
+  if (first === void 0 || typeof first === "string") return null;
+  return typeof first.relay === "string" && first.relay !== "" ? first.relay : null;
+}
+function anchorOf(root, shot, shots) {
+  const first = shot.first_frame;
+  if (typeof first !== "string" || first === "") return null;
+  const path = shots.meta.anchors[first];
+  if (path === void 0 || path === "") return null;
+  return { key: first, path, present: existsSync36(join34(root, path)) };
+}
+function buildEventFacts(root, shots, characters, fps, beats) {
+  const facts = [];
+  let cursor = 0;
+  let estimated = false;
+  for (const shot of shots.shots) {
+    const gaps = [];
+    const length = shot.length ?? shots.defaults.length ?? null;
+    const duration = typeof shot.duration === "number" ? shot.duration : length !== null && fps !== null && fps > 0 ? length / fps : null;
+    const atSeconds = cursor;
+    const atEstimated = estimated || duration === null;
+    if (duration !== null) cursor += duration;
+    else estimated = true;
+    const cast = [];
+    for (const ref of shotCastRefs(shot)) {
+      const resolved = resolveCast(root, ref, characters, shot.id, gaps);
+      if (resolved !== null && !cast.some((item) => item.id === resolved.id)) cast.push(resolved);
+    }
+    const scene = resolveScene(root, shotSceneRef(shot), shots, shot.id, gaps);
+    const voices = resolveVoices(root, shot, characters, shot.id, gaps);
+    const beatIds = (shot.script_refs ?? []).filter((id) => typeof id === "string");
+    for (const beatId of beatIds) {
+      if (!beats.has(beatId)) {
+        gaps.push({
+          code: "unknown_beat",
+          severity: WARNING,
+          shot_id: shot.id,
+          ref: `beat:${beatId}`,
+          message: `\u955C\u5934 ${shot.id} \u5F15\u7528\u4E86\u4E0D\u5B58\u5728\u7684 beat ${beatId}`,
+          hint: "\u4FEE\u6B63 shots.json \u7684 script_refs\uFF0C\u6216\u8865\u62C6\u89E3 beats\u3002"
+        });
+      }
+    }
+    const relayFrom = relayOf(shot);
+    if (relayFrom !== null && !shots.shots.some((item) => item.id === relayFrom)) {
+      gaps.push({
+        code: "relay_upstream_missing",
+        severity: BLOCKER,
+        shot_id: shot.id,
+        ref: `shot:${relayFrom}`,
+        message: `\u955C\u5934 ${shot.id} \u7684 relay \u4E0A\u6E38 ${relayFrom} \u4E0D\u5B58\u5728`,
+        hint: "\u4FEE\u6B63 first_frame.relay\uFF0C\u6216\u5148\u8865\u4E0A\u6E38\u955C\u5934\u3002"
+      });
+    }
+    const anchor = anchorOf(root, shot, shots);
+    if (typeof shot.first_frame === "string" && shot.first_frame !== "" && anchor === null) {
+      gaps.push({
+        code: "anchor_not_found",
+        severity: BLOCKER,
+        shot_id: shot.id,
+        ref: shot.first_frame,
+        message: `\u955C\u5934 ${shot.id} \u7684 anchor ${shot.first_frame} \u672A\u5728 meta.anchors \u4E2D\u5B9A\u4E49`,
+        hint: "\u4FEE\u6B63 shots.json \u7684 first_frame \u6216 meta.anchors\u3002"
+      });
+    } else if (anchor !== null && !anchor.present) {
+      gaps.push({
+        code: "anchor_not_found",
+        severity: BLOCKER,
+        shot_id: shot.id,
+        ref: anchor.path,
+        message: `\u955C\u5934 ${shot.id} \u7684 anchor \u6587\u4EF6\u4E0D\u5B58\u5728\uFF1A${anchor.path}`,
+        hint: "\u8865\u9F50 anchor \u6587\u4EF6\u3002"
+      });
+    }
+    facts.push({
+      shot,
+      at_seconds: atSeconds,
+      at_estimated: atEstimated,
+      duration_seconds: duration,
+      cast,
+      scene,
+      voices,
+      beat_ids: beatIds,
+      dialogue_count: shot.dialogue?.length ?? 0,
+      relay_from: relayFrom,
+      anchor,
+      gaps
+    });
+  }
+  return facts;
+}
+function numberOf2(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+function buildWorkflowCandidate(root, name, rel, abs, project) {
+  let valid = false;
+  let nodeCount = 0;
+  let nodeClasses = [];
+  let graphError = null;
+  try {
+    const loaded = loadGraphFile(abs, rel);
+    valid = true;
+    const nodes = Object.values(loaded.graph);
+    nodeCount = nodes.length;
+    const classes = /* @__PURE__ */ new Set();
+    for (const node of nodes) {
+      const record = recordOf3(node);
+      const cls = stringOf3(record?.class_type);
+      if (cls !== null) classes.add(cls);
+    }
+    nodeClasses = Array.from(classes).slice(0, MAX_NODE_CLASSES);
+  } catch (e) {
+    graphError = e instanceof Error ? e.message : String(e);
+  }
+  let bindings = [];
+  let hasBindings = false;
+  try {
+    const parsed = loadBindings(abs);
+    if (parsed !== null) {
+      bindings = Object.keys(parsed);
+      hasBindings = true;
+    }
+  } catch {
+  }
+  let assetSlots = [];
+  let slotError = null;
+  try {
+    const file = loadWorkflowAssets(abs);
+    assetSlots = file?.slots ?? [];
+  } catch (e) {
+    slotError = e instanceof Error ? e.message : String(e);
+  }
+  const reasons = [];
+  if (!valid) reasons.push(graphError ?? "\u5DE5\u4F5C\u6D41\u56FE\u975E\u6CD5");
+  if (slotError !== null) reasons.push(`\u8D44\u4EA7\u69FD\u4F4D\u6587\u4EF6\u975E\u6CD5\uFF1A${slotError}`);
+  if (!hasBindings) reasons.push("\u7F3A\u5C11 bindings \u6587\u4EF6");
+  else {
+    if (!bindings.includes("prompt")) reasons.push("bindings \u7F3A\u5C11 prompt");
+    if (!bindings.includes("seed")) reasons.push("bindings \u7F3A\u5C11 seed");
+  }
+  const defaultRef = (project?.default_workflow ?? "").trim();
+  const isDefault = defaultRef === name || defaultRef === rel || defaultRef === `${WORKFLOWS_DIR}/${name}.json`;
+  return {
+    name,
+    path: rel,
+    default: isDefault,
+    valid,
+    has_bindings: hasBindings,
+    bindings,
+    node_count: nodeCount,
+    node_classes: nodeClasses,
+    asset_slots: assetSlots,
+    unusable_reasons: reasons
+  };
+}
+function collectWorkflowCatalog(root, project) {
+  const dir = join34(root, WORKFLOWS_DIR);
+  if (!existsSync36(dir)) return [];
+  const out = [];
+  for (const entry of readdirSync13(dir, { withFileTypes: true })) {
+    if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
+    if (entry.name.endsWith(".bindings.json") || entry.name.endsWith(".assets.json")) continue;
+    const name = entry.name.slice(0, -".json".length);
+    const rel = `${WORKFLOWS_DIR}/${entry.name}`;
+    out.push(buildWorkflowCandidate(root, name, rel, join34(dir, entry.name), project));
+  }
+  return out.sort((a, b) => Number(b.default) - Number(a.default) || a.name.localeCompare(b.name));
+}
+function mapWorkflowGap(gap, shotId) {
+  return {
+    code: gap.code,
+    severity: gap.severity,
+    shot_id: shotId,
+    ref: gap.slot !== null ? `${gap.slot}:${gap.owner ?? ""}` : gap.owner,
+    message: gap.message,
+    hint: gap.hint
+  };
+}
+function candidateFit(candidate, fact) {
+  if (candidate.unusable_reasons.length > 0) {
+    return { name: candidate.name, fit: "unusable", reasons: [...candidate.unusable_reasons] };
+  }
+  const required = candidate.asset_slots.filter((slot) => slot.required !== false);
+  const characterSlots = required.filter((slot) => slot.kind === "character");
+  const sceneSlots = required.filter((slot) => slot.kind === "scene");
+  const voiceSlots = required.filter((slot) => slot.kind === "voice");
+  const reasons = [];
+  if (characterSlots.length > fact.cast.length)
+    reasons.push(`\u9700\u8981 ${characterSlots.length} \u4E2A\u89D2\u8272\uFF0C\u955C\u5934\u53EA\u6709 ${fact.cast.length} \u4E2A`);
+  if (sceneSlots.length > 0 && fact.scene === null) reasons.push("\u9700\u8981\u573A\u666F\uFF0C\u4F46\u955C\u5934\u6CA1\u6709\u573A\u666F");
+  if (voiceSlots.length > 0 && fact.voices.length === 0) reasons.push("\u9700\u8981\u97F3\u8272\uFF0C\u4F46\u955C\u5934\u6CA1\u6709\u53F0\u8BCD\u97F3\u8272");
+  if (reasons.length > 0) return { name: candidate.name, fit: "unusable", reasons };
+  const missing = [];
+  for (const [index, slot] of characterSlots.entries()) {
+    const cast = fact.cast[index];
+    if (cast === void 0) {
+      missing.push(`${slot.name} \u7F3A\u5C11\u89D2\u8272`);
+      continue;
+    }
+    if (slot.asset === "reference") {
+      if (!cast.reference_present) missing.push(`${cast.id}/${cast.form} \u7F3A\u5C11\u53EF\u7528\u4E3B\u53C2\u8003`);
+    } else {
+      const asset = cast.assets.find((item) => item.id === slot.asset);
+      if (asset === void 0 || !asset.present || asset.lfs_pointer)
+        missing.push(`${cast.id}/${cast.form} \u7F3A\u5C11\u8D44\u4EA7 ${slot.asset}`);
+    }
+  }
+  for (const slot of sceneSlots) {
+    if (fact.scene === null) continue;
+    if (slot.asset === "reference") {
+      if (!fact.scene.reference_present) missing.push(`\u573A\u666F ${fact.scene.id} \u7F3A\u5C11\u53EF\u7528\u4E3B\u53C2\u8003`);
+    } else {
+      const asset = fact.scene.assets.find((item) => item.id === slot.asset);
+      if (asset === void 0 || !asset.present || asset.lfs_pointer)
+        missing.push(`\u573A\u666F ${fact.scene.id} \u7F3A\u5C11\u8D44\u4EA7 ${slot.asset}`);
+    }
+  }
+  for (const [index, slot] of voiceSlots.entries()) {
+    const voice = fact.voices[index];
+    if (voice === void 0) {
+      missing.push(`${slot.name} \u7F3A\u5C11\u97F3\u8272`);
+      continue;
+    }
+    if (slot.asset === "reference") {
+      if (!voice.reference_present) missing.push(`\u97F3\u8272 ${voice.voice_id} \u7F3A\u5C11\u53EF\u7528\u53C2\u8003\u97F3\u9891`);
+    } else {
+      const asset = voice.assets.find((item) => item.id === slot.asset);
+      if (asset === void 0 || !asset.present || asset.lfs_pointer)
+        missing.push(`\u97F3\u8272 ${voice.voice_id} \u7F3A\u5C11\u8D44\u4EA7 ${slot.asset}`);
+    }
+  }
+  if (missing.length > 0) return { name: candidate.name, fit: "needs_assets", reasons: missing };
+  return { name: candidate.name, fit: "ready", reasons: [] };
+}
+function buildRenderIndex(root, episodeId) {
+  const prefix = `ep:${episodeId}:shot:`;
+  const groups = /* @__PURE__ */ new Map();
+  for (const run2 of listRuns(root)) {
+    if (run2.label === null || !run2.label.startsWith(prefix)) continue;
+    const shotId = run2.label.slice(prefix.length);
+    const list = groups.get(shotId) ?? [];
+    list.push(run2);
+    groups.set(shotId, list);
+  }
+  const index = /* @__PURE__ */ new Map();
+  for (const [shotId, runs] of groups) {
+    const latest = runs[0] ?? null;
+    index.set(shotId, {
+      runs_count: runs.length,
+      succeeded_count: runs.filter((run2) => run2.status === "succeeded").length,
+      latest_run_id: latest?.run_id ?? null,
+      latest_status: latest?.status ?? null,
+      latest_outputs: (latest?.outputs ?? []).map((output2) => ({
+        name: output2.name,
+        kind: outputKind(output2.name),
+        media_url: `${RUN_MEDIA_PREFIX}/${encodeURIComponent(latest?.run_id ?? "")}/${encodeURIComponent(output2.name)}`,
+        bytes: output2.bytes
+      })),
+      latest_finished_at: latest?.finished_at ?? null,
+      latest_error: latest?.error?.message ?? null
+    });
+  }
+  return index;
+}
+function buildGenerationEvent(root, event, fact, shots, project, workflows, renderIndex, previous, relayTargets) {
+  let workflowRef = null;
+  let workflowSource = "none";
+  if (typeof fact.shot.workflow === "string" && fact.shot.workflow.trim() !== "") {
+    workflowRef = fact.shot.workflow.trim();
+    workflowSource = "shot";
+  } else if (typeof shots.workflow === "string" && shots.workflow.trim() !== "") {
+    workflowRef = shots.workflow.trim();
+    workflowSource = "shots";
+  } else if (project?.default_workflow !== void 0 && project.default_workflow.trim() !== "") {
+    workflowRef = project.default_workflow.trim();
+    workflowSource = "project";
+  }
+  const gaps = [...fact.gaps];
+  let workflow = null;
+  if (workflowRef === null) {
+    gaps.push({
+      code: "missing_workflow",
+      severity: BLOCKER,
+      shot_id: event.shot_id,
+      ref: null,
+      message: `\u955C\u5934 ${event.shot_id} \u6CA1\u6709\u53EF\u7528 workflow`,
+      hint: "\u8BBE\u7F6E project.default_workflow\u3001shots.workflow \u6216\u5355\u955C workflow\u3002"
+    });
+  } else {
+    try {
+      const resolved = resolveWorkflowRef(root, workflowRef);
+      const candidate = workflows.find((item) => item.path === resolved.rel || item.name === workflowRef) ?? buildWorkflowCandidate(root, workflowNameOf(resolved.rel), resolved.rel, resolved.abs, project);
+      if (candidate.unusable_reasons.length > 0) {
+        gaps.push({
+          code: "workflow_unresolved",
+          severity: BLOCKER,
+          shot_id: event.shot_id,
+          ref: resolved.rel,
+          message: `workflow ${candidate.name} \u4E0D\u53EF\u7528\uFF1A${candidate.unusable_reasons.join("\uFF1B")}`,
+          hint: "\u4FEE\u6B63 workflow / bindings / assets \u58F0\u660E\uFF0C\u6216\u6362\u4E00\u4E2A\u5019\u9009\u3002"
+        });
+      }
+      const plan = planWorkflowAssets({ root, shot: fact.shot, workflowAbs: resolved.abs });
+      const slots = plan.slots.map((slot) => ({
+        slot: slot.slot,
+        kind: slot.kind,
+        required: slot.required,
+        target: slot.target,
+        owner: slot.owner,
+        mapping_source: slot.mapping_source,
+        asset: slot.asset !== null ? assetRefOf(root, slot.asset) : null,
+        status: slot.status
+      }));
+      const workflowGaps = plan.gaps.map((gap) => mapWorkflowGap(gap, event.shot_id));
+      gaps.push(...workflowGaps);
+      workflow = {
+        name: candidate.name,
+        path: resolved.rel,
+        valid: candidate.valid,
+        has_bindings: candidate.has_bindings,
+        slots,
+        missing_slots: slots.filter((slot) => slot.status === "blocker").map((slot) => slot.slot),
+        gaps: workflowGaps
+      };
+    } catch (e) {
+      const err = asCliError(e, "workflow_invalid");
+      gaps.push({
+        code: "workflow_unresolved",
+        severity: BLOCKER,
+        shot_id: event.shot_id,
+        ref: workflowRef,
+        message: err.message,
+        hint: err.hint
+      });
+    }
+  }
+  const previousSceneId = previous?.scene?.id ?? null;
+  const sceneChanged = previous !== null && fact.scene?.id !== previousSceneId;
+  const sameSceneAsPrev = previous !== null && fact.scene?.id !== null && fact.scene?.id === previousSceneId;
+  const formChanges = [];
+  for (const cast of fact.cast) {
+    const before = previous?.cast.find((item) => item.id === cast.id);
+    if (before !== void 0 && before.form !== cast.form) {
+      formChanges.push({ character_id: cast.id, from: before.form, to: cast.form });
+    }
+  }
+  return {
+    shot_id: event.shot_id,
+    assigned_workflow: workflow?.name ?? null,
+    workflow_source: workflowSource,
+    workflow,
+    cast: fact.cast.map((cast) => castView(cast)),
+    scene: sceneView(fact.scene),
+    voices: fact.voices.map((voice) => voiceView(voice)),
+    continuity: {
+      scene_changed: sceneChanged,
+      same_scene_as_prev: sameSceneAsPrev,
+      form_changes: formChanges,
+      relay_from: fact.relay_from,
+      relay_targets: relayTargets.get(fact.shot.id) ?? [],
+      anchor: fact.anchor
+    },
+    render: renderIndex.get(fact.shot.id) ?? {
+      runs_count: 0,
+      succeeded_count: 0,
+      latest_run_id: null,
+      latest_status: null,
+      latest_outputs: [],
+      latest_finished_at: null,
+      latest_error: null
+    },
+    candidate_workflows: workflows.map((candidate) => candidateFit(candidate, fact)),
+    gaps,
+    ready: gaps.every((gap) => gap.severity !== BLOCKER)
+  };
+}
+function buildStoryMap(root, episodeId, project) {
+  const meta = readEpisodeMeta(root, episodeId);
+  if (meta === null) return null;
+  const projectConfig = project ?? projectOf(root);
+  const characters = loadCharacters(root);
+  const shots = loadEpisodeShots(root, episodeId);
+  const breakdown = loadBreakdown(root, episodeId);
+  const script = loadScriptMeta(root, episodeId);
+  const annotations = readStoryMapAnnotations(root, episodeId);
+  const annotationMap = new Map((annotations.doc?.events ?? []).map((event) => [event.shot_id, event]));
+  const beatMap = new Map((breakdown?.beats ?? []).map((beat) => [beat.id, beat.summary]));
+  const beatList = (breakdown?.beats ?? []).map((beat) => ({ id: beat.id, summary: beat.summary }));
+  const fps = shots !== null ? numberOf2(shots.meta.fps) ?? numberOf2(shots.defaults.fps) : null;
+  const facts = shots !== null ? buildEventFacts(root, shots, characters, fps, beatMap) : [];
+  const events = [];
+  let previousSceneId = null;
+  for (const [index, fact] of facts.entries()) {
+    const annotation = annotationMap.get(fact.shot.id);
+    const derivedImportance = importanceOf(
+      index,
+      previousSceneId,
+      fact.scene?.id ?? null,
+      fact.cast,
+      fact.dialogue_count
+    );
+    const title = typeof annotation?.title === "string" && annotation.title.trim() !== "" ? annotation.title.trim() : fact.shot.title ?? fact.shot.slug ?? `\u955C\u5934 ${fact.shot.id}`;
+    const summary = typeof annotation?.summary === "string" && annotation.summary.trim() !== "" ? annotation.summary.trim() : fact.shot.summary ?? fact.shot.description ?? fact.shot.prompt;
+    events.push({
+      shot_id: fact.shot.id,
+      at_seconds: fact.at_seconds,
+      at_estimated: fact.at_estimated,
+      duration_seconds: fact.duration_seconds,
+      title,
+      title_source: typeof annotation?.title === "string" && annotation.title.trim() !== "" ? "annotation" : "shot",
+      summary,
+      summary_source: typeof annotation?.summary === "string" && annotation.summary.trim() !== "" ? "annotation" : "shot",
+      importance: annotation?.importance ?? derivedImportance,
+      importance_source: annotation?.importance !== void 0 ? "annotation" : "derived",
+      story_time: typeof annotation?.story_time === "string" && annotation.story_time.trim() !== "" ? annotation.story_time.trim() : null,
+      scene: sceneView(fact.scene),
+      characters: fact.cast.map((cast) => castView(cast)),
+      beat_ids: fact.beat_ids,
+      beats: fact.beat_ids.map((id) => ({ id, summary: beatMap.get(id) ?? "" })),
+      dialogue_count: fact.dialogue_count,
+      note: typeof annotation?.note === "string" && annotation.note.trim() !== "" ? annotation.note.trim() : null
+    });
+    previousSceneId = fact.scene?.id ?? null;
+  }
+  const shotIds = new Set(facts.map((fact) => fact.shot.id));
+  const warnings = [...annotations.warnings];
+  if (shots === null) {
+    warnings.push({
+      code: "shots_missing",
+      severity: WARNING,
+      shot_id: null,
+      ref: "shots.json",
+      message: `\u5267\u96C6 ${episodeId} \u8FD8\u6CA1\u6709 shots.json`,
+      hint: `\u5148\u6267\u884C story shots set --episode ${episodeId} --file <shots.json>\u3002`
+    });
+  }
+  for (const annotation of annotations.doc?.events ?? []) {
+    if (shotIds.has(annotation.shot_id)) continue;
+    warnings.push({
+      code: "story_map_orphan_shot",
+      severity: WARNING,
+      shot_id: annotation.shot_id,
+      ref: "story-map.json",
+      message: `\u6807\u6CE8\u5F15\u7528\u4E86\u4E0D\u5B58\u5728\u7684\u955C\u5934 ${annotation.shot_id}`,
+      hint: "\u91CD\u65B0\u6267\u884C story map build \u5237\u65B0\u9AA8\u67B6\u3002"
+    });
+  }
+  const knownCharacters = new Set(characters.characters.map((character) => character.id));
+  for (const fact of facts) for (const cast of fact.cast) knownCharacters.add(cast.id);
+  const relations = [];
+  for (const relation of annotations.doc?.relations ?? []) {
+    if (relation.from === relation.to) {
+      warnings.push({
+        code: "story_map_relation_invalid",
+        severity: WARNING,
+        shot_id: null,
+        ref: "story-map.json",
+        message: `\u5173\u7CFB\u4E0D\u80FD\u81EA\u5F15\u7528\uFF1A${relation.from}`,
+        hint: "\u4FEE\u6B63\u5173\u7CFB\u7AEF\u70B9\u3002"
+      });
+      continue;
+    }
+    if (!knownCharacters.has(relation.from) || !knownCharacters.has(relation.to)) {
+      warnings.push({
+        code: "story_map_relation_unknown",
+        severity: WARNING,
+        shot_id: null,
+        ref: "story-map.json",
+        message: `\u5173\u7CFB\u5F15\u7528\u4E86\u672C\u96C6\u4E0D\u5B58\u5728\u7684\u89D2\u8272\uFF1A${relation.from} \u2192 ${relation.to}`,
+        hint: "\u4FEE\u6B63\u5173\u7CFB\uFF0C\u6216\u8865\u5168\u5C40\u89D2\u8272\u3002"
+      });
+      continue;
+    }
+    relations.push(relation);
+  }
+  const usedVoiceIds = new Set(facts.flatMap((fact) => fact.voices.map((voice) => voice.voice_id)));
+  const catalogResult = buildCatalog2(root, characters, events, usedVoiceIds, beatList);
+  warnings.push(...catalogResult.warnings);
+  const graph = buildGraph(events);
+  const characterCatalog = new Map(catalogResult.catalog.characters.map((character) => [character.id, character]));
+  const sceneCatalog = new Map(catalogResult.catalog.scenes.map((scene) => [scene.id, scene]));
+  for (const node of graph.characters) {
+    const item = characterCatalog.get(String(node.id));
+    if (item !== void 0) node.role = item.role;
+  }
+  for (const node of graph.scenes) {
+    const item = sceneCatalog.get(String(node.id));
+    if (item !== void 0) {
+      node.time_of_day = item.time_of_day;
+      node.interior_exterior = item.interior_exterior;
+    }
+  }
+  const workflows = collectWorkflowCatalog(root, projectConfig);
+  const renderIndex = buildRenderIndex(root, episodeId);
+  const relayTargets = /* @__PURE__ */ new Map();
+  for (const fact of facts) {
+    if (fact.relay_from === null) continue;
+    const list = relayTargets.get(fact.relay_from) ?? [];
+    list.push(fact.shot.id);
+    relayTargets.set(fact.relay_from, list);
+  }
+  const generationEvents = shots === null ? [] : facts.map(
+    (fact, index) => buildGenerationEvent(
+      root,
+      events[index],
+      fact,
+      shots,
+      projectConfig,
+      workflows,
+      renderIndex,
+      index > 0 ? facts[index - 1] : null,
+      relayTargets
+    )
+  );
+  const readyShots = generationEvents.filter((event) => event.ready).map((event) => event.shot_id);
+  const blockedShots = generationEvents.filter((event) => !event.ready).map((event) => event.shot_id);
+  const renderedShots = generationEvents.filter((event) => event.render.succeeded_count > 0).map((event) => event.shot_id);
+  const failedShots = generationEvents.filter((event) => event.render.latest_status === "failed").map((event) => event.shot_id);
+  const generationGaps = generationEvents.flatMap((event) => event.gaps);
+  const unknownDurationShots = facts.filter((fact) => fact.duration_seconds === null).map((fact) => fact.shot.id);
+  const allUnknown = facts.length > 0 && unknownDurationShots.length === facts.length;
+  if (allUnknown) {
+    for (const [index, event] of events.entries()) {
+      event.at_seconds = index;
+      event.at_estimated = true;
+    }
+  }
+  const duration = facts.some((fact) => fact.duration_seconds !== null) ? facts.reduce((sum, fact) => sum + (fact.duration_seconds ?? 0), 0) : null;
+  const source = storyMapSource(root, episodeId, script);
+  const staleReasons = [];
+  if (annotations.doc !== null) {
+    if (annotations.doc.source.script_revision !== source.script_revision)
+      staleReasons.push("\u5267\u672C revision \u5DF2\u53D8\u5316");
+    if (annotations.doc.source.breakdown_sha256 !== source.breakdown_sha256) staleReasons.push("breakdown \u5DF2\u53D8\u5316");
+    if (annotations.doc.source.shots_sha256 !== source.shots_sha256) staleReasons.push("shots \u5DF2\u53D8\u5316");
+  }
+  return {
+    episode_id: episodeId,
+    origin: {
+      derived: true,
+      annotated: annotations.doc !== null,
+      author: annotations.doc?.author ?? "dycli",
+      updated_at: annotations.doc?.updated_at ?? null,
+      stale: staleReasons.length > 0,
+      stale_reasons: staleReasons
+    },
+    time: {
+      basis: allUnknown ? "order" : "screen",
+      duration_seconds: duration,
+      unknown_duration_shots: unknownDurationShots
+    },
+    catalog: catalogResult.catalog,
+    events,
+    graph,
+    generation: {
+      workflows,
+      readiness: {
+        counts: {
+          shots: generationEvents.length,
+          ready: readyShots.length,
+          blocked: blockedShots.length,
+          rendered: renderedShots.length,
+          failed: failedShots.length
+        },
+        ready_shots: readyShots,
+        blocked_shots: blockedShots,
+        rendered_shots: renderedShots,
+        failed_shots: failedShots
+      },
+      events: generationEvents,
+      gaps: generationGaps
+    },
+    relations,
+    warnings: dedupeGaps(warnings)
+  };
+}
+function dedupeGaps(gaps) {
+  const seen = /* @__PURE__ */ new Set();
+  const out = [];
+  for (const gap of gaps) {
+    const key = `${gap.code}|${gap.shot_id ?? ""}|${gap.ref ?? ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(gap);
+  }
+  return out;
+}
+function narrativeEventOf(event) {
+  const out = { shot_id: event.shot_id };
+  if (typeof event.title === "string") out.title = event.title;
+  if (typeof event.summary === "string") out.summary = event.summary;
+  if (event.importance === "major" || event.importance === "normal" || event.importance === "minor")
+    out.importance = event.importance;
+  if (typeof event.story_time === "string") out.story_time = event.story_time;
+  if (typeof event.note === "string") out.note = event.note;
+  return out;
+}
+function normalizeStoryMapDoc(raw, episodeId, author, source, shots, characters) {
+  const record = recordOf3(raw);
+  if (record === null) {
+    throw new DaoyanCliError({ code: "story_invalid", message: "story-map \u5FC5\u987B\u662F JSON \u5BF9\u8C61" });
+  }
+  const issues = [];
+  if (record.version !== 1) issues.push("version \u5FC5\u987B\u4E3A 1");
+  if (typeof record.episode_id === "string" && record.episode_id !== episodeId)
+    issues.push("episode_id \u4E0E\u5F53\u524D\u5267\u96C6\u4E0D\u4E00\u81F4");
+  const shotIds = new Set(shots.shots.map((shot) => shot.id));
+  const events = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const item of arrayOf2(record.events)) {
+    const event = recordOf3(item);
+    const shotId = event !== null ? stringOf3(event.shot_id) : null;
+    if (event === null || shotId === null) {
+      issues.push("\u4E8B\u4EF6\u7F3A\u5C11 shot_id");
+      continue;
+    }
+    if (!shotIds.has(shotId)) {
+      issues.push(`\u4E8B\u4EF6\u5F15\u7528\u4E86\u4E0D\u5B58\u5728\u7684\u955C\u5934 ${shotId}`);
+      continue;
+    }
+    if (seen.has(shotId)) {
+      issues.push(`\u4E8B\u4EF6 shot_id \u91CD\u590D\uFF1A${shotId}`);
+      continue;
+    }
+    seen.add(shotId);
+    const normalized = narrativeEventOf({ ...event, shot_id: shotId });
+    if (typeof event.title === "string" && event.title.length > MAX_TITLE_LENGTH)
+      issues.push(`\u4E8B\u4EF6 ${shotId} \u7684 title \u8D85\u8FC7 ${MAX_TITLE_LENGTH} \u5B57\u7B26`);
+    if (typeof event.summary === "string" && event.summary.length > MAX_SUMMARY_LENGTH)
+      issues.push(`\u4E8B\u4EF6 ${shotId} \u7684 summary \u8D85\u8FC7 ${MAX_SUMMARY_LENGTH} \u5B57\u7B26`);
+    if (typeof event.story_time === "string" && event.story_time.length > MAX_STORY_TIME_LENGTH)
+      issues.push(`\u4E8B\u4EF6 ${shotId} \u7684 story_time \u8D85\u8FC7 ${MAX_STORY_TIME_LENGTH} \u5B57\u7B26`);
+    if (typeof event.note === "string" && event.note.length > MAX_NOTE_LENGTH)
+      issues.push(`\u4E8B\u4EF6 ${shotId} \u7684 note \u8D85\u8FC7 ${MAX_NOTE_LENGTH} \u5B57\u7B26`);
+    if (event.importance !== void 0 && event.importance !== "major" && event.importance !== "normal" && event.importance !== "minor")
+      issues.push(`\u4E8B\u4EF6 ${shotId} \u7684 importance \u975E\u6CD5`);
+    events.push(normalized);
+  }
+  const relations = [];
+  for (const item of arrayOf2(record.relations)) {
+    const relation = recordOf3(item);
+    const from = relation !== null ? stringOf3(relation.from) : null;
+    const to = relation !== null ? stringOf3(relation.to) : null;
+    const label = relation !== null ? stringOf3(relation.label) : null;
+    if (relation === null || from === null || to === null || label === null) {
+      issues.push("\u5173\u7CFB\u7F3A\u5C11 from / to / label");
+      continue;
+    }
+    if (from === to) issues.push(`\u5173\u7CFB\u4E0D\u80FD\u81EA\u5F15\u7528\uFF1A${from}`);
+    if (!characters.characters.some((character) => character.id === from))
+      issues.push(`\u5173\u7CFB\u8D77\u70B9\u89D2\u8272\u4E0D\u5B58\u5728\uFF1A${from}`);
+    if (!characters.characters.some((character) => character.id === to)) issues.push(`\u5173\u7CFB\u7EC8\u70B9\u89D2\u8272\u4E0D\u5B58\u5728\uFF1A${to}`);
+    relations.push({
+      from,
+      to,
+      label,
+      ...typeof relation.kind === "string" && relation.kind !== "" ? { kind: relation.kind } : {},
+      ...typeof relation.note === "string" && relation.note !== "" ? { note: relation.note } : {}
+    });
+  }
+  if (issues.length > 0) {
+    throw new DaoyanCliError({
+      code: "story_invalid",
+      message: `story-map \u6821\u9A8C\u5931\u8D25\uFF08${issues.length} \u9879\u9519\u8BEF\uFF09`,
+      details: { issues }
+    });
+  }
+  return {
+    version: 1,
+    episode_id: episodeId,
+    author,
+    updated_at: nowIso(),
+    source,
+    events,
+    relations,
+    ...typeof record.notes === "string" && record.notes !== "" ? { notes: record.notes } : {}
+  };
+}
+function materializeStoryMap(root, episodeId, options) {
+  const shots = loadEpisodeShots(root, episodeId);
+  if (shots === null) {
+    throw new DaoyanCliError({
+      code: "story_invalid",
+      message: `\u5267\u96C6 ${episodeId} \u6CA1\u6709 shots.json\uFF0C\u65E0\u6CD5\u751F\u6210\u56FE\u8C31\u9AA8\u67B6`,
+      hint: `\u5148\u6267\u884C story shots set --episode ${episodeId} --file <shots.json>\u3002`
+    });
+  }
+  const existingRead = readStoryMapAnnotations(root, episodeId);
+  if (!options.force && existingRead.doc === null && existsSync36(storyMapPath(root, episodeId))) {
+    throw new DaoyanCliError({
+      code: "story_invalid",
+      message: "\u73B0\u6709 story-map.json \u65E0\u6CD5\u89E3\u6790",
+      hint: "\u4FEE\u6B63\u6587\u4EF6\uFF0C\u6216\u4F7F\u7528 --force \u4E22\u5F03\u65E7\u6807\u6CE8\u3002"
+    });
+  }
+  const existing = options.force ? null : existingRead.doc;
+  const existingEvents = new Map((existing?.events ?? []).map((event) => [event.shot_id, event]));
+  const shotIds = new Set(shots.shots.map((shot) => shot.id));
+  const events = shots.shots.map((shot) => {
+    const current = existingEvents.get(shot.id);
+    return current !== void 0 ? narrativeEventOf(current) : { shot_id: shot.id };
+  });
+  const dropped = (existing?.events ?? []).filter((event) => !shotIds.has(event.shot_id)).map((event) => event.shot_id);
+  const preserved = events.filter((event) => Object.keys(event).length > 1).length;
+  const characters = loadCharacters(root);
+  const relations = [];
+  const warnings = [...existingRead.warnings];
+  for (const relation of existing?.relations ?? []) {
+    if (!characters.characters.some((character) => character.id === relation.from) || !characters.characters.some((character) => character.id === relation.to)) {
+      warnings.push({
+        code: "story_map_relation_unknown",
+        severity: WARNING,
+        shot_id: null,
+        ref: "story-map.json",
+        message: `\u4E22\u5F03\u5173\u7CFB ${relation.from} \u2192 ${relation.to}\uFF1A\u89D2\u8272\u4E0D\u5B58\u5728`,
+        hint: "\u8865\u5168\u5C40\u89D2\u8272\uFF0C\u6216\u5220\u9664\u8BE5\u5173\u7CFB\u3002"
+      });
+      continue;
+    }
+    relations.push(relation);
+  }
+  const script = loadScriptMeta(root, episodeId);
+  return {
+    doc: {
+      version: 1,
+      episode_id: episodeId,
+      author: existing?.author ?? "dycli",
+      updated_at: nowIso(),
+      source: storyMapSource(root, episodeId, script),
+      events,
+      relations
+    },
+    dropped,
+    preserved,
+    warnings
+  };
+}
+var BLOCKER, WARNING, RUN_MEDIA_PREFIX, MAX_NODE_CLASSES, VIDEO_EXTENSIONS2, IMAGE_EXTENSIONS2, AUDIO_EXTENSIONS2, JSON_EXTENSIONS2, TEXT_EXTENSIONS2, MAX_TITLE_LENGTH, MAX_SUMMARY_LENGTH, MAX_STORY_TIME_LENGTH, MAX_NOTE_LENGTH;
+var init_map = __esm({
+  "src/core/story/map.mts"() {
+    "use strict";
+    init_errors();
+    init_fs();
+    init_types();
+    init_config();
+    init_load();
+    init_store3();
+    init_assets();
+    init_paths();
+    init_store2();
+    init_workflow_assets();
+    BLOCKER = "blocker";
+    WARNING = "warning";
+    RUN_MEDIA_PREFIX = "/media/run";
+    MAX_NODE_CLASSES = 20;
+    VIDEO_EXTENSIONS2 = /* @__PURE__ */ new Set([".mp4", ".webm", ".mov", ".mkv"]);
+    IMAGE_EXTENSIONS2 = /* @__PURE__ */ new Set([".png", ".jpg", ".jpeg", ".webp", ".gif"]);
+    AUDIO_EXTENSIONS2 = /* @__PURE__ */ new Set([".wav", ".mp3", ".flac", ".ogg", ".m4a"]);
+    JSON_EXTENSIONS2 = /* @__PURE__ */ new Set([".json"]);
+    TEXT_EXTENSIONS2 = /* @__PURE__ */ new Set([".txt", ".md", ".log", ".csv", ".yaml", ".yml"]);
+    MAX_TITLE_LENGTH = 120;
+    MAX_SUMMARY_LENGTH = 500;
+    MAX_STORY_TIME_LENGTH = 80;
+    MAX_NOTE_LENGTH = 500;
+  }
+});
+
+// src/core/web/story-data.mts
+import { existsSync as existsSync37, statSync as statSync12 } from "fs";
+import { join as join35 } from "path";
+function assetView(root, asset) {
+  const abs = join35(root, asset.path);
+  const present = existsSync37(abs);
+  let bytes = asset.bytes;
+  let lfsPointer = false;
+  if (present) {
+    try {
+      const stat = statSync12(abs);
       bytes = stat.size;
       lfsPointer = isLfsPointerFile(abs);
     } catch {
@@ -17316,20 +19070,20 @@ function buildStoryEpisodeView(root, episodeId, project) {
     script: { meta: script, content },
     breakdown,
     shots,
+    map: buildStoryMap(root, episodeId, project),
     tasks: tasks.items,
     runs,
     artifacts: artifacts.items,
     finals,
     files: {
-      script_md: existsSync36(join34(dir, "script.md")),
-      script_json: existsSync36(join34(dir, "script.json")),
-      breakdown: existsSync36(join34(dir, "breakdown.json")),
-      shots: existsSync36(join34(dir, "shots.json"))
+      script_md: existsSync37(join35(dir, "script.md")),
+      script_json: existsSync37(join35(dir, "script.json")),
+      breakdown: existsSync37(join35(dir, "breakdown.json")),
+      shots: existsSync37(join35(dir, "shots.json"))
     },
     episodes: listEpisodeMetas(root)
   };
 }
-var STORY_MEDIA_PREFIX;
 var init_story_data = __esm({
   "src/core/web/story-data.mts"() {
     "use strict";
@@ -17338,21 +19092,13 @@ var init_story_data = __esm({
     init_paths();
     init_store2();
     init_validate();
-    STORY_MEDIA_PREFIX = "/media/story";
+    init_map();
+    init_assets();
   }
 });
 
 // src/core/web/server.mts
 import { createServer as createServer2 } from "http";
-function isLoopbackHost(host) {
-  return host === "127.0.0.1" || host === "localhost" || host === "::1" || host === "[::1]";
-}
-function displayHost(host) {
-  if (host === "0.0.0.0") return "127.0.0.1";
-  if (host === "::" || host === "::1") return "[::1]";
-  if (host.includes(":") && !host.startsWith("[")) return `[${host}]`;
-  return host;
-}
 function setSecurityHeaders(res) {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("Referrer-Policy", "no-referrer");
@@ -17525,6 +19271,7 @@ async function handleRequest(req, res, ctx2, cache) {
         script: view.script,
         breakdown: view.breakdown,
         shots: view.shots,
+        map: view.map,
         tasks: view.tasks,
         runs: view.runs,
         artifacts: view.artifacts,
@@ -17723,7 +19470,7 @@ async function handleRequest(req, res, ctx2, cache) {
   }
 }
 async function startWebServer(options) {
-  const host = options.host ?? DEFAULT_HOST;
+  const host = normalizeHost(options.host ?? DEFAULT_HOST);
   const port = options.port ?? 0;
   const cache = { at: 0, data: null };
   const ctx2 = {
@@ -17766,8 +19513,9 @@ async function startWebServer(options) {
   }
   const actualPort = address.port;
   ctx2.port = actualPort;
-  const urlHost = displayHost(host);
-  const url = `http://${urlHost}:${actualPort}`;
+  const family = address.family === "IPv6" ? "IPv6" : "IPv4";
+  const urls = buildAccessUrls({ host, port: actualPort, family });
+  const url = urls.local[0] ?? urls.network[0] ?? `http://${host}:${actualPort}`;
   let closePromise = null;
   function close() {
     if (closePromise !== null) return closePromise;
@@ -17787,6 +19535,7 @@ async function startWebServer(options) {
   }
   return {
     url,
+    urls,
     host,
     port: actualPort,
     close,
@@ -17797,6 +19546,7 @@ var DEFAULT_HOST, OVERVIEW_CACHE_MS, ASSET_CACHE_SECONDS, URL_BASE, ALLOWED_METH
 var init_server = __esm({
   "src/core/web/server.mts"() {
     "use strict";
+    init_addresses();
     init_json();
     init_version();
     init_data();
@@ -17829,7 +19579,7 @@ var init_server = __esm({
 var ui_default;
 var init_ui = __esm({
   "src/core/web/ui/index.html"() {
-    ui_default = '<!doctype html>\n<html lang="zh-CN">\n    <head>\n        <meta charset="utf-8" />\n        <meta name="viewport" content="width=device-width, initial-scale=1" />\n        <meta name="color-scheme" content="light dark" />\n        <title>daoyan web</title>\n        <link rel="stylesheet" href="/assets/style.css" />\n    </head>\n    <body>\n        <div id="app"></div>\n        <div id="modal" class="modal" hidden>\n            <div class="modal-backdrop" data-modal-close="1"></div>\n            <section class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="modal-title">\n                <header class="modal-head">\n                    <div class="modal-heading">\n                        <p class="eyebrow">\u4EA7\u51FA\u7269\u9884\u89C8</p>\n                        <h2 id="modal-title">\u9884\u89C8</h2>\n                    </div>\n                    <button id="modal-close" class="icon-button" type="button" aria-label="\u5173\u95ED">\xD7</button>\n                </header>\n                <div id="modal-content" class="modal-content"></div>\n                <footer class="modal-foot">\n                    <button id="modal-prev" class="button ghost" type="button">\u4E0A\u4E00\u4E2A</button>\n                    <span id="modal-counter" class="muted"></span>\n                    <button id="modal-next" class="button ghost" type="button">\u4E0B\u4E00\u4E2A</button>\n                </footer>\n            </section>\n        </div>\n        <div id="toast" class="toast" role="status" hidden></div>\n        <script src="/assets/app.js" defer></script>\n    </body>\n</html>\n';
+    ui_default = '<!doctype html>\n<html lang="zh-CN">\n    <head>\n        <meta charset="utf-8" />\n        <meta name="viewport" content="width=device-width, initial-scale=1" />\n        <meta name="color-scheme" content="light dark" />\n        <title>daoyan web</title>\n        <link rel="stylesheet" href="/assets/style.css" />\n    </head>\n    <body>\n        <div id="app"></div>\n        <div id="modal" class="modal" hidden>\n            <div class="modal-backdrop" data-modal-close="1"></div>\n            <section class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="modal-title">\n                <header class="modal-head">\n                    <div class="modal-heading">\n                        <p class="eyebrow">\u9884\u89C8</p>\n                        <h2 id="modal-title">\u9884\u89C8</h2>\n                    </div>\n                    <button id="modal-close" class="icon-button" type="button" aria-label="\u5173\u95ED">\xD7</button>\n                </header>\n                <div id="modal-content" class="modal-content"></div>\n                <footer class="modal-foot">\n                    <button id="modal-prev" class="button ghost" type="button">\u4E0A\u4E00\u4E2A</button>\n                    <span id="modal-counter" class="muted"></span>\n                    <button id="modal-next" class="button ghost" type="button">\u4E0B\u4E00\u4E2A</button>\n                </footer>\n            </section>\n        </div>\n        <div id="toast" class="toast" role="status" hidden></div>\n        <script src="/assets/app.js" defer></script>\n    </body>\n</html>\n';
   }
 });
 
@@ -17837,7 +19587,7 @@ var init_ui = __esm({
 var app_default;
 var init_app = __esm({
   "src/core/web/ui/app.client"() {
-    app_default = '/* daoyan web \u5BA2\u6237\u7AEF \u2014\u2014 \u539F\u751F JS \u5355\u9875\u5E94\u7528\uFF0C\u65E0\u6784\u5EFA\u4F9D\u8D56\u3002\n * \u6240\u6709\u6570\u636E\u6765\u81EA\u540C\u6E90\u53EA\u8BFB API\uFF1BDOM \u6587\u672C\u7EDF\u4E00\u7528 textContent\uFF0C\u907F\u514D\u63D0\u793A\u8BCD\u7B49\u5B57\u6BB5\u6CE8\u5165 HTML\u3002 */\n\n// \u9875\u9762\u89C6\u56FE\nconst VIEWS = [\n    { id: "overview", label: "\u6982\u89C8", hint: "\u9879\u76EE\u4E0E\u5267\u96C6\u72B6\u6001" },\n    { id: "characters", label: "\u89D2\u8272", hint: "\u89D2\u8272\u3001\u5F62\u6001\u4E0E\u53C2\u8003\u56FE" },\n    { id: "scenes", label: "\u573A\u666F", hint: "\u573A\u666F\u4E0E\u53C2\u8003\u56FE" },\n    { id: "voices", label: "\u97F3\u8272", hint: "\u97F3\u8272\u4E0E\u53C2\u8003\u97F3\u9891" },\n    { id: "assets", label: "\u8BBE\u5B9A\u8D44\u4EA7", hint: "\u5168\u90E8\u53C2\u8003\u8D44\u4EA7" },\n    { id: "shots", label: "\u5206\u955C", hint: "\u955C\u5934\u8FDB\u5EA6\u4E0E\u63D0\u793A\u8BCD" },\n    { id: "artifacts", label: "\u4EA7\u51FA\u7269", hint: "\u64AD\u653E\u4E0E\u4E0B\u8F7D" },\n    { id: "tasks", label: "\u4EFB\u52A1", hint: "\u4EFB\u52A1\u4E0E\u4E8B\u4EF6" },\n    { id: "finals", label: "\u6210\u7247", hint: "\u5408\u7247\u7ED3\u679C" },\n    { id: "workflows", label: "\u5DE5\u4F5C\u6D41", hint: "\u56FE\u4E0E bindings" },\n];\n// \u5408\u6CD5\u89C6\u56FE\u96C6\u5408\uFF08\u5267\u96C6\u8BE6\u60C5\u7531 hash \u7684 episode/<id> \u5355\u72EC\u89E3\u6790\uFF09\nconst VIEW_IDS = new Set(VIEWS.map((view) => view.id));\n// \u9ED8\u8BA4\u89C6\u56FE\nconst DEFAULT_VIEW = "overview";\n// \u63A5\u53E3\u8DEF\u5F84\nconst API = {\n    overview: "/api/overview",\n    characters: "/api/story/characters",\n    scenes: "/api/story/scenes",\n    voices: "/api/story/voices",\n    assets: "/api/story/assets",\n    shots: "/api/shots",\n    artifacts: "/api/artifacts?limit=500",\n    tasks: "/api/tasks",\n    finals: "/api/finals",\n    workflows: "/api/workflows",\n};\n// \u5404\u89C6\u56FE\u8F6E\u8BE2\u95F4\u9694\uFF08\u6BEB\u79D2\uFF09\nconst POLL_MS = {\n    overview: 3000,\n    characters: 10000,\n    scenes: 10000,\n    voices: 10000,\n    assets: 10000,\n    episode: 4000,\n    shots: 5000,\n    artifacts: 5000,\n    tasks: 3000,\n    finals: 8000,\n    workflows: 15000,\n};\n// \u72B6\u6001\u6587\u6848\nconst STATUS_LABEL = {\n    queued: "\u6392\u961F",\n    running: "\u8FD0\u884C\u4E2D",\n    succeeded: "\u6210\u529F",\n    failed: "\u5931\u8D25",\n    cancelled: "\u5DF2\u53D6\u6D88",\n    interrupted: "\u5DF2\u4E2D\u65AD",\n    held: "\u6301\u6709",\n    stale: "\u9648\u65E7",\n    absent: "\u7A7A\u95F2",\n    corrupt: "\u635F\u574F",\n};\n// \u4EA7\u7269\u7C7B\u578B\u6587\u6848\nconst KIND_LABEL = {\n    video: "\u89C6\u9891",\n    image: "\u56FE\u7247",\n    audio: "\u97F3\u9891",\n    json: "JSON",\n    text: "\u6587\u672C",\n    other: "\u6587\u4EF6",\n};\n// \u4EA7\u7269\u7C7B\u578B\u56FE\u6807\nconst KIND_ICON = {\n    video: "\u25B6",\n    image: "\u25A7",\n    audio: "\u266A",\n    json: "{}",\n    text: "TXT",\n    other: "\u2193",\n};\n// \u5267\u60C5\u9636\u6BB5\u6587\u6848\nconst STAGE_LABEL = {\n    script: "\u5267\u672C",\n    breakdown: "\u62C6\u89E3",\n    assets: "\u8BBE\u5B9A\u8D44\u4EA7",\n    storyboard: "\u5206\u955C",\n    workflow: "\u5DE5\u4F5C\u6D41",\n    ready: "\u53EF\u62CD\u6444",\n    wrapped: "\u5DF2\u5408\u7247",\n};\n// \u4EFB\u52A1\u7C7B\u578B\u6587\u6848\nconst TASK_KIND_LABEL = {\n    run: "\u5355\u6B21",\n    shot: "\u955C\u5934",\n    retake: "\u91CD\u62CD",\n    batch: "\u6279\u91CF",\n    metadata: "\u5143\u6570\u636E",\n};\n// \u6700\u5927\u64AD\u653E\u5217\u8868\u957F\u5EA6\nconst MAX_PLAYLIST = 200;\n// \u6587\u672C\u9884\u89C8\u4E0A\u9650\nconst TEXT_PREVIEW_LIMIT = 200_000;\n// \u4EFB\u52A1\u8BE6\u60C5\u7F13\u5B58\u65F6\u95F4\uFF08\u6BEB\u79D2\uFF09\nconst TASK_DETAIL_CACHE_MS = 2000;\n// \u65F6\u95F4\u683C\u5F0F\u5668\nconst TIME_FORMATTER = new Intl.DateTimeFormat("zh-CN", {\n    year: "numeric",\n    month: "2-digit",\n    day: "2-digit",\n    hour: "2-digit",\n    minute: "2-digit",\n    second: "2-digit",\n    hour12: false,\n});\n// \u5B57\u8282\u5355\u4F4D\nconst BYTE_UNITS = ["B", "KB", "MB", "GB", "TB"];\n// hash \u524D\u7F00\nconst HASH_PREFIX = "#/";\n// \u53EF\u64AD\u653E\u7C7B\u578B\nconst PLAYABLE_KINDS = new Set(["video", "audio"]);\n// \u53EF\u9884\u89C8\u7C7B\u578B\nconst PREVIEW_KINDS = new Set(["video", "audio", "image", "json", "text"]);\n\n// \u5E94\u7528\u6839\u8282\u70B9\nconst appRoot = document.querySelector("#app");\n// \u6A21\u6001\u6846\u6839\u8282\u70B9\nconst modalRoot = document.querySelector("#modal");\n// \u6A21\u6001\u6807\u9898\nconst modalTitle = document.querySelector("#modal-title");\n// \u6A21\u6001\u5185\u5BB9\nconst modalContent = document.querySelector("#modal-content");\n// \u6A21\u6001\u8BA1\u6570\nconst modalCounter = document.querySelector("#modal-counter");\n// \u4E0A\u4E00\u4E2A\u6309\u94AE\nconst modalPrev = document.querySelector("#modal-prev");\n// \u4E0B\u4E00\u4E2A\u6309\u94AE\nconst modalNext = document.querySelector("#modal-next");\n// \u5173\u95ED\u6309\u94AE\nconst modalClose = document.querySelector("#modal-close");\n// Toast \u6839\u8282\u70B9\nconst toastRoot = document.querySelector("#toast");\n\n// \u5F53\u524D\u89C6\u56FE\nlet currentView = DEFAULT_VIEW;\n// \u5F53\u524D\u5267\u96C6 id\nlet currentEpisodeId = null;\n// \u5F53\u524D\u89C6\u56FE\u662F\u5426\u5DF2\u6210\u529F\u52A0\u8F7D\nlet loaded = false;\n// \u4E0A\u6B21\u6E32\u67D3\u7684\u6570\u636E\u7B7E\u540D\uFF08\u907F\u514D\u8F6E\u8BE2\u91CD\u590D\u91CD\u5EFA DOM\uFF09\nlet lastSignature = "";\n// \u5F53\u524D\u8BF7\u6C42\u63A7\u5236\u5668\nlet requestController = null;\n// \u8F6E\u8BE2\u5B9A\u65F6\u5668\nlet pollTimer = null;\n// \u5F53\u524D\u4EA7\u7269\u7B5B\u9009\nlet artifactFilters = { label: "", status: "", kind: "", search: "" };\n// \u5F53\u524D\u5206\u955C\u7B5B\u9009\nlet shotFilters = { character: "", scene: "", status: "", search: "" };\n// \u5F53\u524D\u5C55\u5F00\u7684 task id\nlet openTaskId = null;\n// \u4EFB\u52A1\u8BE6\u60C5\u7F13\u5B58\nconst taskDetailCache = new Map();\n// \u64AD\u653E\u5217\u8868\nlet playerItems = [];\n// \u64AD\u653E\u7D22\u5F15\nlet playerIndex = 0;\n// Toast \u5B9A\u65F6\u5668\nlet toastTimer = null;\n// \u6700\u540E\u66F4\u65B0\u65F6\u95F4\nlet lastUpdatedAt = "";\n\n// \u4FA7\u8FB9\u5BFC\u822A\u5BB9\u5668\nlet navRoot = null;\n// \u4E3B\u5185\u5BB9\u5BB9\u5668\nlet viewRoot = null;\n// \u9879\u76EE\u540D\u5143\u7D20\nlet projectNameEl = null;\n// \u6A21\u5F0F\u5143\u7D20\nlet modeEl = null;\n// \u8FDE\u63A5\u72B6\u6001\u5143\u7D20\nlet connectionEl = null;\n// \u66F4\u65B0\u65F6\u95F4\u5143\u7D20\nlet updatedEl = null;\n\n/**\n * \u521B\u5EFA\u5143\u7D20\u5E76\u8BBE\u7F6E\u6587\u672C\u3002\n */\nfunction createElement(tag, className, text) {\n    // \u65B0\u5143\u7D20\n    const node = document.createElement(tag);\n    if (className !== undefined && className !== "") node.className = className;\n    if (text !== undefined && text !== null) node.textContent = String(text);\n    return node;\n}\n\n/**\n * \u6E05\u7A7A\u5B50\u8282\u70B9\u3002\n */\nfunction clearNode(node) {\n    while (node.firstChild !== null) node.removeChild(node.firstChild);\n}\n\n/**\n * \u683C\u5F0F\u5316\u5B57\u8282\u3002\n */\nfunction formatBytes(bytes) {\n    // \u515C\u5E95\u6570\u503C\n    const value = Number(bytes);\n    if (!Number.isFinite(value) || value <= 0) return "0 B";\n    // \u5355\u4F4D\u6307\u6570\n    let index = 0;\n    // \u5F53\u524D\u6570\u503C\n    let current = value;\n    while (current >= 1024 && index < BYTE_UNITS.length - 1) {\n        current /= 1024;\n        index += 1;\n    }\n    // \u5C0F\u6570\u4F4D\n    const digits = index === 0 ? 0 : current >= 10 ? 1 : 2;\n    return `${current.toFixed(digits)} ${BYTE_UNITS[index]}`;\n}\n\n/**\n * \u683C\u5F0F\u5316\u65F6\u95F4\u3002\n */\nfunction formatTime(iso) {\n    if (typeof iso !== "string" || iso === "") return "\u2014";\n    // \u65F6\u95F4\u5BF9\u8C61\n    const date = new Date(iso);\n    if (Number.isNaN(date.getTime())) return "\u2014";\n    return TIME_FORMATTER.format(date);\n}\n\n/**\n * \u683C\u5F0F\u5316\u8017\u65F6\u3002\n */\nfunction formatDuration(ms) {\n    // \u6BEB\u79D2\u503C\n    const value = Number(ms);\n    if (!Number.isFinite(value) || value <= 0) return "0 \u79D2";\n    if (value < 1000) return `${Math.round(value)} \u6BEB\u79D2`;\n    // \u79D2\n    const seconds = Math.round(value / 1000);\n    if (seconds < 60) return `${seconds} \u79D2`;\n    // \u5206\u949F/\u79D2\n    const minutes = Math.floor(seconds / 60);\n    // \u4F59\u6570\u79D2\n    const rest = seconds % 60;\n    return rest === 0 ? `${minutes} \u5206` : `${minutes} \u5206 ${rest} \u79D2`;\n}\n\n/**\n * \u77ED id\u3002\n */\nfunction shortId(id) {\n    if (typeof id !== "string") return "\u2014";\n    return id.length > 20 ? `${id.slice(0, 20)}\u2026` : id;\n}\n\n/**\n * \u6587\u672C\u515C\u5E95\u3002\n */\nfunction textOrDash(value) {\n    if (value === undefined || value === null || value === "") return "\u2014";\n    return String(value);\n}\n\n/**\n * \u901A\u7528\u5FBD\u6807\u3002\n */\nfunction badge(text, className) {\n    return createElement("span", `badge ${className ?? ""}`.trim(), text);\n}\n\n/**\n * \u72B6\u6001\u5FBD\u6807\u3002\n */\nfunction statusBadge(status, text) {\n    // \u72B6\u6001\u952E\n    const key = typeof status === "string" && status !== "" ? status : "queued";\n    return badge(text ?? STATUS_LABEL[key] ?? key, `status-${key}`);\n}\n\n/**\n * \u7C7B\u578B\u5FBD\u6807\u3002\n */\nfunction kindBadge(kind) {\n    // \u7C7B\u578B\u952E\n    const key = typeof kind === "string" && kind !== "" ? kind : "other";\n    return badge(KIND_LABEL[key] ?? key, `kind-${key}`);\n}\n\n/**\n * \u8FFD\u52A0\u952E\u503C\u884C\u3002\n */\nfunction appendKv(dl, key, value) {\n    dl.append(createElement("dt", "", key));\n    dl.append(createElement("dd", "", textOrDash(value)));\n}\n\n/**\n * \u4EBA\u7269 / \u573A\u666F\u53BB\u91CD\u952E\u3002\n */\nfunction entityKey(entity) {\n    return entity.id !== null && entity.id !== undefined ? `id:${entity.id}` : `name:${entity.name}`;\n}\n\n/**\n * \u683C\u5F0F\u5316\u79D2\u6570\u3002\n */\nfunction formatSeconds(seconds) {\n    // \u6570\u503C\u515C\u5E95\n    const value = Number(seconds);\n    if (!Number.isFinite(value) || value < 0) return "\u2014";\n    if (value < 60) return Number.isInteger(value) ? `${value} \u79D2` : `${value.toFixed(1)} \u79D2`;\n    // \u5206\u949F\u4E0E\u4F59\u79D2\n    const minutes = Math.floor(value / 60);\n    const rest = Math.round(value % 60);\n    return rest === 0 ? `${minutes} \u5206` : `${minutes} \u5206 ${rest} \u79D2`;\n}\n\n/**\n * \u4EBA\u7269 / \u573A\u666F chip\u3002\n */\nfunction entityChip(entity, className) {\n    // chip\n    const chip = createElement("span", `chip ${className ?? ""}`.trim(), entity.name);\n    if (entity.description) chip.title = entity.description;\n    return chip;\n}\n\n/**\n * \u4E00\u7EC4\u4EBA\u7269 / \u573A\u666F chip\u3002\n */\nfunction entityChips(entities, className) {\n    // chip \u5BB9\u5668\n    const row = createElement("div", "chip-row");\n    if (!Array.isArray(entities) || entities.length === 0) {\n        row.append(createElement("span", "muted", "\u672A\u6807\u6CE8"));\n        return row;\n    }\n    for (const entity of entities) row.append(entityChip(entity, className));\n    return row;\n}\n\n/**\n * \u5206\u955C\u72B6\u6001\u5FBD\u6807\u3002\n */\nfunction shotStatusBadge(shot) {\n    if (shot.done === true) return statusBadge("succeeded", "\u5DF2\u5B8C\u6210");\n    if (shot.latest_status === "failed") return statusBadge("failed");\n    if (shot.latest_status === "running" || shot.latest_status === "queued") {\n        return statusBadge(shot.latest_status);\n    }\n    return statusBadge("queued", "\u672A\u5B8C\u6210");\n}\n\n/**\n * \u8BF7\u6C42 JSON \u5E76\u89E3\u5305\u4FE1\u5C01\u3002\n */\nasync function requestJson(path, signal) {\n    // \u54CD\u5E94\n    const response = await fetch(path, { headers: { Accept: "application/json" }, signal });\n    // \u54CD\u5E94\u4F53\n    const payload = await response.json();\n    if (payload.ok !== true) {\n        throw new Error(payload.error !== undefined ? payload.error.message : `\u8BF7\u6C42\u5931\u8D25\uFF08HTTP ${response.status}\uFF09`);\n    }\n    return payload.data;\n}\n\n/**\n * \u5F53\u524D\u89C6\u56FE\u8BF7\u6C42\uFF08\u53EF\u88AB\u4E0B\u4E00\u6B21\u5BFC\u822A\u4E2D\u6B62\uFF09\u3002\n */\nasync function fetchJson(path) {\n    // \u8BF7\u6C42\u63A7\u5236\u5668\n    const controller = new AbortController();\n    requestController = controller;\n    try {\n        return await requestJson(path, controller.signal);\n    } finally {\n        if (requestController === controller) requestController = null;\n    }\n}\n\n/**\n * \u6E32\u67D3\u9875\u9762\u9AA8\u67B6\u3002\n */\nfunction renderShell() {\n    appRoot.innerHTML = `\n        <div class="app-shell">\n            <aside class="sidebar">\n                <div class="brand">\n                    <div class="brand-mark"><span class="brand-dot"></span>daoyan web</div>\n                    <p class="brand-sub">\u4E34\u65F6\u53EA\u8BFB\u9879\u76EE\u67E5\u770B\u5668</p>\n                </div>\n                <nav id="nav" class="nav" aria-label="\u9875\u9762\u5BFC\u822A"></nav>\n                <div class="sidebar-foot">\n                    <code>Ctrl+C</code> \u505C\u6B62\u670D\u52A1<br />\n                    \u6570\u636E\u6765\u81EA\u5F53\u524D\u9879\u76EE\u76EE\u5F55\uFF0C\u53EA\u8BFB\u3002\n                </div>\n            </aside>\n            <main class="main">\n                <header class="topbar">\n                    <div class="topbar-left">\n                        <h1 id="project-name" class="project-name">\u9879\u76EE</h1>\n                        <span id="project-mode" class="project-mode">\u2014</span>\n                    </div>\n                    <div class="topbar-right">\n                        <span id="connection" class="connection">\n                            <span class="connection-dot"></span>\n                            <span id="connection-text">\u8FDE\u63A5\u4E2D</span>\n                        </span>\n                        <span id="updated-at" class="muted">\u2014</span>\n                    </div>\n                </header>\n                <section id="view" class="content" aria-live="polite"></section>\n            </main>\n        </div>\n    `;\n    navRoot = document.querySelector("#nav");\n    viewRoot = document.querySelector("#view");\n    projectNameEl = document.querySelector("#project-name");\n    modeEl = document.querySelector("#project-mode");\n    connectionEl = document.querySelector("#connection");\n    updatedEl = document.querySelector("#updated-at");\n}\n\n/**\n * \u6E32\u67D3\u5BFC\u822A\u3002\n */\nfunction renderNav() {\n    clearNode(navRoot);\n    for (const view of VIEWS) {\n        // \u5BFC\u822A\u6309\u94AE\n        const button = createElement("button", "nav-item");\n        button.type = "button";\n        button.dataset.view = view.id;\n        button.append(createElement("span", "nav-label", view.label));\n        button.append(createElement("span", "nav-hint", view.hint));\n        button.addEventListener("click", () => {\n            window.location.hash = `${HASH_PREFIX}${view.id}`;\n        });\n        navRoot.append(button);\n    }\n}\n\n/**\n * \u9AD8\u4EAE\u5F53\u524D\u5BFC\u822A\u3002\n */\nfunction setActiveNav() {\n    if (navRoot === null) return;\n    // \u5267\u96C6\u8BE6\u60C5\u5F52\u5C5E\u6982\u89C8\n    const activeView = currentView === "episode" ? "overview" : currentView;\n    for (const button of navRoot.querySelectorAll(".nav-item")) {\n        button.classList.toggle("active", button.dataset.view === activeView);\n    }\n}\n\n/**\n * \u66F4\u65B0\u8FDE\u63A5\u72B6\u6001\u3002\n */\nfunction setConnection(state, text) {\n    if (connectionEl === null) return;\n    connectionEl.classList.remove("ok", "error");\n    if (state === "ok") connectionEl.classList.add("ok");\n    if (state === "error") connectionEl.classList.add("error");\n    // \u72B6\u6001\u6587\u672C\n    const textEl = connectionEl.querySelector("#connection-text");\n    if (textEl !== null) textEl.textContent = text;\n}\n\n/**\n * \u52A0\u8F7D\u9876\u680F\u9879\u76EE\u4FE1\u606F\uFF08\u4E0D\u63A2\u6D4B\u5F15\u64CE\uFF09\u3002\n */\nasync function loadHeader() {\n    try {\n        // \u5065\u5EB7\u68C0\u67E5\u6570\u636E\n        const data = await requestJson("/api/health");\n        if (projectNameEl !== null && typeof data.project === "string") projectNameEl.textContent = data.project;\n        if (modeEl !== null) modeEl.textContent = data.mode === null ? "\u672A\u7ED1\u5B9A\u672C\u673A" : data.mode;\n    } catch {\n        // \u9876\u680F\u5931\u8D25\u4E0D\u5F71\u54CD\u9875\u9762\u4E3B\u4F53\n    }\n}\n\n/**\n * \u66F4\u65B0\u9876\u680F\u9879\u76EE\u4FE1\u606F\u3002\n */\nfunction updateHeader(data) {\n    if (projectNameEl !== null && data !== null && data.project !== undefined && data.project.name !== undefined) {\n        projectNameEl.textContent = data.project.name;\n    }\n    if (modeEl !== null && data !== null && data.mode !== undefined) {\n        modeEl.textContent = data.mode === null ? "\u672A\u7ED1\u5B9A\u672C\u673A" : data.mode;\n    }\n    if (updatedEl !== null) {\n        updatedEl.textContent = lastUpdatedAt === "" ? "\u2014" : `\u66F4\u65B0\u4E8E ${formatTime(lastUpdatedAt)}`;\n    }\n}\n\n/**\n * \u663E\u793A\u9519\u8BEF\u6761\u3002\n */\nfunction showError(message) {\n    if (viewRoot === null) return;\n    // \u73B0\u6709\u9519\u8BEF\u6761\n    let banner = viewRoot.querySelector(".error-banner");\n    if (banner === null) {\n        banner = createElement("div", "error-banner");\n        viewRoot.prepend(banner);\n    }\n    banner.textContent = message;\n}\n\n/**\n * \u6E05\u9664\u9519\u8BEF\u6761\u3002\n */\nfunction clearError() {\n    if (viewRoot === null) return;\n    // \u73B0\u6709\u9519\u8BEF\u6761\n    const banner = viewRoot.querySelector(".error-banner");\n    if (banner !== null) banner.remove();\n}\n\n/**\n * \u663E\u793A Toast\u3002\n */\nfunction showToast(message, isError) {\n    toastRoot.textContent = message;\n    toastRoot.classList.toggle("error", isError === true);\n    toastRoot.hidden = false;\n    if (toastTimer !== null) window.clearTimeout(toastTimer);\n    toastTimer = window.setTimeout(() => {\n        toastRoot.hidden = true;\n    }, 2600);\n}\n\n/**\n * \u7A7A\u72B6\u6001\u8282\u70B9\u3002\n */\nfunction emptyNode(title, body) {\n    // \u5BB9\u5668\n    const box = createElement("div", "empty");\n    box.append(createElement("p", "empty-title", title));\n    box.append(createElement("p", "empty-body", body));\n    return box;\n}\n\n/**\n * \u52A0\u8F7D\u72B6\u6001\u3002\n */\nfunction renderLoading() {\n    if (viewRoot === null) return;\n    clearNode(viewRoot);\n    // \u52A0\u8F7D\u5BB9\u5668\n    const box = createElement("div", "loading");\n    box.append(createElement("span", "spinner"));\n    box.append(createElement("span", "", "\u52A0\u8F7D\u4E2D\u2026"));\n    viewRoot.append(box);\n}\n\n/**\n * \u8BA1\u7B97\u7528\u4E8E\u8DF3\u8FC7\u91CD\u590D\u6E32\u67D3\u7684\u6570\u636E\u7B7E\u540D\uFF08\u5FFD\u7565\u6982\u89C8\u7684\u751F\u6210\u65F6\u95F4\uFF09\u3002\n */\nfunction signatureOf(data) {\n    if (data !== null && typeof data === "object" && Object.prototype.hasOwnProperty.call(data, "generated_at")) {\n        // \u53BB\u6389\u65F6\u95F4\u6233\u540E\u7684\u526F\u672C\n        const copy = { ...data };\n        delete copy.generated_at;\n        return JSON.stringify(copy);\n    }\n    return JSON.stringify(data);\n}\n\n/**\n * \u52A0\u8F7D\u5F53\u524D\u89C6\u56FE\u3002\n */\nasync function loadCurrent() {\n    if (requestController !== null) requestController.abort();\n    // \u76EE\u6807\u89C6\u56FE\n    const view = currentView;\n    if (!loaded) renderLoading();\n    try {\n        // \u63A5\u53E3\u6570\u636E\n        const path =\n            view === "episode" && currentEpisodeId !== null\n                ? `/api/episodes/${encodeURIComponent(currentEpisodeId)}`\n                : API[view];\n        const data = await fetchJson(path);\n        if (view !== currentView) return;\n        // \u6570\u636E\u7B7E\u540D\uFF08\u7A33\u5B9A\u9875\u9762\u4E0D\u91CD\u590D\u91CD\u5EFA DOM\uFF09\n        const signature = signatureOf(data);\n        lastUpdatedAt = new Date().toISOString();\n        updateHeader(data);\n        setConnection("ok", "\u5DF2\u8FDE\u63A5");\n        if (loaded && signature === lastSignature) return;\n        loaded = true;\n        lastSignature = signature;\n        renderView(view, data);\n    } catch (error) {\n        if (error !== null && error !== undefined && error.name === "AbortError") return;\n        setConnection("error", "\u8FDE\u63A5\u5931\u8D25");\n        if (!loaded) {\n            clearNode(viewRoot);\n            viewRoot.append(emptyNode("\u65E0\u6CD5\u52A0\u8F7D", "\u8BF7\u786E\u8BA4\u670D\u52A1\u4ECD\u5728\u8FD0\u884C\uFF0C\u6216\u5237\u65B0\u9875\u9762\u91CD\u8BD5\u3002"));\n        }\n        showError(error instanceof Error ? error.message : "\u52A0\u8F7D\u5931\u8D25");\n    }\n}\n\n/**\n * \u5207\u6362\u89C6\u56FE\u3002\n */\nfunction onHashChange() {\n    // \u539F\u59CB hash\n    const raw = window.location.hash.replace(/^#\\/?/, "");\n    // \u8DEF\u5F84\u6BB5\n    const parts = raw.split("/");\n    // \u76EE\u6807\u89C6\u56FE / \u5267\u96C6\n    let view = DEFAULT_VIEW;\n    let episodeId = null;\n    if (parts[0] === "episode" && parts[1] !== undefined && parts[1] !== "") {\n        try {\n            episodeId = decodeURIComponent(parts[1]);\n            view = "episode";\n        } catch {\n            view = DEFAULT_VIEW;\n        }\n    } else {\n        view = VIEW_IDS.has(raw) ? raw : DEFAULT_VIEW;\n    }\n    currentView = view;\n    currentEpisodeId = episodeId;\n    loaded = false;\n    lastSignature = "";\n    openTaskId = null;\n    setActiveNav();\n    renderLoading();\n    void loadCurrent();\n    schedulePoll();\n}\n\n/**\n * \u5B89\u6392\u8F6E\u8BE2\u3002\n */\nfunction schedulePoll() {\n    if (pollTimer !== null) window.clearInterval(pollTimer);\n    // \u5F53\u524D\u95F4\u9694\n    const interval = POLL_MS[currentView] ?? 5000;\n    pollTimer = window.setInterval(() => {\n        if (document.hidden) return;\n        void loadCurrent();\n    }, interval);\n}\n\n/**\n * \u5206\u53D1\u89C6\u56FE\u6E32\u67D3\u3002\n */\nfunction renderView(view, data) {\n    if (viewRoot === null) return;\n    clearNode(viewRoot);\n    if (view === "overview") renderOverview(data);\n    else if (view === "episode") renderEpisode(data);\n    else if (view === "characters") renderCharacters(data);\n    else if (view === "scenes") renderScenes(data);\n    else if (view === "voices") renderVoices(data);\n    else if (view === "assets") renderAssets(data);\n    else if (view === "shots") renderShots(data);\n    else if (view === "artifacts") renderArtifacts(data);\n    else if (view === "tasks") renderTasks(data);\n    else if (view === "finals") renderFinals(data);\n    else if (view === "workflows") renderWorkflows(data);\n    clearError();\n}\n\n/**\n * \u72B6\u6001\u5361\u7247\u3002\n */\nfunction statCard(label, value, hint) {\n    // \u5361\u7247\n    const card = createElement("div", "stat-card");\n    card.append(createElement("p", "stat-label", label));\n    card.append(createElement("p", "stat-value", value));\n    if (hint !== undefined) card.append(createElement("p", "stat-hint", hint));\n    return card;\n}\n\n/**\n * story \u6A21\u5F0F\u9690\u85CF legacy \u5206\u955C\u5165\u53E3\u3002\n */\nfunction hideLegacyShotsNav() {\n    if (navRoot === null) return;\n    // \u5206\u955C\u5BFC\u822A\n    const button = navRoot.querySelector(\'.nav-item[data-view="shots"]\');\n    if (button !== null) button.remove();\n}\n\n/**\n * \u5267\u60C5\u9636\u6BB5\u5FBD\u6807\u3002\n */\nfunction stageBadge(stage) {\n    return badge(STAGE_LABEL[stage] ?? stage, `stage-${stage}`);\n}\n\n/**\n * \u8D44\u4EA7\u7F29\u7565 / \u64AD\u653E\u8282\u70B9\u3002\n */\nfunction assetNode(asset, compact) {\n    // \u5BB9\u5668\n    const box = createElement("div", compact === true ? "asset-compact" : "asset-tile");\n    if (asset === null || asset === undefined) {\n        box.append(createElement("span", "muted", "\u65E0\u8D44\u4EA7"));\n        return box;\n    }\n    if (asset.present !== true || asset.lfs_pointer === true) {\n        box.append(createElement("span", "asset-missing", asset.lfs_pointer === true ? "LFS \u672A\u62C9\u53D6" : "\u6587\u4EF6\u7F3A\u5931"));\n        return box;\n    }\n    if (asset.kind === "image") {\n        // \u56FE\u7247\n        const img = document.createElement("img");\n        img.src = asset.media_url;\n        img.alt = asset.path;\n        img.loading = "lazy";\n        box.append(img);\n    } else if (asset.kind === "audio") {\n        // \u97F3\u9891\n        const audio = document.createElement("audio");\n        audio.controls = true;\n        audio.preload = "metadata";\n        audio.src = asset.media_url;\n        box.append(audio);\n    } else {\n        box.append(createElement("span", "preview-icon", KIND_ICON[asset.kind] ?? "\u2193"));\n    }\n    box.append(createElement("span", "asset-name mono", asset.path));\n    return box;\n}\n\n/**\n * \u7CFB\u5217\u6982\u89C8\u3002\n */\nfunction renderStorySeries(story) {\n    hideLegacyShotsNav();\n    // \u533A\u5757\u5934\n    const head = createElement("div", "section-head");\n    head.append(createElement("h3", "section-title", "\u5267\u96C6"));\n    head.append(createElement("span", "section-meta", `${story.series.episodes_total} \u96C6`));\n    viewRoot.append(head);\n    // \u5267\u96C6\u7F51\u683C\n    const grid = createElement("div", "grid");\n    for (const episode of story.episodes) {\n        // \u5361\u7247\n        const card = createElement("article", "card episode-card");\n        // \u5185\u5BB9\n        const body = createElement("div", "card-body");\n        body.append(createElement("p", "eyebrow", `\u7B2C ${episode.number} \u96C6`));\n        body.append(createElement("h3", "card-title", episode.title));\n        // \u5143\u4FE1\u606F\n        const meta = createElement("div", "card-meta");\n        meta.append(stageBadge(episode.stage));\n        meta.append(createElement("span", "", `\u5267\u672C r${episode.script.revision} \xB7 ${episode.script.status}`));\n        if (episode.blockers.length > 0) {\n            meta.append(createElement("span", "text-warn", `${episode.blockers.length} \u9879\u963B\u65AD`));\n        }\n        body.append(meta);\n        // \u963B\u65AD\u6458\u8981\n        if (episode.blockers.length > 0) {\n            const list = createElement("ul", "mini-list");\n            for (const blocker of episode.blockers.slice(0, 3)) {\n                list.append(createElement("li", "", blocker.message));\n            }\n            body.append(list);\n        }\n        // \u64CD\u4F5C\n        const actions = createElement("div", "card-actions");\n        const open = createElement("button", "button", "\u67E5\u770B\u5267\u96C6");\n        open.type = "button";\n        open.addEventListener("click", () => {\n            window.location.hash = `${HASH_PREFIX}episode/${encodeURIComponent(episode.id)}`;\n        });\n        actions.append(open);\n        body.append(actions);\n        card.append(body);\n        grid.append(card);\n    }\n    viewRoot.append(grid);\n    // \u4E0B\u4E00\u6B65\n    if (Array.isArray(story.next_actions) && story.next_actions.length > 0) {\n        const callout = createElement("div", "callout");\n        callout.append(createElement("strong", "", "\u4E0B\u4E00\u6B65"));\n        const list = createElement("ul", "mini-list");\n        for (const action of story.next_actions) list.append(createElement("li", "", action));\n        callout.append(list);\n        viewRoot.append(callout);\n    }\n}\n\n/**\n * \u5267\u96C6\u8BE6\u60C5\u3002\n */\nfunction renderEpisode(data) {\n    hideLegacyShotsNav();\n    // \u5267\u96C6 / \u72B6\u6001\n    const episode = data.episode;\n    const status = data.status;\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", `Episode ${episode.id}`));\n    headText.append(createElement("h2", "page-title", `\u7B2C ${episode.number} \u96C6 \xB7 ${episode.title}`));\n    headText.append(createElement("p", "page-subtitle", episode.summary ?? ""));\n    head.append(headText);\n    // \u8FD4\u56DE\n    const back = createElement("button", "button ghost", "\u2190 \u8FD4\u56DE\u6982\u89C8");\n    back.type = "button";\n    back.addEventListener("click", () => {\n        window.location.hash = `${HASH_PREFIX}overview`;\n    });\n    head.append(back);\n    viewRoot.append(head);\n    // \u9636\u6BB5\n    const stageRow = createElement("div", "chip-row");\n    stageRow.append(stageBadge(status.stage));\n    stageRow.append(createElement("span", "muted", `\u5267\u672C r${status.script.revision} \xB7 ${status.script.status}`));\n    stageRow.append(createElement("span", "muted", `\u62C6\u89E3 r${status.documents.breakdown.source_revision}`));\n    stageRow.append(createElement("span", "muted", `\u5206\u955C r${status.documents.shots.source_revision}`));\n    viewRoot.append(stageRow);\n    // \u963B\u65AD\n    if (status.blockers.length > 0) {\n        const callout = createElement("div", "callout warn");\n        callout.append(createElement("strong", "", `\u95E8\u7981\u963B\u65AD ${status.blockers.length} \u9879`));\n        const list = createElement("ul", "mini-list");\n        for (const blocker of status.blockers)\n            list.append(createElement("li", "", `[${blocker.code}] ${blocker.message}`));\n        callout.append(list);\n        viewRoot.append(callout);\n    }\n    // \u5267\u672C\n    const scriptHead = createElement("div", "section-head");\n    scriptHead.append(createElement("h3", "section-title", "\u5267\u672C"));\n    scriptHead.append(createElement("span", "section-meta", `r${data.script.meta.revision}`));\n    viewRoot.append(scriptHead);\n    const script = createElement(\n        "pre",\n        "script-text",\n        data.script.content === "" ? "\uFF08\u5C1A\u672A\u540C\u6B65\uFF09" : data.script.content,\n    );\n    viewRoot.append(script);\n    // \u62C6\u89E3\n    const breakdown = data.breakdown;\n    const breakdownHead = createElement("div", "section-head");\n    breakdownHead.append(createElement("h3", "section-title", "\u672C\u96C6\u62C6\u89E3"));\n    breakdownHead.append(\n        createElement("span", "section-meta", breakdown === null ? "\u7F3A\u5931" : `source r${breakdown.source_revision}`),\n    );\n    viewRoot.append(breakdownHead);\n    if (breakdown === null) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u62C6\u89E3", "\u4F7F\u7528 daoyan story breakdown set \u5199\u5165\u672C\u96C6\u89D2\u8272\u3001\u5F62\u6001\u3001\u573A\u666F\u4E0E\u97F3\u8272\u3002"));\n    } else {\n        const list = createElement("div", "layout-two");\n        // \u89D2\u8272\n        const cast = createElement("div", "panel");\n        cast.append(createElement("h4", "panel-title", "\u89D2\u8272\u4E0E\u5F62\u6001"));\n        const castList = createElement("ul", "mini-list");\n        for (const item of breakdown.characters) {\n            castList.append(createElement("li", "", `${item.id} \xB7 ${item.forms.join(" / ")}`));\n        }\n        cast.append(castList);\n        // \u573A\u666F / \u97F3\u8272 / beat\n        const other = createElement("div", "panel");\n        other.append(createElement("h4", "panel-title", "\u573A\u666F / \u97F3\u8272 / Beat"));\n        other.append(createElement("p", "", `\u573A\u666F\uFF1A${breakdown.scenes.join("\u3001") || "\u65E0"}`));\n        other.append(createElement("p", "", `\u97F3\u8272\uFF1A${breakdown.voices.join("\u3001") || "\u65E0"}`));\n        other.append(createElement("p", "", `Beat\uFF1A${(breakdown.beats ?? []).map((b) => b.id).join("\u3001") || "\u65E0"}`));\n        list.append(cast);\n        list.append(other);\n        viewRoot.append(list);\n    }\n    // \u5206\u955C\n    const shots = data.shots;\n    const shotsHead = createElement("div", "section-head");\n    shotsHead.append(createElement("h3", "section-title", "\u5206\u955C"));\n    shotsHead.append(\n        createElement("span", "section-meta", shots === null ? "\u7F3A\u5931" : `${shots.summary.shots_total} \u955C`),\n    );\n    viewRoot.append(shotsHead);\n    if (shots === null || shots.shots.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u5206\u955C", "\u4F7F\u7528 daoyan story shots set \u5199\u5165\u672C\u96C6\u5206\u955C\u3002"));\n    } else {\n        const grid = createElement("div", "shot-grid");\n        for (const shot of shots.shots) grid.append(renderShotCard(shot));\n        viewRoot.append(grid);\n    }\n    // \u4EFB\u52A1\n    const taskHead = createElement("div", "section-head");\n    taskHead.append(createElement("h3", "section-title", "\u672C\u96C6\u4EFB\u52A1"));\n    taskHead.append(createElement("span", "section-meta", `${data.tasks.length} \u4E2A`));\n    viewRoot.append(taskHead);\n    if (data.tasks.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u4EFB\u52A1", "\u62CD\u6444\u672C\u96C6\u540E\uFF0Ctask \u4F1A\u51FA\u73B0\u5728\u8FD9\u91CC\u3002"));\n    } else {\n        const list = createElement("div", "task-list");\n        for (const task of data.tasks.slice(0, 10)) {\n            const row = createElement("div", "task-row");\n            row.append(createElement("span", "mono", task.task_id));\n            row.append(createElement("span", "", task.command));\n            row.append(statusBadge(task.status));\n            list.append(row);\n        }\n        viewRoot.append(list);\n    }\n    // \u6210\u7247\n    const finalHead = createElement("div", "section-head");\n    finalHead.append(createElement("h3", "section-title", "\u6210\u7247"));\n    finalHead.append(createElement("span", "section-meta", `${data.finals.length} \u4E2A`));\n    viewRoot.append(finalHead);\n    if (data.finals.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u6210\u7247", "\u8FD0\u884C daoyan wrap --episode <id> \u540E\u51FA\u73B0\u3002"));\n    } else {\n        const list = createElement("div", "task-list");\n        for (const item of data.finals) {\n            const row = createElement("div", "task-row");\n            row.append(createElement("span", "mono", item.name));\n            row.append(createElement("span", "", formatTime(item.created_at ?? "")));\n            const play = createElement("button", "button", "\u64AD\u653E");\n            play.type = "button";\n            play.addEventListener("click", () => {\n                openPlayer([{ title: item.name, url: item.media_url, kind: "video" }], 0);\n            });\n            row.append(play);\n            list.append(row);\n        }\n        viewRoot.append(list);\n    }\n}\n\n/**\n * \u89D2\u8272\u9875\u3002\n */\nfunction renderCharacters(data) {\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", "Characters"));\n    headText.append(createElement("h2", "page-title", "\u89D2\u8272\u4E0E\u5F62\u6001"));\n    headText.append(createElement("p", "page-subtitle", "\u8DE8\u96C6\u5171\u4EAB\u7684\u5168\u5C40\u8BBE\u5B9A\uFF1B\u4E3B\u53C2\u8003\u7531 AI / \u7528\u6237\u663E\u5F0F\u6307\u5B9A\u3002"));\n    head.append(headText);\n    viewRoot.append(head);\n    // \u89D2\u8272\n    const items = Array.isArray(data.items) ? data.items : [];\n    if (items.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u89D2\u8272", "\u4F7F\u7528 daoyan story characters set \u5199\u5165\u5168\u5C40\u89D2\u8272\u3002"));\n        return;\n    }\n    const grid = createElement("div", "grid");\n    for (const character of items) {\n        // \u5361\u7247\n        const card = createElement("article", "card entity-card");\n        const body = createElement("div", "card-body");\n        body.append(createElement("h3", "card-title", `${character.name} \xB7 ${character.id}`));\n        body.append(createElement("p", "muted", character.summary ?? ""));\n        for (const form of character.forms) {\n            // \u5F62\u6001\n            const block = createElement("div", "form-block");\n            block.append(createElement("h4", "form-title", `${form.name} \xB7 ${form.id}`));\n            // \u4E3B\u53C2\u8003\n            const reference = form.reference_asset\n                ? form.assets.find((asset) => asset.id === form.reference_asset)\n                : null;\n            block.append(assetNode(reference, false));\n            // \u5176\u5B83\u8D44\u4EA7\n            const more = createElement("div", "asset-row");\n            for (const asset of form.assets) {\n                if (reference !== null && asset.id === reference.id) continue;\n                more.append(assetNode(asset, true));\n            }\n            if (more.childElementCount > 0) block.append(more);\n            body.append(block);\n        }\n        card.append(body);\n        grid.append(card);\n    }\n    viewRoot.append(grid);\n}\n\n/**\n * \u573A\u666F\u9875\u3002\n */\nfunction renderScenes(data) {\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", "Scenes"));\n    headText.append(createElement("h2", "page-title", "\u573A\u666F"));\n    headText.append(createElement("p", "page-subtitle", "\u8DE8\u96C6\u5171\u4EAB\u7684\u573A\u666F\u53C2\u8003\u8D44\u4EA7\u3002"));\n    head.append(headText);\n    viewRoot.append(head);\n    // \u573A\u666F\n    const items = Array.isArray(data.items) ? data.items : [];\n    if (items.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u573A\u666F", "\u4F7F\u7528 daoyan story scenes set \u5199\u5165\u5168\u5C40\u573A\u666F\u3002"));\n        return;\n    }\n    const grid = createElement("div", "grid");\n    for (const scene of items) {\n        // \u5361\u7247\n        const card = createElement("article", "card entity-card");\n        const body = createElement("div", "card-body");\n        body.append(createElement("h3", "card-title", `${scene.name} \xB7 ${scene.id}`));\n        body.append(createElement("p", "muted", scene.description ?? ""));\n        const reference = scene.reference_asset\n            ? scene.assets.find((asset) => asset.id === scene.reference_asset)\n            : null;\n        body.append(assetNode(reference, false));\n        const more = createElement("div", "asset-row");\n        for (const asset of scene.assets) {\n            if (reference !== null && asset.id === reference.id) continue;\n            more.append(assetNode(asset, true));\n        }\n        if (more.childElementCount > 0) body.append(more);\n        card.append(body);\n        grid.append(card);\n    }\n    viewRoot.append(grid);\n}\n\n/**\n * \u97F3\u8272\u9875\u3002\n */\nfunction renderVoices(data) {\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", "Voices"));\n    headText.append(createElement("h2", "page-title", "\u97F3\u8272"));\n    headText.append(createElement("p", "page-subtitle", "\u89D2\u8272\u97F3\u8272\u6863\u6848\uFF1Breference \u6A21\u5F0F\u5FC5\u987B\u6709\u663E\u5F0F\u53C2\u8003\u97F3\u9891\u3002"));\n    head.append(headText);\n    viewRoot.append(head);\n    // \u97F3\u8272\n    const items = Array.isArray(data.items) ? data.items : [];\n    if (items.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u97F3\u8272", "\u4F7F\u7528 daoyan story voices set \u5199\u5165\u97F3\u8272\u3002"));\n        return;\n    }\n    const grid = createElement("div", "grid");\n    for (const voice of items) {\n        // \u5361\u7247\n        const card = createElement("article", "card entity-card");\n        const body = createElement("div", "card-body");\n        body.append(createElement("h3", "card-title", `${voice.name} \xB7 ${voice.id}`));\n        body.append(createElement("p", "muted", `${voice.character_id} \xB7 ${voice.mode}`));\n        body.append(createElement("p", "", voice.description ?? ""));\n        const reference = voice.reference_asset\n            ? voice.assets.find((asset) => asset.id === voice.reference_asset)\n            : null;\n        body.append(assetNode(reference, false));\n        if (voice.sample_text) body.append(createElement("blockquote", "quote", voice.sample_text));\n        card.append(body);\n        grid.append(card);\n    }\n    viewRoot.append(grid);\n}\n\n/**\n * \u8BBE\u5B9A\u8D44\u4EA7\u9875\u3002\n */\nfunction renderAssets(data) {\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", "Story assets"));\n    headText.append(createElement("h2", "page-title", "\u8BBE\u5B9A\u8D44\u4EA7"));\n    headText.append(createElement("p", "page-subtitle", "\u53C2\u8003\u56FE\u4E0E\u53C2\u8003\u97F3\u9891\uFF1B* \u8868\u793A\u5F53\u524D\u4E3B\u53C2\u8003\u3002"));\n    head.append(headText);\n    viewRoot.append(head);\n    // \u8D44\u4EA7\n    const items = Array.isArray(data.items) ? data.items : [];\n    if (items.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u8BBE\u5B9A\u8D44\u4EA7", "\u4F7F\u7528 daoyan story asset add \u5165\u5E93\u53C2\u8003\u56FE / \u97F3\u9891\u3002"));\n        return;\n    }\n    const grid = createElement("div", "grid");\n    for (const item of items) {\n        // \u5361\u7247\n        const card = createElement("article", "card entity-card");\n        const body = createElement("div", "card-body");\n        const owner = `${item.owner_kind}:${item.owner_id}${item.form_id !== null ? `/${item.form_id}` : ""}`;\n        body.append(createElement("h3", "card-title", `${item.reference ? "* " : ""}${item.asset.id}`));\n        body.append(createElement("p", "muted", `${owner} \xB7 ${item.owner_name}`));\n        body.append(assetNode(item.asset, false));\n        card.append(body);\n        grid.append(card);\n    }\n    viewRoot.append(grid);\n}\n\n/**\n * \u6982\u89C8\u9875\u3002\n */\nfunction renderOverview(data) {\n    // \u7EDF\u8BA1\n    const stats = data.stats ?? {};\n    // \u5206\u955C\u89C6\u56FE\n    const storyboard = data.storyboard !== undefined ? data.storyboard : null;\n    // \u7CFB\u5217\u72B6\u6001\n    const story = data.story !== undefined ? data.story : null;\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    // \u9875\u5934\u6587\u672C\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", "Overview"));\n    headText.append(createElement("h2", "page-title", data.project !== undefined ? data.project.name : "\u9879\u76EE\u6982\u89C8"));\n    // \u9879\u76EE\u6458\u8981\n    const subtitle = [`${data.mode ?? "\u672A\u7ED1\u5B9A\u672C\u673A"} \xB7 ${data.machine_id ?? "\u672C\u673A\u672A\u521D\u59CB\u5316"}`];\n    if (storyboard !== null && storyboard.summary !== undefined) {\n        subtitle.push(\n            `${storyboard.summary.shots_total} \u955C \xB7 ${storyboard.summary.characters_total} \u89D2\u8272 \xB7 ${storyboard.summary.scenes_total} \u573A\u666F`,\n        );\n    }\n    headText.append(createElement("p", "page-subtitle", subtitle.join(" \xB7 ")));\n    head.append(headText);\n    viewRoot.append(head);\n\n    if (data.machine === null) {\n        // \u672A\u521D\u59CB\u5316\u63D0\u793A\n        const callout = createElement("div", "callout");\n        callout.append(createElement("strong", "", "\u672C\u673A\u5C1A\u672A\u521D\u59CB\u5316\u3002"));\n        callout.append(document.createTextNode(" \u5F53\u524D\u4EC5\u5C55\u793A\u5171\u4EAB\u6570\u636E\uFF1B\u8FD0\u884C "));\n        callout.append(createElement("code", "mono", "daoyan init --mode=local|remote"));\n        callout.append(document.createTextNode(" \u7ED1\u5B9A\u672C\u673A\u540E\u5373\u53EF\u770B\u5230\u5F15\u64CE\u4E0E\u673A\u5668\u72B6\u6001\u3002"));\n        viewRoot.append(callout);\n    }\n\n    // \u7EDF\u8BA1\u7F51\u683C\n    const statsGrid = createElement("div", "stats-grid");\n    if (story !== null) {\n        statsGrid.append(\n            statCard(\n                "\u5267\u96C6",\n                `${story.series.episodes_ready ?? 0}/${story.series.episodes_total ?? 0}`,\n                "\u53EF\u62CD / \u603B\u96C6\u6570",\n            ),\n        );\n        statsGrid.append(statCard("\u89D2\u8272", stats.characters_total ?? 0, `${stats.forms_total ?? 0} \u4E2A\u5F62\u6001`));\n        statsGrid.append(statCard("\u573A\u666F", stats.scenes_total ?? 0, "\u5168\u5C40\u573A\u666F"));\n        statsGrid.append(statCard("\u97F3\u8272", stats.voices_total ?? 0, "\u5168\u5C40\u97F3\u8272"));\n        statsGrid.append(statCard("\u8BBE\u5B9A\u8D44\u4EA7", stats.assets_total ?? 0, "\u53C2\u8003\u56FE / \u97F3\u9891"));\n        statsGrid.append(statCard("\u955C\u5934", stats.shots_total ?? 0, `\u6210\u529F run ${stats.runs_succeeded ?? 0}`));\n    } else {\n        statsGrid.append(statCard("\u955C\u5934", `${stats.shots_done ?? 0}/${stats.shots_total ?? 0}`, "\u5DF2\u5B8C\u6210 / \u603B\u6570"));\n        statsGrid.append(statCard("\u4EBA\u7269", stats.characters_total ?? 0, "\u5DF2\u767B\u8BB0\u89D2\u8272"));\n        statsGrid.append(statCard("\u573A\u666F", stats.scenes_total ?? 0, "\u5DF2\u767B\u8BB0\u573A\u666F"));\n        statsGrid.append(statCard("\u4EA7\u51FA\u7269", stats.outputs_total ?? 0, formatBytes(stats.outputs_bytes ?? 0)));\n        statsGrid.append(\n            statCard(\n                "\u6210\u529F run",\n                `${stats.runs_succeeded ?? 0}/${stats.runs_total ?? 0}`,\n                `\u5931\u8D25 ${stats.runs_failed ?? 0}`,\n            ),\n        );\n        statsGrid.append(statCard("\u8FD0\u884C\u4E2D\u4EFB\u52A1", stats.tasks_active ?? 0, `\u5171 ${stats.tasks_total ?? 0} \u4E2A\u4EFB\u52A1`));\n    }\n    viewRoot.append(statsGrid);\n\n    if (story !== null) {\n        renderStorySeries(story);\n    } else if (storyboard !== null) {\n        viewRoot.append(renderProjectProfile(storyboard));\n        viewRoot.append(renderEntitySection("character", storyboard.characters));\n        viewRoot.append(renderEntitySection("scene", storyboard.scenes));\n        viewRoot.append(renderStoryboardPanel(storyboard));\n    } else {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u5206\u955C\u8BBE\u5B9A", "\u521B\u5EFA shots.json \u540E\uFF0C\u8FD9\u91CC\u4F1A\u5C55\u793A\u955C\u5934\u3001\u4EBA\u7269\u3001\u573A\u666F\u548C\u9010\u955C\u4EA7\u51FA\u3002"));\n    }\n\n    // \u4E24\u5217\u4FE1\u606F\n    const layout = createElement("div", "layout-two");\n    layout.append(renderEnginePanel(data));\n    layout.append(renderEnvironmentPanel(data));\n    viewRoot.append(layout);\n\n    // \u6700\u8FD1\u4EA7\u7269\n    const artifacts = Array.isArray(data.recent_artifacts) ? data.recent_artifacts : [];\n    // \u4EA7\u7269\u533A\u5757\u5934\n    const artifactHead = createElement("div", "section-head");\n    artifactHead.append(createElement("h3", "section-title", "\u6700\u8FD1\u4EA7\u51FA\u7269"));\n    artifactHead.append(createElement("span", "section-meta", `${artifacts.length} \u4E2A`));\n    viewRoot.append(artifactHead);\n    if (artifacts.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u4EA7\u51FA\u7269", "\u6267\u884C shot / run \u540E\uFF0C\u89C6\u9891\u4E0E\u56FE\u7247\u4F1A\u51FA\u73B0\u5728\u8FD9\u91CC\u3002"));\n    } else {\n        // \u4EA7\u7269\u7F51\u683C\n        const grid = createElement("div", "grid");\n        renderArtifactCards(grid, artifacts);\n        viewRoot.append(grid);\n    }\n\n    // \u6700\u8FD1\u4EFB\u52A1\n    const tasks = Array.isArray(data.recent_tasks) ? data.recent_tasks : [];\n    // \u4EFB\u52A1\u533A\u5757\u5934\n    const taskHead = createElement("div", "section-head");\n    taskHead.append(createElement("h3", "section-title", "\u6700\u8FD1\u4EFB\u52A1"));\n    taskHead.append(createElement("span", "section-meta", `${tasks.length} \u4E2A`));\n    viewRoot.append(taskHead);\n    if (tasks.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u4EFB\u52A1", "daoyan shot / batch \u521B\u5EFA\u7684\u4EFB\u52A1\u4F1A\u5728\u8FD9\u91CC\u51FA\u73B0\u3002"));\n    } else {\n        viewRoot.append(renderTaskList(tasks));\n    }\n}\n\n/**\n * \u9879\u76EE\u6863\u6848\u9762\u677F\u3002\n */\nfunction renderProjectProfile(storyboard) {\n    // \u9762\u677F\n    const panel = createElement("section", "panel profile-panel");\n    // \u9762\u677F\u5934\n    const head = createElement("div", "panel-head");\n    // \u6807\u9898\u5BB9\u5668\n    const titles = createElement("div");\n    titles.append(createElement("h3", "panel-title", "\u9879\u76EE\u6863\u6848"));\n    titles.append(createElement("p", "panel-sub", "\u5267\u60C5\u3001\u753B\u9762\u4E0E\u751F\u6210\u53C2\u6570"));\n    head.append(titles);\n    panel.append(head);\n\n    if (storyboard.synopsis !== null && storyboard.synopsis !== undefined) {\n        panel.append(createElement("p", "profile-synopsis", storyboard.synopsis));\n    }\n\n    // \u6458\u8981\n    const summary = storyboard.summary ?? {};\n    // \u9ED8\u8BA4\u53C2\u6570\n    const defaults = storyboard.defaults ?? {};\n    // \u952E\u503C\u5217\u8868\n    const kv = createElement("dl", "kv");\n    appendKv(kv, "\u7247\u540D", storyboard.title ?? "\u672A\u547D\u540D");\n    appendKv(kv, "\u5206\u8FA8\u7387", summary.resolution ?? "\u2014");\n    appendKv(kv, "\u5E27\u7387", summary.fps !== null && summary.fps !== undefined ? `${summary.fps} fps` : "\u672A\u8BBE\u7F6E");\n    appendKv(kv, "\u603B\u5E27\u6570", summary.total_frames ?? 0);\n    appendKv(\n        kv,\n        "\u603B\u65F6\u957F",\n        summary.total_duration_seconds !== null && summary.total_duration_seconds !== undefined\n            ? formatSeconds(summary.total_duration_seconds)\n            : "\u90E8\u5206\u955C\u5934\u672A\u77E5",\n    );\n    appendKv(kv, "\u98CE\u683C", storyboard.style_prefix ?? "\u2014");\n    appendKv(kv, "workflow", storyboard.workflow ?? "\u2014");\n    if (defaults.steps !== undefined) appendKv(kv, "\u9ED8\u8BA4 steps", defaults.steps);\n    if (defaults.cfg !== undefined) appendKv(kv, "\u9ED8\u8BA4 cfg", defaults.cfg);\n    if (defaults.negative !== undefined) appendKv(kv, "\u8D1F\u5411\u63D0\u793A\u8BCD", defaults.negative);\n    panel.append(kv);\n    return panel;\n}\n\n/**\n * \u4EBA\u7269 / \u573A\u666F\u533A\u5757\u3002\n */\nfunction renderEntitySection(kind, entities) {\n    // \u662F\u5426\u4EBA\u7269\n    const isCharacter = kind === "character";\n    // \u533A\u5757\n    const section = createElement("section", "entity-section");\n    // \u533A\u5757\u5934\n    const head = createElement("div", "section-head");\n    head.append(createElement("h3", "section-title", isCharacter ? "\u4EBA\u7269\u8BBE\u5B9A" : "\u573A\u666F\u8BBE\u5B9A"));\n    head.append(createElement("span", "section-meta", `${Array.isArray(entities) ? entities.length : 0} \u4E2A`));\n    section.append(head);\n    if (!Array.isArray(entities) || entities.length === 0) {\n        section.append(\n            emptyNode(\n                isCharacter ? "\u8FD8\u6CA1\u6709\u4EBA\u7269\u8BBE\u5B9A" : "\u8FD8\u6CA1\u6709\u573A\u666F\u8BBE\u5B9A",\n                isCharacter\n                    ? "\u5728 shots.json \u7684 meta.characters \u767B\u8BB0\u4EBA\u7269\uFF0C\u5E76\u5728\u955C\u5934\u7684 characters \u5B57\u6BB5\u5F15\u7528\u3002"\n                    : "\u5728 shots.json \u7684 meta.scenes \u767B\u8BB0\u573A\u666F\uFF0C\u5E76\u5728\u955C\u5934\u7684 scene \u5B57\u6BB5\u5F15\u7528\u3002",\n            ),\n        );\n        return section;\n    }\n    // \u5361\u7247\u7F51\u683C\n    const grid = createElement("div", "entity-grid");\n    for (const entity of entities) {\n        // \u5B9E\u4F53\u5361\u7247\n        const card = createElement("article", "entity-card");\n        // \u5361\u7247\u5934\n        const cardHead = createElement("div", "entity-head");\n        cardHead.append(createElement("h4", "entity-name", entity.name));\n        cardHead.append(\n            entity.count > 0\n                ? badge(`\u51FA\u573A ${entity.count} \u955C`, isCharacter ? "kind-image" : "kind-video")\n                : badge("\u672A\u51FA\u573A", ""),\n        );\n        card.append(cardHead);\n        if (entity.description) card.append(createElement("p", "entity-desc", entity.description));\n        if (entity.reference) card.append(createElement("p", "entity-ref mono", entity.reference));\n        // \u51FA\u573A\u955C\u53F7\n        const shots = createElement("div", "chip-row");\n        if (Array.isArray(entity.shots) && entity.shots.length > 0) {\n            for (const shotId of entity.shots) shots.append(createElement("span", "chip chip-small", `\u955C ${shotId}`));\n        } else {\n            shots.append(createElement("span", "muted", "\u6682\u65E0\u51FA\u573A\u955C\u5934"));\n        }\n        card.append(shots);\n        grid.append(card);\n    }\n    section.append(grid);\n    return section;\n}\n\n/**\n * \u5206\u955C\u4E00\u89C8\u9762\u677F\u3002\n */\nfunction renderStoryboardPanel(storyboard) {\n    // \u955C\u5934\n    const shots = Array.isArray(storyboard.shots) ? storyboard.shots : [];\n    // \u533A\u5757\n    const section = createElement("section", "storyboard-section");\n    // \u533A\u5757\u5934\n    const head = createElement("div", "section-head");\n    head.append(createElement("h3", "section-title", "\u5206\u955C\u4E00\u89C8"));\n    head.append(createElement("span", "section-meta", `${shots.length} \u955C`));\n    // \u67E5\u770B\u5168\u90E8\n    const more = createElement("button", "button ghost", "\u67E5\u770B\u5206\u955C\u8BE6\u60C5");\n    more.type = "button";\n    more.addEventListener("click", () => {\n        window.location.hash = `${HASH_PREFIX}shots`;\n    });\n    head.append(more);\n    section.append(head);\n    if (shots.length === 0) {\n        section.append(emptyNode("\u8FD8\u6CA1\u6709\u955C\u5934", "\u5728 shots.json \u7684 shots \u6570\u7EC4\u91CC\u6DFB\u52A0\u955C\u5934\u3002"));\n        return section;\n    }\n    // \u5206\u955C\u5217\u8868\n    const list = createElement("div", "storyboard-list");\n    // \u8868\u5934\n    const header = createElement("div", "storyboard-row storyboard-header");\n    for (const label of ["\u955C\u53F7", "\u5185\u5BB9", "\u573A\u666F", "\u4EBA\u7269", "\u4EA7\u51FA"]) header.append(createElement("span", "", label));\n    list.append(header);\n    for (const shot of shots) {\n        // \u6570\u636E\u884C\n        const row = createElement("div", "storyboard-row");\n        // \u955C\u53F7\n        const idCell = createElement("div", "storyboard-id-cell");\n        idCell.append(createElement("span", "storyboard-id", shot.id));\n        idCell.append(shotStatusBadge(shot));\n        row.append(idCell);\n        // \u5185\u5BB9\n        const content = createElement("div", "storyboard-content");\n        content.append(createElement("div", "storyboard-title", shot.title ?? shot.slug ?? `\u955C\u5934 ${shot.id}`));\n        content.append(createElement("p", "storyboard-summary", shot.summary));\n        row.append(content);\n        // \u573A\u666F\n        row.append(\n            shot.scene !== null && shot.scene !== undefined\n                ? entityChip(shot.scene, "chip-scene")\n                : createElement("span", "muted", "\u2014"),\n        );\n        // \u4EBA\u7269\n        const cast = createElement("div", "chip-row");\n        if (Array.isArray(shot.characters) && shot.characters.length > 0) {\n            for (const character of shot.characters) cast.append(entityChip(character, "chip-character"));\n        } else {\n            cast.append(createElement("span", "muted", "\u2014"));\n        }\n        row.append(cast);\n        // \u4EA7\u51FA\n        const artifacts = Array.isArray(shot.artifacts) ? shot.artifacts : [];\n        const artifactCell = createElement("div", "storyboard-artifacts");\n        artifactCell.append(createElement("span", "muted", `${artifacts.length} \u4E2A`));\n        // \u53EF\u64AD\u653E\u4EA7\u7269\n        const playable = artifacts.find(\n            (item) =>\n                item.output.present === true && item.output.lfs_pointer !== true && PREVIEW_KINDS.has(item.output.kind),\n        );\n        if (playable !== undefined) {\n            // \u64AD\u653E\u6309\u94AE\n            const play = createElement("button", "button ghost", "\u64AD\u653E");\n            play.type = "button";\n            play.addEventListener("click", () => openArtifact(playable, artifacts));\n            artifactCell.append(play);\n        }\n        row.append(artifactCell);\n        list.append(row);\n    }\n    section.append(list);\n    return section;\n}\n\n/**\n * \u5F15\u64CE\u9762\u677F\u3002\n */\nfunction renderEnginePanel(data) {\n    // \u9762\u677F\n    const panel = createElement("section", "panel");\n    // \u9762\u677F\u5934\n    const head = createElement("div", "panel-head");\n    // \u6807\u9898\u5BB9\u5668\n    const titles = createElement("div");\n    titles.append(createElement("h3", "panel-title", "\u5F15\u64CE"));\n    titles.append(createElement("p", "panel-sub", data.engine === null ? "\u672A\u7ED1\u5B9A\u672C\u673A" : data.engine.mode));\n    head.append(titles);\n    if (data.engine !== null) {\n        head.append(data.engine.up === true ? badge("\u53EF\u8FBE", "status-succeeded") : badge("\u4E0D\u53EF\u8FBE", "status-failed"));\n    }\n    panel.append(head);\n    if (data.engine === null) {\n        panel.append(createElement("p", "muted", "\u8FD0\u884C init \u7ED1\u5B9A\u672C\u673A\u540E\u663E\u793A\u5F15\u64CE\u72B6\u6001\u3002"));\n        return panel;\n    }\n    // \u952E\u503C\u5217\u8868\n    const kv = createElement("dl", "kv");\n    appendKv(kv, "\u5730\u5740", data.engine.url);\n    appendKv(kv, "PID", data.engine.pid);\n    if (data.engine.queue !== null && data.engine.queue !== undefined) {\n        appendKv(kv, "\u961F\u5217", `\u6267\u884C\u4E2D ${data.engine.queue.running} / \u7B49\u5F85 ${data.engine.queue.pending}`);\n    }\n    appendKv(kv, "\u6A21\u5F0F", data.mode);\n    panel.append(kv);\n    return panel;\n}\n\n/**\n * \u673A\u5668 / GPU / Skill \u9762\u677F\u3002\n */\nfunction renderEnvironmentPanel(data) {\n    // \u9762\u677F\n    const panel = createElement("section", "panel");\n    // \u9762\u677F\u5934\n    const head = createElement("div", "panel-head");\n    // \u6807\u9898\u5BB9\u5668\n    const titles = createElement("div");\n    titles.append(createElement("h3", "panel-title", "\u673A\u5668\u4E0E\u8FD0\u884C\u73AF\u5883"));\n    titles.append(createElement("p", "panel-sub", data.machine_id ?? "\u672C\u673A\u672A\u521D\u59CB\u5316"));\n    head.append(titles);\n    panel.append(head);\n\n    // \u952E\u503C\u5217\u8868\n    const kv = createElement("dl", "kv");\n    // \u673A\u5668\u9501\u72B6\u6001\n    const lock = data.machine_lock;\n    if (lock === null || lock === undefined) {\n        appendKv(kv, "\u673A\u5668\u9501", "\u2014");\n    } else if (lock.status === "held" && lock.owner !== undefined) {\n        appendKv(kv, "\u673A\u5668\u9501", `${lock.owner.command}\uFF08task ${lock.owner.task_id}\uFF0Cpid ${lock.owner.pid}\uFF09`);\n    } else {\n        appendKv(kv, "\u673A\u5668\u9501", STATUS_LABEL[lock.status] ?? lock.status);\n    }\n\n    // GPU \u72B6\u6001\n    const gpu = data.gpu;\n    if (gpu === null || gpu === undefined) {\n        appendKv(kv, "GPU", "\u2014");\n    } else if (gpu.supported === true && Array.isArray(gpu.devices) && gpu.devices.length > 0) {\n        appendKv(kv, "GPU", `${gpu.devices[0].usedMb} MiB / ${gpu.devices[0].totalMb} MiB`);\n    } else {\n        appendKv(kv, "GPU", gpu.reason ?? "\u4E0D\u53EF\u7528");\n    }\n\n    // Skill \u72B6\u6001\n    const skill = data.skill;\n    if (skill === null || skill === undefined) {\n        appendKv(kv, "Skill", "\u2014");\n    } else if (skill.present !== true) {\n        appendKv(kv, "Skill", "\u7F3A\u5931\uFF08\u8FD0\u884C daoyan skill update\uFF09");\n    } else {\n        appendKv(kv, "Skill", skill.stale === true ? "\u9700\u8981\u66F4\u65B0" : "\u5DF2\u5C31\u7EEA");\n    }\n    panel.append(kv);\n\n    // \u4E0B\u4E00\u6B65\u52A8\u4F5C\n    const actions = Array.isArray(data.next_actions) ? data.next_actions : [];\n    if (actions.length > 0) {\n        // \u4E0B\u4E00\u6B65\n        const next = createElement("div", "card-actions");\n        for (const action of actions) next.append(createElement("code", "mono", action));\n        panel.append(next);\n    }\n    return panel;\n}\n\n/**\n * \u5206\u955C\u9875\u3002\n */\nfunction renderShots(data) {\n    if (data === null) {\n        // \u9875\u5934\n        const head = createElement("div", "view-head");\n        head.append(createElement("h2", "page-title", "\u5206\u955C"));\n        viewRoot.append(head);\n        viewRoot.append(emptyNode("\u672A\u914D\u7F6E shots.json", "\u5728\u9879\u76EE\u6839\u521B\u5EFA shots.json \u540E\u5237\u65B0\u3002"));\n        return;\n    }\n    // \u9875\u9762\u6807\u9898\n    const title = data.title !== null && data.title !== undefined ? data.title : "\u5206\u955C";\n    // \u7EDF\u8BA1\n    const stats = data.summary ?? {};\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    // \u9875\u5934\u6587\u672C\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", "Storyboard"));\n    headText.append(createElement("h2", "page-title", title));\n    // \u9875\u5934\u526F\u6807\u9898\n    const subtitle = [];\n    if (data.style_prefix) subtitle.push(`\u98CE\u683C ${data.style_prefix}`);\n    if (data.workflow) subtitle.push(`workflow ${data.workflow}`);\n    if (stats.resolution) subtitle.push(stats.resolution);\n    if (stats.fps) subtitle.push(`${stats.fps} fps`);\n    headText.append(createElement("p", "page-subtitle", subtitle.join(" \xB7 ") || "\u6309\u955C\u5934\u67E5\u770B\u5185\u5BB9\u3001\u4EBA\u7269\u3001\u573A\u666F\u4E0E\u4EA7\u51FA"));\n    head.append(headText);\n    viewRoot.append(head);\n\n    if (data.synopsis !== null && data.synopsis !== undefined) {\n        viewRoot.append(createElement("p", "profile-synopsis", data.synopsis));\n    }\n\n    // \u7EDF\u8BA1\u5361\u7247\n    const statsGrid = createElement("div", "stats-grid");\n    statsGrid.append(statCard("\u955C\u5934", `${stats.shots_done ?? 0}/${stats.shots_total ?? 0}`, "\u5DF2\u5B8C\u6210 / \u603B\u6570"));\n    statsGrid.append(statCard("\u4EBA\u7269", stats.characters_total ?? 0, "\u5168\u7247\u89D2\u8272"));\n    statsGrid.append(statCard("\u573A\u666F", stats.scenes_total ?? 0, "\u5168\u7247\u573A\u666F"));\n    statsGrid.append(\n        statCard(\n            "\u4EA7\u51FA\u7269",\n            stats.artifacts_total ?? 0,\n            `${stats.total_frames ?? 0} \u5E27 \xB7 ${\n                stats.total_duration_seconds !== null && stats.total_duration_seconds !== undefined\n                    ? formatSeconds(stats.total_duration_seconds)\n                    : "\u90E8\u5206\u955C\u5934\u672A\u77E5"\n            }`,\n        ),\n    );\n    viewRoot.append(statsGrid);\n\n    // \u955C\u5934\u5217\u8868\n    const shots = Array.isArray(data.shots) ? data.shots : [];\n    if (shots.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u955C\u5934", "\u5728 shots.json \u7684 shots \u6570\u7EC4\u91CC\u6DFB\u52A0\u955C\u5934\u3002"));\n        return;\n    }\n\n    // \u4EBA\u7269\u7B5B\u9009\u503C -> \u540D\u79F0\n    const characterOptions = {};\n    for (const entity of Array.isArray(data.characters) ? data.characters : []) {\n        characterOptions[entityKey(entity)] = entity.name;\n    }\n    // \u573A\u666F\u7B5B\u9009\u503C -> \u540D\u79F0\n    const sceneOptions = {};\n    for (const entity of Array.isArray(data.scenes) ? data.scenes : []) {\n        sceneOptions[entityKey(entity)] = entity.name;\n    }\n    // \u72B6\u6001\u6587\u6848\n    const statusLabels = { done: "\u5DF2\u5B8C\u6210", pending: "\u672A\u5B8C\u6210", failed: "\u5931\u8D25", running: "\u8FD0\u884C\u4E2D" };\n\n    // \u7B5B\u9009\u680F\n    const filters = createElement("div", "filter-bar");\n    filters.append(\n        buildSelect(\n            "\u4EBA\u7269",\n            Object.keys(characterOptions),\n            shotFilters.character,\n            (value) => {\n                shotFilters.character = value;\n                refresh();\n            },\n            "\u5168\u90E8\u4EBA\u7269",\n            characterOptions,\n        ),\n    );\n    filters.append(\n        buildSelect(\n            "\u573A\u666F",\n            Object.keys(sceneOptions),\n            shotFilters.scene,\n            (value) => {\n                shotFilters.scene = value;\n                refresh();\n            },\n            "\u5168\u90E8\u573A\u666F",\n            sceneOptions,\n        ),\n    );\n    filters.append(\n        buildSelect(\n            "\u72B6\u6001",\n            ["done", "pending", "failed", "running"],\n            shotFilters.status,\n            (value) => {\n                shotFilters.status = value;\n                refresh();\n            },\n            "\u5168\u90E8\u72B6\u6001",\n            statusLabels,\n        ),\n    );\n    // \u641C\u7D22\u6846\n    const search = createElement("input", "input search");\n    search.type = "search";\n    search.placeholder = "\u641C\u7D22\u955C\u53F7 / \u5185\u5BB9 / \u4EBA\u7269 / \u573A\u666F";\n    search.value = shotFilters.search;\n    search.addEventListener("input", () => {\n        shotFilters.search = search.value;\n        refresh();\n    });\n    filters.append(search);\n    viewRoot.append(filters);\n\n    // \u7ED3\u679C\u5934\n    const listHead = createElement("div", "section-head");\n    listHead.append(createElement("h3", "section-title", "\u5206\u955C\u5217\u8868"));\n    // \u7ED3\u679C\u6458\u8981\n    const resultMeta = createElement("span", "section-meta", "");\n    listHead.append(resultMeta);\n    viewRoot.append(listHead);\n\n    // \u955C\u5934\u7F51\u683C\n    const grid = createElement("div", "grid shot-grid");\n    viewRoot.append(grid);\n\n    /**\n     * \u6309\u7B5B\u9009\u6761\u4EF6\u5237\u65B0\u955C\u5934\u5361\u7247\u3002\n     */\n    function refresh() {\n        // \u8FC7\u6EE4\u7ED3\u679C\n        const filtered = filterShots(shots);\n        resultMeta.textContent = `\u663E\u793A ${filtered.length} / ${shots.length}`;\n        clearNode(grid);\n        if (filtered.length === 0) {\n            grid.append(emptyNode("\u6CA1\u6709\u5339\u914D\u7684\u955C\u5934", "\u8C03\u6574\u4EBA\u7269\u3001\u573A\u666F\u3001\u72B6\u6001\u6216\u641C\u7D22\u6761\u4EF6\u3002"));\n            return;\n        }\n        for (const shot of filtered) grid.append(renderShotCard(shot));\n    }\n\n    refresh();\n}\n\n/**\n * \u6309\u5F53\u524D\u7B5B\u9009\u6761\u4EF6\u8FC7\u6EE4\u955C\u5934\u3002\n */\nfunction filterShots(shots) {\n    // \u641C\u7D22\u8BCD\n    const search = shotFilters.search.trim().toLowerCase();\n    return shots.filter((shot) => {\n        if (\n            shotFilters.character !== "" &&\n            !(\n                Array.isArray(shot.characters) &&\n                shot.characters.some((entity) => entityKey(entity) === shotFilters.character)\n            )\n        ) {\n            return false;\n        }\n        if (\n            shotFilters.scene !== "" &&\n            (shot.scene === null || shot.scene === undefined || entityKey(shot.scene) !== shotFilters.scene)\n        ) {\n            return false;\n        }\n        if (shotFilters.status === "done" && shot.done !== true) return false;\n        if (shotFilters.status === "pending" && shot.done === true) return false;\n        if (shotFilters.status === "failed" && shot.latest_status !== "failed") return false;\n        if (shotFilters.status === "running" && shot.latest_status !== "running" && shot.latest_status !== "queued") {\n            return false;\n        }\n        if (search !== "") {\n            // \u641C\u7D22\u6587\u672C\n            const haystack = `${shot.id} ${shot.title ?? ""} ${shot.slug ?? ""} ${shot.summary} ${shot.prompt} ${(\n                shot.characters ?? []\n            )\n                .map((entity) => entity.name)\n                .join(" ")} ${shot.scene !== null && shot.scene !== undefined ? shot.scene.name : ""}`.toLowerCase();\n            if (!haystack.includes(search)) return false;\n        }\n        return true;\n    });\n}\n\n/**\n * \u5355\u4E2A\u5206\u955C\u5361\u7247\u3002\n */\nfunction renderShotCard(shot) {\n    // \u5361\u7247\n    const card = createElement("article", "card shot-card shot-card-rich");\n    // \u5361\u7247\u5934\n    const cardHead = createElement("div", "shot-head");\n    // \u6807\u9898\u5BB9\u5668\n    const titles = createElement("div", "shot-title");\n    titles.append(createElement("span", "shot-id", shot.id));\n    titles.append(createElement("span", "shot-title-text", shot.title ?? shot.slug ?? `\u955C\u5934 ${shot.id}`));\n    if (shot.slug && shot.title) titles.append(createElement("span", "shot-slug", shot.slug));\n    cardHead.append(titles);\n    // \u72B6\u6001\u4E0E\u573A\u666F\n    const headBadges = createElement("div", "chip-row");\n    headBadges.append(shotStatusBadge(shot));\n    if (shot.scene !== null && shot.scene !== undefined) headBadges.append(entityChip(shot.scene, "chip-scene"));\n    cardHead.append(headBadges);\n    card.append(cardHead);\n\n    // \u5185\u5BB9\u6458\u8981\n    const summary = createElement("p", "shot-summary", shot.summary);\n    card.append(summary);\n\n    // \u4EBA\u7269\n    const cast = createElement("div", "shot-line");\n    cast.append(createElement("span", "shot-line-label", "\u4EBA\u7269"));\n    cast.append(entityChips(shot.characters, "chip-character"));\n    card.append(cast);\n\n    // \u5236\u4F5C\u53C2\u6570\n    const meta = createElement("div", "shot-meta-grid");\n    meta.append(createElement("span", "", `seed ${shot.seed}`));\n    meta.append(createElement("span", "", shot.length !== null ? `${shot.length} \u5E27` : "\u5E27\u6570\u672A\u77E5"));\n    meta.append(\n        createElement("span", "", shot.duration_seconds !== null ? formatSeconds(shot.duration_seconds) : "\u65F6\u957F\u672A\u77E5"),\n    );\n    meta.append(createElement("span", "", `${shot.width}x${shot.height}`));\n    meta.append(createElement("span", "", shot.steps !== null ? `steps ${shot.steps}` : "steps \u9ED8\u8BA4"));\n    meta.append(createElement("span", "", shot.cfg !== null ? `cfg ${shot.cfg}` : "cfg \u9ED8\u8BA4"));\n    meta.append(createElement("span", "", `\u9996\u5E27 ${shot.first_frame ?? "\u65E0"}`));\n    meta.append(createElement("span", "", shot.workflow ?? "\u9ED8\u8BA4 workflow"));\n    meta.append(createElement("span", "", `${shot.runs_count} run / ${shot.succeeded_count} \u6210\u529F`));\n    card.append(meta);\n\n    // \u5B8C\u6574\u63D0\u793A\u8BCD\n    const promptDetails = createElement("details", "shot-prompt");\n    promptDetails.append(createElement("summary", "", "\u5B8C\u6574\u63D0\u793A\u8BCD"));\n    promptDetails.append(createElement("p", "", shot.prompt));\n    card.append(promptDetails);\n\n    if (shot.notes) card.append(createElement("p", "shot-notes", `\u5907\u6CE8\uFF1A${shot.notes}`));\n\n    // \u4EA7\u7269\u533A\u5757\n    const artifacts = Array.isArray(shot.artifacts) ? shot.artifacts : [];\n    const artifactHead = createElement("div", "shot-section-head");\n    artifactHead.append(createElement("h4", "", `\u4EA7\u51FA\u7269\uFF08${artifacts.length}\uFF09`));\n    artifactHead.append(createElement("span", "muted", `${shot.runs_count} run / ${shot.succeeded_count} \u6210\u529F`));\n    card.append(artifactHead);\n    if (artifacts.length === 0) {\n        card.append(createElement("p", "muted", "\u8FD8\u6CA1\u6709\u4EA7\u51FA\u7269\u3002"));\n    } else {\n        // \u4EA7\u7269\u5217\u8868\n        const list = createElement("div", "artifact-list");\n        for (const item of artifacts) list.append(renderShotArtifactRow(item, artifacts));\n        card.append(list);\n    }\n\n    card.append(renderShotRunHistory(shot));\n    return card;\n}\n\n/**\n * \u5206\u955C\u4EA7\u7269\u7684\u5355\u884C\u5C55\u793A\u3002\n */\nfunction renderShotArtifactRow(item, all) {\n    // \u4EA7\u7269\n    const output = item.output;\n    // \u884C\n    const row = createElement("div", "artifact-row");\n    // \u7F29\u7565\u56FE\n    const thumb = createElement("div", "artifact-thumb");\n    // \u662F\u5426\u53EF\u7528\n    const available = output.present === true && output.lfs_pointer !== true;\n    if (available && output.kind === "video") {\n        // \u89C6\u9891\u9996\u5E27\n        const video = document.createElement("video");\n        video.src = `${output.media_url}#t=0.1`;\n        video.muted = true;\n        video.playsInline = true;\n        video.preload = "metadata";\n        thumb.append(video);\n    } else if (available && output.kind === "image") {\n        // \u56FE\u7247\u7F29\u7565\u56FE\n        const image = document.createElement("img");\n        image.src = output.media_url;\n        image.alt = output.name;\n        image.loading = "lazy";\n        thumb.append(image);\n    } else {\n        thumb.append(createElement("span", "artifact-thumb-icon", KIND_ICON[output.kind] ?? "\u2193"));\n    }\n    if (!output.present) thumb.append(createElement("span", "artifact-thumb-note", "\u7F3A\u5931"));\n    else if (output.lfs_pointer) thumb.append(createElement("span", "artifact-thumb-note", "LFS"));\n    row.append(thumb);\n\n    // \u4FE1\u606F\n    const info = createElement("div", "artifact-info");\n    info.append(createElement("div", "artifact-name", output.name));\n    // \u5143\u4FE1\u606F\n    const meta = createElement("div", "artifact-meta");\n    meta.append(kindBadge(output.kind));\n    meta.append(statusBadge(item.run_status));\n    meta.append(createElement("span", "", shortId(item.run_id)));\n    meta.append(createElement("span", "", formatTime(item.started_at)));\n    meta.append(createElement("span", "", formatBytes(output.bytes)));\n    info.append(meta);\n    row.append(info);\n\n    // \u64CD\u4F5C\n    const actions = createElement("div", "artifact-row-actions");\n    if (available && PREVIEW_KINDS.has(output.kind)) {\n        // \u9884\u89C8\u6309\u94AE\n        const preview = createElement("button", "button ghost", output.kind === "video" ? "\u64AD\u653E" : "\u67E5\u770B");\n        preview.type = "button";\n        preview.addEventListener("click", () => openArtifact(item, all));\n        actions.append(preview);\n    }\n    // \u4E0B\u8F7D\u94FE\u63A5\n    const download = createElement("a", "button ghost", "\u4E0B\u8F7D");\n    download.href = output.download_url;\n    actions.append(download);\n    row.append(actions);\n    return row;\n}\n\n/**\n * \u5386\u53F2 run \u6298\u53E0\u533A\u3002\n */\nfunction renderShotRunHistory(shot) {\n    // run \u5217\u8868\n    const runs = Array.isArray(shot.runs) ? shot.runs : [];\n    // \u6298\u53E0\u533A\n    const details = createElement("details", "shot-runs");\n    details.append(createElement("summary", "", `\u5386\u53F2 run\uFF08${runs.length}\uFF09`));\n    if (runs.length === 0) {\n        details.append(createElement("p", "muted", "\u8FD8\u6CA1\u6709 run\u3002"));\n        return details;\n    }\n    // \u5217\u8868\n    const list = createElement("ul", "run-list");\n    for (const run of runs) {\n        // run \u884C\n        const item = createElement("li", "run-item");\n        // \u4E3B\u4FE1\u606F\n        const main = createElement("div", "run-main");\n        main.append(statusBadge(run.status));\n        main.append(createElement("code", "mono", shortId(run.run_id)));\n        main.append(createElement("span", "", `${run.outputs.length} \u4E2A\u4EA7\u7269`));\n        main.append(\n            createElement("span", "muted", `${formatDuration(run.duration_ms)} \xB7 ${formatTime(run.started_at)}`),\n        );\n        item.append(main);\n        list.append(item);\n    }\n    details.append(list);\n    return details;\n}\n\n/**\n * \u4EA7\u51FA\u7269\u9875\u3002\n */\nfunction renderArtifacts(data) {\n    // \u5168\u90E8\u6761\u76EE\n    const items = Array.isArray(data.items) ? data.items : [];\n    // label \u5019\u9009\n    const labels = Array.isArray(data.labels) ? data.labels : [];\n    // \u7C7B\u578B\u5019\u9009\n    const kinds = Array.isArray(data.kinds) ? data.kinds : [];\n    // \u603B\u6570\n    const total = Number(data.total ?? items.length);\n\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    // \u9875\u5934\u6587\u672C\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", "Artifacts"));\n    headText.append(createElement("h2", "page-title", "\u4EA7\u51FA\u7269"));\n    headText.append(createElement("p", "page-subtitle", "\u70B9\u51FB\u89C6\u9891\u6216\u56FE\u7247\u9884\u89C8\uFF1B\u652F\u6301\u62D6\u52A8\u8FDB\u5EA6\u6761\u64AD\u653E\u3002"));\n    head.append(headText);\n    viewRoot.append(head);\n\n    // \u7B5B\u9009\u680F\n    const filters = createElement("div", "filter-bar");\n    filters.append(\n        buildSelect(\n            "\u955C\u5934",\n            labels,\n            artifactFilters.label,\n            (value) => {\n                artifactFilters.label = value;\n                refresh();\n            },\n            "\u5168\u90E8\u955C\u5934",\n        ),\n    );\n    filters.append(\n        buildSelect(\n            "\u72B6\u6001",\n            ["queued", "running", "succeeded", "failed", "cancelled", "interrupted"],\n            artifactFilters.status,\n            (value) => {\n                artifactFilters.status = value;\n                refresh();\n            },\n            "\u5168\u90E8\u72B6\u6001",\n            STATUS_LABEL,\n        ),\n    );\n    filters.append(\n        buildSelect(\n            "\u7C7B\u578B",\n            kinds,\n            artifactFilters.kind,\n            (value) => {\n                artifactFilters.kind = value;\n                refresh();\n            },\n            "\u5168\u90E8\u7C7B\u578B",\n            KIND_LABEL,\n        ),\n    );\n    // \u641C\u7D22\u6846\n    const search = createElement("input", "input search");\n    search.type = "search";\n    search.placeholder = "\u641C\u7D22 run / label / prompt / \u6587\u4EF6\u540D";\n    search.value = artifactFilters.search;\n    search.addEventListener("input", () => {\n        artifactFilters.search = search.value;\n        refresh();\n    });\n    filters.append(search);\n    viewRoot.append(filters);\n\n    // \u7ED3\u679C\u6458\u8981\n    const summaryHead = createElement("div", "section-head");\n    summaryHead.append(createElement("h3", "section-title", "\u5168\u90E8\u4EA7\u51FA\u7269"));\n    // \u6458\u8981\n    const summary = createElement("span", "section-meta", "");\n    summaryHead.append(summary);\n    viewRoot.append(summaryHead);\n\n    // \u7F51\u683C\n    const grid = createElement("div", "grid");\n    viewRoot.append(grid);\n\n    /**\n     * \u6309\u5F53\u524D\u7B5B\u9009\u5237\u65B0\u7F51\u683C\u3002\n     */\n    function refresh() {\n        // \u8FC7\u6EE4\u7ED3\u679C\n        const filtered = filterArtifacts(items);\n        summary.textContent = `\u663E\u793A ${filtered.length} / ${total}`;\n        clearNode(grid);\n        if (filtered.length === 0) {\n            grid.append(emptyNode("\u6CA1\u6709\u5339\u914D\u7684\u4EA7\u51FA\u7269", "\u8C03\u6574\u7B5B\u9009\u6761\u4EF6\u6216\u5148\u6267\u884C\u751F\u6210\u4EFB\u52A1\u3002"));\n            return;\n        }\n        renderArtifactCards(grid, filtered);\n    }\n\n    refresh();\n}\n\n/**\n * \u6784\u9020\u4E0B\u62C9\u7B5B\u9009\u3002\n */\nfunction buildSelect(label, options, value, onChange, allLabel, labels) {\n    // \u5B57\u6BB5\u5BB9\u5668\n    const field = createElement("label", "field");\n    field.append(createElement("span", "field-label", label));\n    // \u4E0B\u62C9\u6846\n    const select = createElement("select", "select");\n    select.append(new Option(allLabel, ""));\n    for (const option of options) {\n        // \u9009\u9879\u6587\u6848\n        const text = labels !== undefined ? (labels[option] ?? option) : option;\n        select.append(new Option(text, option));\n    }\n    select.value = value;\n    select.addEventListener("change", () => onChange(select.value));\n    field.append(select);\n    return field;\n}\n\n/**\n * \u6309\u7B5B\u9009\u6761\u4EF6\u8FC7\u6EE4\u4EA7\u7269\u3002\n */\nfunction filterArtifacts(items) {\n    // \u641C\u7D22\u8BCD\n    const search = artifactFilters.search.trim().toLowerCase();\n    return items.filter((item) => {\n        if (artifactFilters.label !== "" && item.label !== artifactFilters.label) return false;\n        if (artifactFilters.status !== "" && item.run_status !== artifactFilters.status) return false;\n        if (artifactFilters.kind !== "" && item.output.kind !== artifactFilters.kind) return false;\n        if (search !== "") {\n            // \u641C\u7D22\u6587\u672C\n            const haystack =\n                `${item.run_id} ${item.label ?? ""} ${item.prompt ?? ""} ${item.output.name}`.toLowerCase();\n            if (!haystack.includes(search)) return false;\n        }\n        return true;\n    });\n}\n\n/**\n * \u6E32\u67D3\u4EA7\u7269\u5361\u7247\u5217\u8868\u3002\n */\nfunction renderArtifactCards(container, items) {\n    for (const item of items) container.append(renderArtifactCard(item, items));\n}\n\n/**\n * \u5355\u4E2A\u4EA7\u7269\u5361\u7247\u3002\n */\nfunction renderArtifactCard(item, items) {\n    // \u4EA7\u7269\n    const output = item.output;\n    // \u5361\u7247\n    const card = createElement("article", "card artifact-card");\n    // \u9884\u89C8\u533A\n    const preview = createElement("div", "artifact-preview");\n    // \u662F\u5426\u53EF\u9884\u89C8\n    const available = output.present === true && output.lfs_pointer !== true;\n    if (available && (output.kind === "video" || output.kind === "image")) {\n        if (output.kind === "video") {\n            // \u89C6\u9891\u9996\u5E27\n            const video = document.createElement("video");\n            video.src = `${output.media_url}#t=0.1`;\n            video.muted = true;\n            video.playsInline = true;\n            video.preload = "metadata";\n            preview.append(video);\n        } else {\n            // \u56FE\u7247\u7F29\u7565\u56FE\n            const image = document.createElement("img");\n            image.src = output.media_url;\n            image.alt = output.name;\n            image.loading = "lazy";\n            preview.append(image);\n        }\n    } else {\n        preview.append(createElement("span", "preview-icon", KIND_ICON[output.kind] ?? "\u2193"));\n    }\n    if (!output.present) preview.append(createElement("span", "preview-note", "\u6587\u4EF6\u7F3A\u5931"));\n    else if (output.lfs_pointer) preview.append(createElement("span", "preview-note", "LFS \u672A\u62C9\u53D6"));\n    if (available && PREVIEW_KINDS.has(output.kind)) {\n        // \u64AD\u653E/\u9884\u89C8\u6309\u94AE\n        const open = createElement("button", "play-button", output.kind === "video" ? "\u25B6" : "\u2315");\n        open.type = "button";\n        open.title = output.kind === "video" ? "\u64AD\u653E" : "\u9884\u89C8";\n        open.addEventListener("click", (event) => {\n            event.stopPropagation();\n            openArtifact(item, items);\n        });\n        preview.append(open);\n    }\n    card.append(preview);\n\n    // \u5361\u7247\u5185\u5BB9\n    const body = createElement("div", "card-body");\n    // \u6807\u9898\u884C\n    const titleRow = createElement("div", "card-meta");\n    titleRow.append(createElement("h3", "card-title", output.name));\n    titleRow.append(kindBadge(output.kind));\n    body.append(titleRow);\n\n    // \u5143\u4FE1\u606F\n    const meta = createElement("div", "card-meta");\n    meta.append(createElement("span", "", item.label ?? shortId(item.run_id)));\n    meta.append(createElement("span", "", formatTime(item.started_at)));\n    meta.append(createElement("span", "", formatBytes(output.bytes)));\n    body.append(meta);\n\n    // \u64CD\u4F5C\u533A\n    const actions = createElement("div", "card-actions");\n    if (available && PREVIEW_KINDS.has(output.kind)) {\n        // \u6253\u5F00\u6309\u94AE\n        const open = createElement(\n            "button",\n            "button",\n            output.kind === "video" ? "\u64AD\u653E" : output.kind === "image" ? "\u67E5\u770B" : "\u9884\u89C8",\n        );\n        open.type = "button";\n        open.addEventListener("click", () => openArtifact(item, items));\n        actions.append(open);\n    }\n    // \u4E0B\u8F7D\u94FE\u63A5\n    const download = createElement("a", "button ghost", "\u4E0B\u8F7D");\n    download.href = output.download_url;\n    actions.append(download);\n    body.append(actions);\n    card.append(body);\n    return card;\n}\n\n/**\n * \u6253\u5F00\u4EA7\u7269\u3002\n */\nfunction openArtifact(item, list) {\n    // \u4EA7\u7269\n    const output = item.output;\n    if (output.present !== true) {\n        showToast("\u6587\u4EF6\u4E0D\u5B58\u5728\uFF0C\u53EF\u80FD\u5C1A\u672A\u4ECE Git LFS \u62C9\u53D6", true);\n        return;\n    }\n    if (output.lfs_pointer === true) {\n        showToast("\u8FD9\u662F Git LFS pointer\uFF0C\u8BF7\u5148\u6267\u884C git lfs pull", true);\n        return;\n    }\n    if (output.kind === "video" || output.kind === "audio") {\n        // \u53EF\u64AD\u653E\u6761\u76EE\n        const playable = playableItems(list ?? [item]);\n        // \u5F53\u524D\u7D22\u5F15\n        const index = playable.findIndex((entry) => entry.url === output.media_url);\n        openPlayer(playable, Math.max(index, 0));\n        return;\n    }\n    if (output.kind === "image") {\n        openImage(item);\n        return;\n    }\n    if (output.kind === "json" || output.kind === "text") {\n        void openText(item);\n        return;\n    }\n    window.location.href = output.download_url;\n}\n\n/**\n * \u53EF\u64AD\u653E\u5217\u8868\u3002\n */\nfunction playableItems(items) {\n    // \u7ED3\u679C\n    const out = [];\n    for (const item of items) {\n        // \u4EA7\u7269\n        const output = item.output;\n        if (output === undefined || output.present !== true || output.lfs_pointer === true) continue;\n        if (!PLAYABLE_KINDS.has(output.kind)) continue;\n        out.push({\n            title: `${item.label ?? item.run_id} \xB7 ${output.name}`,\n            url: output.media_url,\n            kind: output.kind,\n        });\n    }\n    return out;\n}\n\n/**\n * \u4EFB\u52A1\u9875\u3002\n */\nfunction renderTasks(data) {\n    // \u4EFB\u52A1\u5217\u8868\n    const tasks = Array.isArray(data.items) ? data.items : [];\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    // \u9875\u5934\u6587\u672C\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", "Tasks"));\n    headText.append(createElement("h2", "page-title", "\u4EFB\u52A1"));\n    headText.append(\n        createElement("p", "page-subtitle", `\u5171 ${data.total ?? tasks.length} \u4E2A\u4EFB\u52A1\uFF1B\u70B9\u51FB\u8BE6\u60C5\u67E5\u770B run \u4E0E\u4E8B\u4EF6\u3002`),\n    );\n    head.append(headText);\n    viewRoot.append(head);\n    if (tasks.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u4EFB\u52A1", "daoyan run / shot / batch \u521B\u5EFA\u7684\u4EFB\u52A1\u4F1A\u5728\u8FD9\u91CC\u51FA\u73B0\u3002"));\n        return;\n    }\n    viewRoot.append(renderTaskList(tasks));\n}\n\n/**\n * \u6E32\u67D3\u4EFB\u52A1\u5217\u8868\u3002\n */\nfunction renderTaskList(tasks) {\n    // \u5BB9\u5668\n    const list = createElement("div", "task-list");\n    for (const task of tasks) {\n        // \u4EFB\u52A1\u5361\u7247\n        const card = renderTaskCard(task);\n        list.append(card);\n        if (openTaskId === task.task_id) {\n            // \u8BE6\u60C5\u5BB9\u5668\n            const detail = card.querySelector(".task-detail");\n            void loadTaskDetail(task.task_id, detail);\n        }\n    }\n    return list;\n}\n\n/**\n * \u5355\u4E2A\u4EFB\u52A1\u5361\u7247\u3002\n */\nfunction renderTaskCard(task) {\n    // \u5361\u7247\n    const card = createElement("article", "task-card");\n    // \u5934\u90E8\n    const head = createElement("div", "task-head");\n    // \u6807\u9898\u533A\n    const title = createElement("div", "task-title");\n    title.append(statusBadge(task.status));\n    title.append(createElement("h3", "task-command", task.command));\n    title.append(badge(TASK_KIND_LABEL[task.kind] ?? task.kind, ""));\n    head.append(title);\n\n    // \u8BE6\u60C5\u6309\u94AE\n    const toggle = createElement("button", "button ghost task-toggle", openTaskId === task.task_id ? "\u6536\u8D77" : "\u8BE6\u60C5");\n    toggle.type = "button";\n    head.append(toggle);\n    card.append(head);\n\n    // \u5143\u4FE1\u606F\n    const meta = createElement("div", "task-meta");\n    meta.append(createElement("span", "", `task ${shortId(task.task_id)}`));\n    meta.append(createElement("span", "", `machine ${task.machine_id}`));\n    meta.append(createElement("span", "", `${task.run_count ?? 0} run`));\n    meta.append(createElement("span", "", formatTime(task.created_at)));\n    if (task.error !== null && task.error !== undefined) {\n        meta.append(createElement("span", "", `${task.error.code}: ${task.error.message}`));\n    }\n    card.append(meta);\n\n    // \u8BE6\u60C5\u5BB9\u5668\n    const detail = createElement("div", "task-detail");\n    detail.hidden = openTaskId !== task.task_id;\n    card.append(detail);\n    toggle.addEventListener("click", () => {\n        if (openTaskId === task.task_id) {\n            openTaskId = null;\n            detail.hidden = true;\n            toggle.textContent = "\u8BE6\u60C5";\n            return;\n        }\n        openTaskId = task.task_id;\n        for (const other of viewRoot.querySelectorAll(".task-detail")) other.hidden = true;\n        for (const button of viewRoot.querySelectorAll(".task-toggle")) button.textContent = "\u8BE6\u60C5";\n        detail.hidden = false;\n        toggle.textContent = "\u6536\u8D77";\n        void loadTaskDetail(task.task_id, detail);\n    });\n    return card;\n}\n\n/**\n * \u52A0\u8F7D\u4EFB\u52A1\u8BE6\u60C5\u3002\n */\nasync function loadTaskDetail(taskId, container) {\n    if (container === null) return;\n    container.hidden = false;\n    container.textContent = "\u52A0\u8F7D\u4E2D\u2026";\n    // \u7F13\u5B58\u9879\n    const cached = taskDetailCache.get(taskId);\n    if (cached !== undefined && Date.now() - cached.at < TASK_DETAIL_CACHE_MS) {\n        renderTaskDetail(container, cached.data);\n        return;\n    }\n    try {\n        // \u8BE6\u60C5\u6570\u636E\n        const data = await requestJson(`/api/tasks/${encodeURIComponent(taskId)}`);\n        taskDetailCache.set(taskId, { at: Date.now(), data });\n        renderTaskDetail(container, data);\n    } catch (error) {\n        container.textContent = `\u52A0\u8F7D\u5931\u8D25\uFF1A${error instanceof Error ? error.message : String(error)}`;\n    }\n}\n\n/**\n * \u6E32\u67D3\u4EFB\u52A1\u8BE6\u60C5\u3002\n */\nfunction renderTaskDetail(container, data) {\n    clearNode(container);\n    // run \u5217\u8868\n    const runs = Array.isArray(data.runs_detail) ? data.runs_detail : [];\n    container.append(createElement("h4", "", `Runs\uFF08${runs.length}\uFF09`));\n    if (runs.length === 0) {\n        container.append(createElement("p", "muted", "\u8FD8\u6CA1\u6709 run\u3002"));\n    } else {\n        // run \u5217\u8868\u8282\u70B9\n        const list = createElement("ul", "run-list");\n        for (const run of runs) {\n            // run \u884C\n            const item = createElement("li", "run-item");\n            // run \u4E3B\u4FE1\u606F\n            const main = createElement("div", "run-main");\n            main.append(statusBadge(run.status));\n            main.append(createElement("code", "mono", shortId(run.run_id)));\n            main.append(createElement("span", "", run.label ?? "\u65E0 label"));\n            main.append(\n                createElement("span", "muted", `${run.outputs.length} \u4E2A\u4EA7\u7269 \xB7 ${formatDuration(run.duration_ms)}`),\n            );\n            item.append(main);\n\n            // run \u64CD\u4F5C\n            const actions = createElement("div", "card-actions");\n            // \u9996\u4E2A\u4EA7\u7269\n            const firstOutput = run.outputs[0];\n            if (\n                firstOutput !== undefined &&\n                firstOutput.present === true &&\n                firstOutput.lfs_pointer !== true &&\n                PREVIEW_KINDS.has(firstOutput.kind)\n            ) {\n                // \u9884\u89C8\u6309\u94AE\n                const preview = createElement("button", "button ghost", "\u9884\u89C8");\n                preview.type = "button";\n                preview.addEventListener("click", () => {\n                    openArtifact(artifactItemFromRun(run, firstOutput));\n                });\n                actions.append(preview);\n            }\n            item.append(actions);\n            list.append(item);\n        }\n        container.append(list);\n    }\n\n    // \u4E8B\u4EF6\n    const events = Array.isArray(data.events) ? data.events : [];\n    container.append(createElement("h4", "", `\u4E8B\u4EF6\uFF08${events.length}\uFF09`));\n    if (events.length === 0) {\n        container.append(createElement("p", "muted", "\u6682\u65E0\u4E8B\u4EF6\u3002"));\n        return;\n    }\n    // \u4E8B\u4EF6\u5217\u8868\n    const eventList = createElement("ul", "events");\n    for (const event of events) {\n        // \u4E8B\u4EF6\u884C\n        const item = createElement("li", "event");\n        item.append(createElement("span", "event-time", event.ts.slice(11, 19)));\n        item.append(createElement("span", "event-type", event.type));\n        // \u4E8B\u4EF6\u6570\u636E\u6587\u672C\n        const dataText = JSON.stringify(event.data ?? {});\n        item.append(\n            createElement("span", "event-data", dataText.length > 220 ? `${dataText.slice(0, 220)}\u2026` : dataText),\n        );\n        eventList.append(item);\n    }\n    container.append(eventList);\n}\n\n/**\n * \u7528 run \u4FE1\u606F\u6784\u9020\u4EA7\u7269\u6761\u76EE\u3002\n */\nfunction artifactItemFromRun(run, output) {\n    return {\n        run_id: run.run_id,\n        task_id: run.task_id,\n        machine_id: run.machine_id,\n        label: run.label,\n        run_status: run.status,\n        started_at: run.started_at,\n        finished_at: run.finished_at,\n        workflow: run.workflow.path,\n        prompt: run.prompt,\n        output,\n    };\n}\n\n/**\n * \u6210\u7247\u9875\u3002\n */\nfunction renderFinals(data) {\n    // \u6210\u7247\u5217\u8868\n    const items = Array.isArray(data) ? data : [];\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    // \u9875\u5934\u6587\u672C\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", "Final cuts"));\n    headText.append(createElement("h2", "page-title", "\u6210\u7247"));\n    headText.append(createElement("p", "page-subtitle", "daoyan wrap \u751F\u6210\u7684 final/cut-* \u6587\u4EF6\u3002"));\n    head.append(headText);\n    viewRoot.append(head);\n    if (items.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u6210\u7247", "\u5B8C\u6210\u81F3\u5C11\u4E24\u4E2A\u955C\u5934\u540E\u8FD0\u884C daoyan wrap\u3002"));\n        return;\n    }\n    // \u7F51\u683C\n    const grid = createElement("div", "grid");\n    for (const item of items) {\n        // \u5361\u7247\n        const card = createElement("article", "card final-card");\n        // \u9884\u89C8\u533A\n        const preview = createElement("div", "artifact-preview");\n        if (item.present === true && item.lfs_pointer !== true) {\n            // \u89C6\u9891\u9996\u5E27\n            const video = document.createElement("video");\n            video.src = `${item.media_url}#t=0.1`;\n            video.muted = true;\n            video.playsInline = true;\n            video.preload = "metadata";\n            preview.append(video);\n            // \u64AD\u653E\u6309\u94AE\n            const play = createElement("button", "play-button", "\u25B6");\n            play.type = "button";\n            play.title = "\u64AD\u653E\u6210\u7247";\n            play.addEventListener("click", () => {\n                openPlayer([{ title: item.name, url: item.media_url, kind: "video" }], 0);\n            });\n            preview.append(play);\n        } else {\n            preview.append(createElement("span", "preview-icon", "\u25B6"));\n            preview.append(\n                createElement("span", "preview-note", item.lfs_pointer === true ? "LFS \u672A\u62C9\u53D6" : "\u6587\u4EF6\u7F3A\u5931"),\n            );\n        }\n        card.append(preview);\n\n        // \u5361\u7247\u5185\u5BB9\n        const body = createElement("div", "card-body");\n        body.append(createElement("h3", "card-title", item.name));\n        // \u5143\u4FE1\u606F\n        const meta = createElement("div", "card-meta");\n        meta.append(createElement("span", "", item.created_at !== null ? formatTime(item.created_at) : "\u65E0 manifest"));\n        meta.append(createElement("span", "", formatBytes(item.bytes)));\n        meta.append(createElement("span", "", `${item.clips.length} \u6BB5`));\n        if (item.missing.length > 0) meta.append(createElement("span", "", `\u7F3A ${item.missing.length} \u955C`));\n        body.append(meta);\n\n        // \u64CD\u4F5C\u533A\n        const actions = createElement("div", "card-actions");\n        if (item.present === true && item.lfs_pointer !== true) {\n            // \u64AD\u653E\u6309\u94AE\n            const play = createElement("button", "button", "\u64AD\u653E");\n            play.type = "button";\n            play.addEventListener("click", () => {\n                openPlayer([{ title: item.name, url: item.media_url, kind: "video" }], 0);\n            });\n            actions.append(play);\n        }\n        // \u4E0B\u8F7D\u94FE\u63A5\n        const download = createElement("a", "button ghost", "\u4E0B\u8F7D");\n        download.href = item.download_url;\n        actions.append(download);\n        body.append(actions);\n        card.append(body);\n        grid.append(card);\n    }\n    viewRoot.append(grid);\n}\n\n/**\n * \u5DE5\u4F5C\u6D41\u9875\u3002\n */\nfunction renderWorkflows(data) {\n    // \u5DE5\u4F5C\u6D41\u5217\u8868\n    const items = Array.isArray(data) ? data : [];\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    // \u9875\u5934\u6587\u672C\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", "Workflows"));\n    headText.append(createElement("h2", "page-title", "\u5DE5\u4F5C\u6D41"));\n    headText.append(createElement("p", "page-subtitle", "workflows/ \u4E0B\u7684 ComfyUI API \u56FE\u4E0E bindings\u3002"));\n    head.append(headText);\n    viewRoot.append(head);\n    if (items.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u5DE5\u4F5C\u6D41", "\u8FD0\u884C daoyan workflow new / import \u521B\u5EFA\u5DE5\u4F5C\u6D41\u3002"));\n        return;\n    }\n    // \u8868\u683C\n    const list = createElement("div", "table-list");\n    // \u8868\u5934\n    const header = createElement("div", "table-row header");\n    for (const label of ["\u5DE5\u4F5C\u6D41", "\u8282\u70B9", "bindings", "\u9ED8\u8BA4", "\u72B6\u6001"]) header.append(createElement("span", "", label));\n    list.append(header);\n    for (const item of items) {\n        // \u6570\u636E\u884C\n        const row = createElement("div", "table-row");\n        // \u540D\u79F0\u533A\n        const name = createElement("div");\n        name.append(createElement("div", "workflow-name", item.name));\n        name.append(createElement("div", "muted mono", item.path));\n        row.append(name);\n        row.append(createElement("span", "", item.nodes));\n        row.append(createElement("span", "", item.bindings ? "\u6709" : "\u65E0"));\n        row.append(createElement("span", "", item.default ? "\u662F" : "\u2014"));\n        row.append(createElement("span", "", item.valid ? "\u53EF\u89E3\u6790" : "JSON \u635F\u574F"));\n        list.append(row);\n    }\n    viewRoot.append(list);\n}\n\n/**\n * \u6253\u5F00\u64AD\u653E\u5668\u3002\n */\nfunction openPlayer(items, index) {\n    if (items.length === 0) {\n        showToast("\u6CA1\u6709\u53EF\u64AD\u653E\u7684\u4EA7\u7269", true);\n        return;\n    }\n    playerItems = items.slice(0, MAX_PLAYLIST);\n    playerIndex = Math.max(0, Math.min(index, playerItems.length - 1));\n    renderPlayerItem();\n}\n\n/**\n * \u6E32\u67D3\u5F53\u524D\u64AD\u653E\u9879\u3002\n */\nfunction renderPlayerItem() {\n    // \u5F53\u524D\u9879\n    const item = playerItems[playerIndex];\n    if (item === undefined) {\n        closeModal();\n        return;\n    }\n    // \u5A92\u4F53\u5143\u7D20\n    const media = document.createElement(item.kind === "video" ? "video" : "audio");\n    media.controls = true;\n    media.autoplay = true;\n    media.playsInline = true;\n    media.src = item.url;\n    setModal(item.title, media, `${playerIndex + 1} / ${playerItems.length}`);\n    modalPrev.disabled = playerIndex <= 0;\n    modalNext.disabled = playerIndex >= playerItems.length - 1;\n}\n\n/**\n * \u6253\u5F00\u56FE\u7247\u3002\n */\nfunction openImage(item) {\n    // \u56FE\u7247\u5143\u7D20\n    const image = document.createElement("img");\n    image.src = item.output.media_url;\n    image.alt = item.output.name;\n    setModal(item.output.name, image, "\u56FE\u7247");\n    modalPrev.disabled = true;\n    modalNext.disabled = true;\n}\n\n/**\n * \u6253\u5F00\u6587\u672C\u9884\u89C8\u3002\n */\nasync function openText(item) {\n    // \u9884\u89C8\u8282\u70B9\n    const pre = createElement("pre", "", "\u52A0\u8F7D\u4E2D\u2026");\n    setModal(item.output.name, pre, "\u6587\u672C\u9884\u89C8");\n    modalPrev.disabled = true;\n    modalNext.disabled = true;\n    try {\n        // \u6587\u672C\u54CD\u5E94\n        const response = await fetch(item.output.media_url);\n        if (!response.ok) throw new Error(`HTTP ${response.status}`);\n        // \u539F\u59CB\u6587\u672C\n        const raw = await response.text();\n        // \u5C55\u793A\u6587\u672C\n        let text = raw;\n        if (item.output.kind === "json") {\n            try {\n                text = JSON.stringify(JSON.parse(raw), null, 2);\n            } catch {\n                text = raw;\n            }\n        }\n        pre.textContent =\n            text.length > TEXT_PREVIEW_LIMIT\n                ? `${text.slice(0, TEXT_PREVIEW_LIMIT)}\\n\\n\u2026\uFF08\u5DF2\u622A\u65AD\uFF0C\u5B8C\u6574\u5185\u5BB9\u8BF7\u4E0B\u8F7D\uFF09`\n                : text;\n    } catch (error) {\n        pre.textContent = `\u8BFB\u53D6\u5931\u8D25\uFF1A${error instanceof Error ? error.message : String(error)}`;\n    }\n}\n\n/**\n * \u8BBE\u7F6E\u6A21\u6001\u6846\u5185\u5BB9\u3002\n */\nfunction setModal(title, content, counter) {\n    modalTitle.textContent = title;\n    clearNode(modalContent);\n    modalContent.append(content);\n    modalCounter.textContent = counter ?? "";\n    modalRoot.hidden = false;\n}\n\n/**\n * \u5173\u95ED\u6A21\u6001\u6846\u3002\n */\nfunction closeModal() {\n    modalRoot.hidden = true;\n    clearNode(modalContent);\n    modalTitle.textContent = "\u9884\u89C8";\n    modalCounter.textContent = "";\n    playerItems = [];\n    playerIndex = 0;\n}\n\n/**\n * \u4E0A\u4E00\u4E2A\u64AD\u653E\u9879\u3002\n */\nfunction modalPrevStep() {\n    if (playerItems.length === 0 || playerIndex <= 0) return;\n    playerIndex -= 1;\n    renderPlayerItem();\n}\n\n/**\n * \u4E0B\u4E00\u4E2A\u64AD\u653E\u9879\u3002\n */\nfunction modalNextStep() {\n    if (playerItems.length === 0 || playerIndex >= playerItems.length - 1) return;\n    playerIndex += 1;\n    renderPlayerItem();\n}\n\n/**\n * \u952E\u76D8\u64CD\u4F5C\u3002\n */\nfunction handleKeydown(event) {\n    if (modalRoot.hidden) return;\n    if (event.key === "Escape") closeModal();\n    else if (event.key === "ArrowLeft") modalPrevStep();\n    else if (event.key === "ArrowRight") modalNextStep();\n}\n\n/**\n * \u542F\u52A8\u5E94\u7528\u3002\n */\nfunction start() {\n    renderShell();\n    renderNav();\n    setActiveNav();\n    modalClose.addEventListener("click", closeModal);\n    modalPrev.addEventListener("click", modalPrevStep);\n    modalNext.addEventListener("click", modalNextStep);\n    // \u906E\u7F69\u5C42\n    const backdrop = document.querySelector(".modal-backdrop");\n    if (backdrop !== null) backdrop.addEventListener("click", closeModal);\n    window.addEventListener("hashchange", onHashChange);\n    window.addEventListener("keydown", handleKeydown);\n    document.addEventListener("visibilitychange", () => {\n        if (!document.hidden) void loadCurrent();\n    });\n    void loadHeader();\n    onHashChange();\n}\n\nstart();\n';
+    app_default = '/* daoyan web \u5BA2\u6237\u7AEF \u2014\u2014 \u539F\u751F JS \u5355\u9875\u5E94\u7528\uFF0C\u65E0\u6784\u5EFA\u4F9D\u8D56\u3002\n * \u6240\u6709\u6570\u636E\u6765\u81EA\u540C\u6E90\u53EA\u8BFB API\uFF1BDOM \u6587\u672C\u7EDF\u4E00\u7528 textContent\uFF0C\u907F\u514D\u63D0\u793A\u8BCD\u7B49\u5B57\u6BB5\u6CE8\u5165 HTML\u3002 */\n\n// \u9875\u9762\u89C6\u56FE\nconst VIEWS = [\n    { id: "overview", label: "\u6982\u89C8", hint: "\u9879\u76EE\u4E0E\u5267\u96C6\u72B6\u6001" },\n    { id: "characters", label: "\u89D2\u8272", hint: "\u89D2\u8272\u3001\u5F62\u6001\u4E0E\u53C2\u8003\u56FE" },\n    { id: "scenes", label: "\u573A\u666F", hint: "\u573A\u666F\u4E0E\u53C2\u8003\u56FE" },\n    { id: "voices", label: "\u97F3\u8272", hint: "\u97F3\u8272\u4E0E\u53C2\u8003\u97F3\u9891" },\n    { id: "assets", label: "\u8BBE\u5B9A\u8D44\u4EA7", hint: "\u5168\u90E8\u53C2\u8003\u8D44\u4EA7" },\n    { id: "shots", label: "\u5206\u955C", hint: "\u955C\u5934\u8FDB\u5EA6\u4E0E\u63D0\u793A\u8BCD" },\n    { id: "artifacts", label: "\u4EA7\u51FA\u7269", hint: "\u64AD\u653E\u4E0E\u4E0B\u8F7D" },\n    { id: "tasks", label: "\u4EFB\u52A1", hint: "\u4EFB\u52A1\u4E0E\u4E8B\u4EF6" },\n    { id: "finals", label: "\u6210\u7247", hint: "\u5408\u7247\u7ED3\u679C" },\n    { id: "workflows", label: "\u5DE5\u4F5C\u6D41", hint: "\u56FE\u4E0E bindings" },\n];\n// \u5408\u6CD5\u89C6\u56FE\u96C6\u5408\uFF08\u5267\u96C6\u8BE6\u60C5\u7531 hash \u7684 episode/<id> \u5355\u72EC\u89E3\u6790\uFF09\nconst VIEW_IDS = new Set(VIEWS.map((view) => view.id));\n// \u9ED8\u8BA4\u89C6\u56FE\nconst DEFAULT_VIEW = "overview";\n// \u63A5\u53E3\u8DEF\u5F84\nconst API = {\n    overview: "/api/overview",\n    characters: "/api/story/characters",\n    scenes: "/api/story/scenes",\n    voices: "/api/story/voices",\n    assets: "/api/story/assets",\n    shots: "/api/shots",\n    artifacts: "/api/artifacts?limit=500",\n    tasks: "/api/tasks",\n    finals: "/api/finals",\n    workflows: "/api/workflows",\n};\n// \u5404\u89C6\u56FE\u8F6E\u8BE2\u95F4\u9694\uFF08\u6BEB\u79D2\uFF09\nconst POLL_MS = {\n    overview: 3000,\n    characters: 10000,\n    scenes: 10000,\n    voices: 10000,\n    assets: 10000,\n    episode: 4000,\n    shots: 5000,\n    artifacts: 5000,\n    tasks: 3000,\n    finals: 8000,\n    workflows: 15000,\n};\n// \u72B6\u6001\u6587\u6848\nconst STATUS_LABEL = {\n    queued: "\u6392\u961F",\n    running: "\u8FD0\u884C\u4E2D",\n    succeeded: "\u6210\u529F",\n    failed: "\u5931\u8D25",\n    cancelled: "\u5DF2\u53D6\u6D88",\n    interrupted: "\u5DF2\u4E2D\u65AD",\n    held: "\u6301\u6709",\n    stale: "\u9648\u65E7",\n    absent: "\u7A7A\u95F2",\n    corrupt: "\u635F\u574F",\n};\n// \u4EA7\u7269\u7C7B\u578B\u6587\u6848\nconst KIND_LABEL = {\n    video: "\u89C6\u9891",\n    image: "\u56FE\u7247",\n    audio: "\u97F3\u9891",\n    json: "JSON",\n    text: "\u6587\u672C",\n    other: "\u6587\u4EF6",\n};\n// \u4EA7\u7269\u7C7B\u578B\u56FE\u6807\nconst KIND_ICON = {\n    video: "\u25B6",\n    image: "\u25A7",\n    audio: "\u266A",\n    json: "{}",\n    text: "TXT",\n    other: "\u2193",\n};\n// \u5267\u60C5\u9636\u6BB5\u6587\u6848\nconst STAGE_LABEL = {\n    script: "\u5267\u672C",\n    breakdown: "\u62C6\u89E3",\n    assets: "\u8BBE\u5B9A\u8D44\u4EA7",\n    storyboard: "\u5206\u955C",\n    workflow: "\u5DE5\u4F5C\u6D41",\n    ready: "\u53EF\u62CD\u6444",\n    wrapped: "\u5DF2\u5408\u7247",\n};\n// \u4EFB\u52A1\u7C7B\u578B\u6587\u6848\nconst TASK_KIND_LABEL = {\n    run: "\u5355\u6B21",\n    shot: "\u955C\u5934",\n    retake: "\u91CD\u62CD",\n    batch: "\u6279\u91CF",\n    metadata: "\u5143\u6570\u636E",\n};\n// \u6700\u5927\u64AD\u653E\u5217\u8868\u957F\u5EA6\nconst MAX_PLAYLIST = 200;\n// \u6587\u672C\u9884\u89C8\u4E0A\u9650\nconst TEXT_PREVIEW_LIMIT = 200_000;\n// SVG \u547D\u540D\u7A7A\u95F4\nconst SVG_NS = "http://www.w3.org/2000/svg";\n// \u56FE\u8C31\u8282\u70B9\u5BBD\u5EA6\nconst MAP_NODE_WIDTH = 190;\n// \u56FE\u8C31\u8282\u70B9\u9AD8\u5EA6\nconst MAP_NODE_HEIGHT = 48;\n// \u56FE\u8C31\u884C\u9AD8\nconst MAP_ROW_HEIGHT = 76;\n// \u56FE\u8C31\u9876\u90E8\u7559\u767D\nconst MAP_TOP = 32;\n// \u56FE\u8C31\u5DE6\u5217 x\nconst MAP_LEFT_X = 32;\n// \u56FE\u8C31\u53F3\u5217 x\nconst MAP_RIGHT_X = 470;\n// \u56FE\u8C31\u753B\u5E03\u5BBD\u5EA6\nconst MAP_WIDTH = 700;\n// \u56FE\u8C31\u6700\u5927\u5171\u73B0\u5F27\u6570\u91CF\nconst MAP_MAX_ARCS = 15;\n// \u4EFB\u52A1\u8BE6\u60C5\u7F13\u5B58\u65F6\u95F4\uFF08\u6BEB\u79D2\uFF09\nconst TASK_DETAIL_CACHE_MS = 2000;\n// \u65F6\u95F4\u683C\u5F0F\u5668\nconst TIME_FORMATTER = new Intl.DateTimeFormat("zh-CN", {\n    year: "numeric",\n    month: "2-digit",\n    day: "2-digit",\n    hour: "2-digit",\n    minute: "2-digit",\n    second: "2-digit",\n    hour12: false,\n});\n// \u5B57\u8282\u5355\u4F4D\nconst BYTE_UNITS = ["B", "KB", "MB", "GB", "TB"];\n// hash \u524D\u7F00\nconst HASH_PREFIX = "#/";\n// \u53EF\u64AD\u653E\u7C7B\u578B\nconst PLAYABLE_KINDS = new Set(["video", "audio"]);\n// \u53EF\u9884\u89C8\u7C7B\u578B\nconst PREVIEW_KINDS = new Set(["video", "audio", "image", "json", "text"]);\n\n// \u5E94\u7528\u6839\u8282\u70B9\nconst appRoot = document.querySelector("#app");\n// \u6A21\u6001\u6846\u6839\u8282\u70B9\nconst modalRoot = document.querySelector("#modal");\n// \u6A21\u6001\u6807\u9898\nconst modalTitle = document.querySelector("#modal-title");\n// \u6A21\u6001\u5185\u5BB9\nconst modalContent = document.querySelector("#modal-content");\n// \u6A21\u6001\u8BA1\u6570\nconst modalCounter = document.querySelector("#modal-counter");\n// \u4E0A\u4E00\u4E2A\u6309\u94AE\nconst modalPrev = document.querySelector("#modal-prev");\n// \u4E0B\u4E00\u4E2A\u6309\u94AE\nconst modalNext = document.querySelector("#modal-next");\n// \u5173\u95ED\u6309\u94AE\nconst modalClose = document.querySelector("#modal-close");\n// Toast \u6839\u8282\u70B9\nconst toastRoot = document.querySelector("#toast");\n\n// \u5F53\u524D\u89C6\u56FE\nlet currentView = DEFAULT_VIEW;\n// \u5F53\u524D\u5267\u96C6 id\nlet currentEpisodeId = null;\n// \u5F53\u524D\u89C6\u56FE\u662F\u5426\u5DF2\u6210\u529F\u52A0\u8F7D\nlet loaded = false;\n// \u4E0A\u6B21\u6E32\u67D3\u7684\u6570\u636E\u7B7E\u540D\uFF08\u907F\u514D\u8F6E\u8BE2\u91CD\u590D\u91CD\u5EFA DOM\uFF09\nlet lastSignature = "";\n// \u5F53\u524D\u8BF7\u6C42\u63A7\u5236\u5668\nlet requestController = null;\n// \u8F6E\u8BE2\u5B9A\u65F6\u5668\nlet pollTimer = null;\n// \u5F53\u524D\u4EA7\u7269\u7B5B\u9009\nlet artifactFilters = { label: "", status: "", kind: "", search: "" };\n// \u5F53\u524D\u5206\u955C\u7B5B\u9009\nlet shotFilters = { character: "", scene: "", status: "", search: "" };\n// \u56FE\u8C31 Tab\uFF08graph | timeline\uFF09\nlet mapTab = "graph";\n// \u56FE\u8C31\u805A\u5408\u6A21\u5F0F\uFF08character | form\uFF09\nlet mapMode = "character";\n// \u56FE\u8C31\u7B5B\u9009\uFF08{ kind, id } | null\uFF09\nlet mapFocus = null;\n// \u53EA\u663E\u793A\u5173\u952E\u4E8B\u4EF6\nlet mapOnlyMajor = false;\n// \u53EA\u663E\u793A\u963B\u585E\u4E8B\u4EF6\nlet mapBlockedOnly = false;\n// \u5F53\u524D\u5C55\u5F00\u7684 task id\nlet openTaskId = null;\n// \u4EFB\u52A1\u8BE6\u60C5\u7F13\u5B58\nconst taskDetailCache = new Map();\n// \u64AD\u653E\u5217\u8868\nlet playerItems = [];\n// \u64AD\u653E\u7D22\u5F15\nlet playerIndex = 0;\n// Toast \u5B9A\u65F6\u5668\nlet toastTimer = null;\n// \u6700\u540E\u66F4\u65B0\u65F6\u95F4\nlet lastUpdatedAt = "";\n\n// \u4FA7\u8FB9\u5BFC\u822A\u5BB9\u5668\nlet navRoot = null;\n// \u4E3B\u5185\u5BB9\u5BB9\u5668\nlet viewRoot = null;\n// \u9879\u76EE\u540D\u5143\u7D20\nlet projectNameEl = null;\n// \u6A21\u5F0F\u5143\u7D20\nlet modeEl = null;\n// \u8FDE\u63A5\u72B6\u6001\u5143\u7D20\nlet connectionEl = null;\n// \u66F4\u65B0\u65F6\u95F4\u5143\u7D20\nlet updatedEl = null;\n\n/**\n * \u521B\u5EFA\u5143\u7D20\u5E76\u8BBE\u7F6E\u6587\u672C\u3002\n */\nfunction createElement(tag, className, text) {\n    // \u65B0\u5143\u7D20\n    const node = document.createElement(tag);\n    if (className !== undefined && className !== "") node.className = className;\n    if (text !== undefined && text !== null) node.textContent = String(text);\n    return node;\n}\n\n/**\n * \u6E05\u7A7A\u5B50\u8282\u70B9\u3002\n */\nfunction clearNode(node) {\n    while (node.firstChild !== null) node.removeChild(node.firstChild);\n}\n\n/**\n * \u683C\u5F0F\u5316\u5B57\u8282\u3002\n */\nfunction formatBytes(bytes) {\n    // \u515C\u5E95\u6570\u503C\n    const value = Number(bytes);\n    if (!Number.isFinite(value) || value <= 0) return "0 B";\n    // \u5355\u4F4D\u6307\u6570\n    let index = 0;\n    // \u5F53\u524D\u6570\u503C\n    let current = value;\n    while (current >= 1024 && index < BYTE_UNITS.length - 1) {\n        current /= 1024;\n        index += 1;\n    }\n    // \u5C0F\u6570\u4F4D\n    const digits = index === 0 ? 0 : current >= 10 ? 1 : 2;\n    return `${current.toFixed(digits)} ${BYTE_UNITS[index]}`;\n}\n\n/**\n * \u683C\u5F0F\u5316\u65F6\u95F4\u3002\n */\nfunction formatTime(iso) {\n    if (typeof iso !== "string" || iso === "") return "\u2014";\n    // \u65F6\u95F4\u5BF9\u8C61\n    const date = new Date(iso);\n    if (Number.isNaN(date.getTime())) return "\u2014";\n    return TIME_FORMATTER.format(date);\n}\n\n/**\n * \u683C\u5F0F\u5316\u8017\u65F6\u3002\n */\nfunction formatDuration(ms) {\n    // \u6BEB\u79D2\u503C\n    const value = Number(ms);\n    if (!Number.isFinite(value) || value <= 0) return "0 \u79D2";\n    if (value < 1000) return `${Math.round(value)} \u6BEB\u79D2`;\n    // \u79D2\n    const seconds = Math.round(value / 1000);\n    if (seconds < 60) return `${seconds} \u79D2`;\n    // \u5206\u949F/\u79D2\n    const minutes = Math.floor(seconds / 60);\n    // \u4F59\u6570\u79D2\n    const rest = seconds % 60;\n    return rest === 0 ? `${minutes} \u5206` : `${minutes} \u5206 ${rest} \u79D2`;\n}\n\n/**\n * \u77ED id\u3002\n */\nfunction shortId(id) {\n    if (typeof id !== "string") return "\u2014";\n    return id.length > 20 ? `${id.slice(0, 20)}\u2026` : id;\n}\n\n/**\n * \u6587\u672C\u515C\u5E95\u3002\n */\nfunction textOrDash(value) {\n    if (value === undefined || value === null || value === "") return "\u2014";\n    return String(value);\n}\n\n/**\n * \u901A\u7528\u5FBD\u6807\u3002\n */\nfunction badge(text, className) {\n    return createElement("span", `badge ${className ?? ""}`.trim(), text);\n}\n\n/**\n * \u72B6\u6001\u5FBD\u6807\u3002\n */\nfunction statusBadge(status, text) {\n    // \u72B6\u6001\u952E\n    const key = typeof status === "string" && status !== "" ? status : "queued";\n    return badge(text ?? STATUS_LABEL[key] ?? key, `status-${key}`);\n}\n\n/**\n * \u7C7B\u578B\u5FBD\u6807\u3002\n */\nfunction kindBadge(kind) {\n    // \u7C7B\u578B\u952E\n    const key = typeof kind === "string" && kind !== "" ? kind : "other";\n    return badge(KIND_LABEL[key] ?? key, `kind-${key}`);\n}\n\n/**\n * \u8FFD\u52A0\u952E\u503C\u884C\u3002\n */\nfunction appendKv(dl, key, value) {\n    dl.append(createElement("dt", "", key));\n    dl.append(createElement("dd", "", textOrDash(value)));\n}\n\n/**\n * \u4EBA\u7269 / \u573A\u666F\u53BB\u91CD\u952E\u3002\n */\nfunction entityKey(entity) {\n    return entity.id !== null && entity.id !== undefined ? `id:${entity.id}` : `name:${entity.name}`;\n}\n\n/**\n * \u683C\u5F0F\u5316\u79D2\u6570\u3002\n */\nfunction formatSeconds(seconds) {\n    // \u6570\u503C\u515C\u5E95\n    const value = Number(seconds);\n    if (!Number.isFinite(value) || value < 0) return "\u2014";\n    if (value < 60) return Number.isInteger(value) ? `${value} \u79D2` : `${value.toFixed(1)} \u79D2`;\n    // \u5206\u949F\u4E0E\u4F59\u79D2\n    const minutes = Math.floor(value / 60);\n    const rest = Math.round(value % 60);\n    return rest === 0 ? `${minutes} \u5206` : `${minutes} \u5206 ${rest} \u79D2`;\n}\n\n/**\n * \u4EBA\u7269 / \u573A\u666F chip\u3002\n */\nfunction entityChip(entity, className) {\n    // chip\n    const chip = createElement("span", `chip ${className ?? ""}`.trim(), entity.name);\n    if (entity.description) chip.title = entity.description;\n    return chip;\n}\n\n/**\n * \u4E00\u7EC4\u4EBA\u7269 / \u573A\u666F chip\u3002\n */\nfunction entityChips(entities, className) {\n    // chip \u5BB9\u5668\n    const row = createElement("div", "chip-row");\n    if (!Array.isArray(entities) || entities.length === 0) {\n        row.append(createElement("span", "muted", "\u672A\u6807\u6CE8"));\n        return row;\n    }\n    for (const entity of entities) row.append(entityChip(entity, className));\n    return row;\n}\n\n/**\n * \u5206\u955C\u72B6\u6001\u5FBD\u6807\u3002\n */\nfunction shotStatusBadge(shot) {\n    if (shot.done === true) return statusBadge("succeeded", "\u5DF2\u5B8C\u6210");\n    if (shot.latest_status === "failed") return statusBadge("failed");\n    if (shot.latest_status === "running" || shot.latest_status === "queued") {\n        return statusBadge(shot.latest_status);\n    }\n    return statusBadge("queued", "\u672A\u5B8C\u6210");\n}\n\n/**\n * \u8BF7\u6C42 JSON \u5E76\u89E3\u5305\u4FE1\u5C01\u3002\n */\nasync function requestJson(path, signal) {\n    // \u54CD\u5E94\n    const response = await fetch(path, { headers: { Accept: "application/json" }, signal });\n    // \u54CD\u5E94\u4F53\n    const payload = await response.json();\n    if (payload.ok !== true) {\n        throw new Error(payload.error !== undefined ? payload.error.message : `\u8BF7\u6C42\u5931\u8D25\uFF08HTTP ${response.status}\uFF09`);\n    }\n    return payload.data;\n}\n\n/**\n * \u5F53\u524D\u89C6\u56FE\u8BF7\u6C42\uFF08\u53EF\u88AB\u4E0B\u4E00\u6B21\u5BFC\u822A\u4E2D\u6B62\uFF09\u3002\n */\nasync function fetchJson(path) {\n    // \u8BF7\u6C42\u63A7\u5236\u5668\n    const controller = new AbortController();\n    requestController = controller;\n    try {\n        return await requestJson(path, controller.signal);\n    } finally {\n        if (requestController === controller) requestController = null;\n    }\n}\n\n/**\n * \u6E32\u67D3\u9875\u9762\u9AA8\u67B6\u3002\n */\nfunction renderShell() {\n    appRoot.innerHTML = `\n        <div class="app-shell">\n            <aside class="sidebar">\n                <div class="brand">\n                    <div class="brand-mark"><span class="brand-dot"></span>daoyan web</div>\n                    <p class="brand-sub">\u4E34\u65F6\u53EA\u8BFB\u9879\u76EE\u67E5\u770B\u5668</p>\n                </div>\n                <nav id="nav" class="nav" aria-label="\u9875\u9762\u5BFC\u822A"></nav>\n                <div class="sidebar-foot">\n                    <code>Ctrl+C</code> \u505C\u6B62\u670D\u52A1<br />\n                    \u6570\u636E\u6765\u81EA\u5F53\u524D\u9879\u76EE\u76EE\u5F55\uFF0C\u53EA\u8BFB\u3002\n                </div>\n            </aside>\n            <main class="main">\n                <header class="topbar">\n                    <div class="topbar-left">\n                        <h1 id="project-name" class="project-name">\u9879\u76EE</h1>\n                        <span id="project-mode" class="project-mode">\u2014</span>\n                    </div>\n                    <div class="topbar-right">\n                        <span id="connection" class="connection">\n                            <span class="connection-dot"></span>\n                            <span id="connection-text">\u8FDE\u63A5\u4E2D</span>\n                        </span>\n                        <span id="updated-at" class="muted">\u2014</span>\n                    </div>\n                </header>\n                <section id="view" class="content" aria-live="polite"></section>\n            </main>\n        </div>\n    `;\n    navRoot = document.querySelector("#nav");\n    viewRoot = document.querySelector("#view");\n    projectNameEl = document.querySelector("#project-name");\n    modeEl = document.querySelector("#project-mode");\n    connectionEl = document.querySelector("#connection");\n    updatedEl = document.querySelector("#updated-at");\n}\n\n/**\n * \u6E32\u67D3\u5BFC\u822A\u3002\n */\nfunction renderNav() {\n    clearNode(navRoot);\n    for (const view of VIEWS) {\n        // \u5BFC\u822A\u6309\u94AE\n        const button = createElement("button", "nav-item");\n        button.type = "button";\n        button.dataset.view = view.id;\n        button.append(createElement("span", "nav-label", view.label));\n        button.append(createElement("span", "nav-hint", view.hint));\n        button.addEventListener("click", () => {\n            window.location.hash = `${HASH_PREFIX}${view.id}`;\n        });\n        navRoot.append(button);\n    }\n}\n\n/**\n * \u9AD8\u4EAE\u5F53\u524D\u5BFC\u822A\u3002\n */\nfunction setActiveNav() {\n    if (navRoot === null) return;\n    // \u5267\u96C6\u8BE6\u60C5\u5F52\u5C5E\u6982\u89C8\n    const activeView = currentView === "episode" ? "overview" : currentView;\n    for (const button of navRoot.querySelectorAll(".nav-item")) {\n        button.classList.toggle("active", button.dataset.view === activeView);\n    }\n}\n\n/**\n * \u66F4\u65B0\u8FDE\u63A5\u72B6\u6001\u3002\n */\nfunction setConnection(state, text) {\n    if (connectionEl === null) return;\n    connectionEl.classList.remove("ok", "error");\n    if (state === "ok") connectionEl.classList.add("ok");\n    if (state === "error") connectionEl.classList.add("error");\n    // \u72B6\u6001\u6587\u672C\n    const textEl = connectionEl.querySelector("#connection-text");\n    if (textEl !== null) textEl.textContent = text;\n}\n\n/**\n * \u52A0\u8F7D\u9876\u680F\u9879\u76EE\u4FE1\u606F\uFF08\u4E0D\u63A2\u6D4B\u5F15\u64CE\uFF09\u3002\n */\nasync function loadHeader() {\n    try {\n        // \u5065\u5EB7\u68C0\u67E5\u6570\u636E\n        const data = await requestJson("/api/health");\n        if (projectNameEl !== null && typeof data.project === "string") projectNameEl.textContent = data.project;\n        if (modeEl !== null) modeEl.textContent = data.mode === null ? "\u672A\u7ED1\u5B9A\u672C\u673A" : data.mode;\n    } catch {\n        // \u9876\u680F\u5931\u8D25\u4E0D\u5F71\u54CD\u9875\u9762\u4E3B\u4F53\n    }\n}\n\n/**\n * \u66F4\u65B0\u9876\u680F\u9879\u76EE\u4FE1\u606F\u3002\n */\nfunction updateHeader(data) {\n    if (projectNameEl !== null && data !== null && data.project !== undefined && data.project.name !== undefined) {\n        projectNameEl.textContent = data.project.name;\n    }\n    if (modeEl !== null && data !== null && data.mode !== undefined) {\n        modeEl.textContent = data.mode === null ? "\u672A\u7ED1\u5B9A\u672C\u673A" : data.mode;\n    }\n    if (updatedEl !== null) {\n        updatedEl.textContent = lastUpdatedAt === "" ? "\u2014" : `\u66F4\u65B0\u4E8E ${formatTime(lastUpdatedAt)}`;\n    }\n}\n\n/**\n * \u663E\u793A\u9519\u8BEF\u6761\u3002\n */\nfunction showError(message) {\n    if (viewRoot === null) return;\n    // \u73B0\u6709\u9519\u8BEF\u6761\n    let banner = viewRoot.querySelector(".error-banner");\n    if (banner === null) {\n        banner = createElement("div", "error-banner");\n        viewRoot.prepend(banner);\n    }\n    banner.textContent = message;\n}\n\n/**\n * \u6E05\u9664\u9519\u8BEF\u6761\u3002\n */\nfunction clearError() {\n    if (viewRoot === null) return;\n    // \u73B0\u6709\u9519\u8BEF\u6761\n    const banner = viewRoot.querySelector(".error-banner");\n    if (banner !== null) banner.remove();\n}\n\n/**\n * \u663E\u793A Toast\u3002\n */\nfunction showToast(message, isError) {\n    toastRoot.textContent = message;\n    toastRoot.classList.toggle("error", isError === true);\n    toastRoot.hidden = false;\n    if (toastTimer !== null) window.clearTimeout(toastTimer);\n    toastTimer = window.setTimeout(() => {\n        toastRoot.hidden = true;\n    }, 2600);\n}\n\n/**\n * \u7A7A\u72B6\u6001\u8282\u70B9\u3002\n */\nfunction emptyNode(title, body) {\n    // \u5BB9\u5668\n    const box = createElement("div", "empty");\n    box.append(createElement("p", "empty-title", title));\n    box.append(createElement("p", "empty-body", body));\n    return box;\n}\n\n/**\n * \u52A0\u8F7D\u72B6\u6001\u3002\n */\nfunction renderLoading() {\n    if (viewRoot === null) return;\n    clearNode(viewRoot);\n    // \u52A0\u8F7D\u5BB9\u5668\n    const box = createElement("div", "loading");\n    box.append(createElement("span", "spinner"));\n    box.append(createElement("span", "", "\u52A0\u8F7D\u4E2D\u2026"));\n    viewRoot.append(box);\n}\n\n/**\n * \u8BA1\u7B97\u7528\u4E8E\u8DF3\u8FC7\u91CD\u590D\u6E32\u67D3\u7684\u6570\u636E\u7B7E\u540D\uFF08\u5FFD\u7565\u6982\u89C8\u7684\u751F\u6210\u65F6\u95F4\uFF09\u3002\n */\nfunction signatureOf(data) {\n    if (data !== null && typeof data === "object" && Object.prototype.hasOwnProperty.call(data, "generated_at")) {\n        // \u53BB\u6389\u65F6\u95F4\u6233\u540E\u7684\u526F\u672C\n        const copy = { ...data };\n        delete copy.generated_at;\n        return JSON.stringify(copy);\n    }\n    return JSON.stringify(data);\n}\n\n/**\n * \u52A0\u8F7D\u5F53\u524D\u89C6\u56FE\u3002\n */\nasync function loadCurrent() {\n    if (requestController !== null) requestController.abort();\n    // \u76EE\u6807\u89C6\u56FE\n    const view = currentView;\n    if (!loaded) renderLoading();\n    try {\n        // \u63A5\u53E3\u6570\u636E\n        const path =\n            view === "episode" && currentEpisodeId !== null\n                ? `/api/episodes/${encodeURIComponent(currentEpisodeId)}`\n                : API[view];\n        const data = await fetchJson(path);\n        if (view !== currentView) return;\n        // \u6570\u636E\u7B7E\u540D\uFF08\u7A33\u5B9A\u9875\u9762\u4E0D\u91CD\u590D\u91CD\u5EFA DOM\uFF09\n        const signature = signatureOf(data);\n        lastUpdatedAt = new Date().toISOString();\n        updateHeader(data);\n        setConnection("ok", "\u5DF2\u8FDE\u63A5");\n        if (loaded && signature === lastSignature) return;\n        loaded = true;\n        lastSignature = signature;\n        renderView(view, data);\n    } catch (error) {\n        if (error !== null && error !== undefined && error.name === "AbortError") return;\n        setConnection("error", "\u8FDE\u63A5\u5931\u8D25");\n        if (!loaded) {\n            clearNode(viewRoot);\n            viewRoot.append(emptyNode("\u65E0\u6CD5\u52A0\u8F7D", "\u8BF7\u786E\u8BA4\u670D\u52A1\u4ECD\u5728\u8FD0\u884C\uFF0C\u6216\u5237\u65B0\u9875\u9762\u91CD\u8BD5\u3002"));\n        }\n        showError(error instanceof Error ? error.message : "\u52A0\u8F7D\u5931\u8D25");\n    }\n}\n\n/**\n * \u5207\u6362\u89C6\u56FE\u3002\n */\nfunction onHashChange() {\n    // \u539F\u59CB hash\n    const raw = window.location.hash.replace(/^#\\/?/, "");\n    // \u8DEF\u5F84\u6BB5\n    const parts = raw.split("/");\n    // \u76EE\u6807\u89C6\u56FE / \u5267\u96C6\n    let view = DEFAULT_VIEW;\n    let episodeId = null;\n    if (parts[0] === "episode" && parts[1] !== undefined && parts[1] !== "") {\n        try {\n            episodeId = decodeURIComponent(parts[1]);\n            view = "episode";\n        } catch {\n            view = DEFAULT_VIEW;\n        }\n    } else {\n        view = VIEW_IDS.has(raw) ? raw : DEFAULT_VIEW;\n    }\n    currentView = view;\n    currentEpisodeId = episodeId;\n    mapTab = "graph";\n    mapMode = "character";\n    mapFocus = null;\n    mapOnlyMajor = false;\n    mapBlockedOnly = false;\n    loaded = false;\n    lastSignature = "";\n    openTaskId = null;\n    setActiveNav();\n    renderLoading();\n    void loadCurrent();\n    schedulePoll();\n}\n\n/**\n * \u5B89\u6392\u8F6E\u8BE2\u3002\n */\nfunction schedulePoll() {\n    if (pollTimer !== null) window.clearInterval(pollTimer);\n    // \u5F53\u524D\u95F4\u9694\n    const interval = POLL_MS[currentView] ?? 5000;\n    pollTimer = window.setInterval(() => {\n        if (document.hidden) return;\n        void loadCurrent();\n    }, interval);\n}\n\n/**\n * \u5206\u53D1\u89C6\u56FE\u6E32\u67D3\u3002\n */\nfunction renderView(view, data) {\n    if (viewRoot === null) return;\n    clearNode(viewRoot);\n    if (view === "overview") renderOverview(data);\n    else if (view === "episode") renderEpisode(data);\n    else if (view === "characters") renderCharacters(data);\n    else if (view === "scenes") renderScenes(data);\n    else if (view === "voices") renderVoices(data);\n    else if (view === "assets") renderAssets(data);\n    else if (view === "shots") renderShots(data);\n    else if (view === "artifacts") renderArtifacts(data);\n    else if (view === "tasks") renderTasks(data);\n    else if (view === "finals") renderFinals(data);\n    else if (view === "workflows") renderWorkflows(data);\n    clearError();\n}\n\n/**\n * \u72B6\u6001\u5361\u7247\u3002\n */\nfunction statCard(label, value, hint) {\n    // \u5361\u7247\n    const card = createElement("div", "stat-card");\n    card.append(createElement("p", "stat-label", label));\n    card.append(createElement("p", "stat-value", value));\n    if (hint !== undefined) card.append(createElement("p", "stat-hint", hint));\n    return card;\n}\n\n/**\n * story \u6A21\u5F0F\u9690\u85CF legacy \u5206\u955C\u5165\u53E3\u3002\n */\nfunction hideLegacyShotsNav() {\n    if (navRoot === null) return;\n    // \u5206\u955C\u5BFC\u822A\n    const button = navRoot.querySelector(\'.nav-item[data-view="shots"]\');\n    if (button !== null) button.remove();\n}\n\n/**\n * \u5267\u60C5\u9636\u6BB5\u5FBD\u6807\u3002\n */\nfunction stageBadge(stage) {\n    return badge(STAGE_LABEL[stage] ?? stage, `stage-${stage}`);\n}\n\n/**\n * \u8D44\u4EA7\u7F29\u7565 / \u64AD\u653E\u8282\u70B9\u3002\n */\nfunction assetNode(asset, compact) {\n    // \u5BB9\u5668\n    const box = createElement("div", compact === true ? "asset-compact" : "asset-tile");\n    if (asset === null || asset === undefined) {\n        box.append(createElement("span", "muted", "\u65E0\u8D44\u4EA7"));\n        return box;\n    }\n    if (asset.present !== true || asset.lfs_pointer === true) {\n        box.append(createElement("span", "asset-missing", asset.lfs_pointer === true ? "LFS \u672A\u62C9\u53D6" : "\u6587\u4EF6\u7F3A\u5931"));\n        return box;\n    }\n    if (asset.kind === "image") {\n        // \u56FE\u7247\u9884\u89C8\u6309\u94AE\n        const button = createElement("button", "asset-thumb");\n        button.type = "button";\n        button.title = "\u70B9\u51FB\u9884\u89C8";\n        button.setAttribute("aria-label", `\u9884\u89C8 ${asset.path}`);\n        // \u56FE\u7247\n        const img = document.createElement("img");\n        img.src = asset.media_url;\n        img.alt = asset.path;\n        img.loading = "lazy";\n        button.append(img);\n        button.addEventListener("click", () => {\n            openImageUrl(asset.media_url, asset.path);\n        });\n        box.append(button);\n    } else if (asset.kind === "audio") {\n        // \u97F3\u9891\n        const audio = document.createElement("audio");\n        audio.controls = true;\n        audio.preload = "metadata";\n        audio.src = asset.media_url;\n        box.append(audio);\n    } else {\n        box.append(createElement("span", "preview-icon", KIND_ICON[asset.kind] ?? "\u2193"));\n    }\n    box.append(createElement("span", "asset-name mono", asset.path));\n    return box;\n}\n\n/**\n * \u7CFB\u5217\u6982\u89C8\u3002\n */\nfunction renderStorySeries(story) {\n    hideLegacyShotsNav();\n    // \u533A\u5757\u5934\n    const head = createElement("div", "section-head");\n    head.append(createElement("h3", "section-title", "\u5267\u96C6"));\n    head.append(createElement("span", "section-meta", `${story.series.episodes_total} \u96C6`));\n    viewRoot.append(head);\n    // \u5267\u96C6\u7F51\u683C\n    const grid = createElement("div", "grid");\n    for (const episode of story.episodes) {\n        // \u5361\u7247\n        const card = createElement("article", "card episode-card");\n        // \u5185\u5BB9\n        const body = createElement("div", "card-body");\n        body.append(createElement("p", "eyebrow", `\u7B2C ${episode.number} \u96C6`));\n        body.append(createElement("h3", "card-title", episode.title));\n        // \u5143\u4FE1\u606F\n        const meta = createElement("div", "card-meta");\n        meta.append(stageBadge(episode.stage));\n        meta.append(createElement("span", "", `\u5267\u672C r${episode.script.revision} \xB7 ${episode.script.status}`));\n        if (episode.blockers.length > 0) {\n            meta.append(createElement("span", "text-warn", `${episode.blockers.length} \u9879\u963B\u65AD`));\n        }\n        body.append(meta);\n        // \u963B\u65AD\u6458\u8981\n        if (episode.blockers.length > 0) {\n            const list = createElement("ul", "mini-list");\n            for (const blocker of episode.blockers.slice(0, 3)) {\n                list.append(createElement("li", "", blocker.message));\n            }\n            body.append(list);\n        }\n        // \u64CD\u4F5C\n        const actions = createElement("div", "card-actions");\n        const open = createElement("button", "button", "\u67E5\u770B\u5267\u96C6");\n        open.type = "button";\n        open.addEventListener("click", () => {\n            window.location.hash = `${HASH_PREFIX}episode/${encodeURIComponent(episode.id)}`;\n        });\n        actions.append(open);\n        body.append(actions);\n        card.append(body);\n        grid.append(card);\n    }\n    viewRoot.append(grid);\n    // \u4E0B\u4E00\u6B65\n    if (Array.isArray(story.next_actions) && story.next_actions.length > 0) {\n        const callout = createElement("div", "callout");\n        callout.append(createElement("strong", "", "\u4E0B\u4E00\u6B65"));\n        const list = createElement("ul", "mini-list");\n        for (const action of story.next_actions) list.append(createElement("li", "", action));\n        callout.append(list);\n        viewRoot.append(callout);\n    }\n}\n\n/**\n * \u5267\u96C6\u8BE6\u60C5\u3002\n */\nfunction renderEpisode(data) {\n    hideLegacyShotsNav();\n    // \u5267\u96C6 / \u72B6\u6001\n    const episode = data.episode;\n    const status = data.status;\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", `Episode ${episode.id}`));\n    headText.append(createElement("h2", "page-title", `\u7B2C ${episode.number} \u96C6 \xB7 ${episode.title}`));\n    headText.append(createElement("p", "page-subtitle", episode.summary ?? ""));\n    head.append(headText);\n    // \u8FD4\u56DE\n    const back = createElement("button", "button ghost", "\u2190 \u8FD4\u56DE\u6982\u89C8");\n    back.type = "button";\n    back.addEventListener("click", () => {\n        window.location.hash = `${HASH_PREFIX}overview`;\n    });\n    head.append(back);\n    viewRoot.append(head);\n    // \u9636\u6BB5\n    const stageRow = createElement("div", "chip-row");\n    stageRow.append(stageBadge(status.stage));\n    stageRow.append(createElement("span", "muted", `\u5267\u672C r${status.script.revision} \xB7 ${status.script.status}`));\n    stageRow.append(createElement("span", "muted", `\u62C6\u89E3 r${status.documents.breakdown.source_revision}`));\n    stageRow.append(createElement("span", "muted", `\u5206\u955C r${status.documents.shots.source_revision}`));\n    viewRoot.append(stageRow);\n    // \u963B\u65AD\n    if (status.blockers.length > 0) {\n        const callout = createElement("div", "callout warn");\n        callout.append(createElement("strong", "", `\u95E8\u7981\u963B\u65AD ${status.blockers.length} \u9879`));\n        const list = createElement("ul", "mini-list");\n        for (const blocker of status.blockers)\n            list.append(createElement("li", "", `[${blocker.code}] ${blocker.message}`));\n        callout.append(list);\n        viewRoot.append(callout);\n    }\n    // \u5267\u60C5\u56FE\u8C31\n    viewRoot.append(renderStoryMap(data.map));\n    // \u5267\u672C\n    const scriptHead = createElement("div", "section-head");\n    scriptHead.append(createElement("h3", "section-title", "\u5267\u672C"));\n    scriptHead.append(createElement("span", "section-meta", `r${data.script.meta.revision}`));\n    viewRoot.append(scriptHead);\n    const script = createElement(\n        "pre",\n        "script-text",\n        data.script.content === "" ? "\uFF08\u5C1A\u672A\u540C\u6B65\uFF09" : data.script.content,\n    );\n    viewRoot.append(script);\n    // \u62C6\u89E3\n    const breakdown = data.breakdown;\n    const breakdownHead = createElement("div", "section-head");\n    breakdownHead.append(createElement("h3", "section-title", "\u672C\u96C6\u62C6\u89E3"));\n    breakdownHead.append(\n        createElement("span", "section-meta", breakdown === null ? "\u7F3A\u5931" : `source r${breakdown.source_revision}`),\n    );\n    viewRoot.append(breakdownHead);\n    if (breakdown === null) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u62C6\u89E3", "\u4F7F\u7528 daoyan story breakdown set \u5199\u5165\u672C\u96C6\u89D2\u8272\u3001\u5F62\u6001\u3001\u573A\u666F\u4E0E\u97F3\u8272\u3002"));\n    } else {\n        const list = createElement("div", "layout-two");\n        // \u89D2\u8272\n        const cast = createElement("div", "panel");\n        cast.append(createElement("h4", "panel-title", "\u89D2\u8272\u4E0E\u5F62\u6001"));\n        const castList = createElement("ul", "mini-list");\n        for (const item of breakdown.characters) {\n            castList.append(createElement("li", "", `${item.id} \xB7 ${item.forms.join(" / ")}`));\n        }\n        cast.append(castList);\n        // \u573A\u666F / \u97F3\u8272 / beat\n        const other = createElement("div", "panel");\n        other.append(createElement("h4", "panel-title", "\u573A\u666F / \u97F3\u8272 / Beat"));\n        other.append(createElement("p", "", `\u573A\u666F\uFF1A${breakdown.scenes.join("\u3001") || "\u65E0"}`));\n        other.append(createElement("p", "", `\u97F3\u8272\uFF1A${breakdown.voices.join("\u3001") || "\u65E0"}`));\n        other.append(createElement("p", "", `Beat\uFF1A${(breakdown.beats ?? []).map((b) => b.id).join("\u3001") || "\u65E0"}`));\n        list.append(cast);\n        list.append(other);\n        viewRoot.append(list);\n    }\n    // \u5206\u955C\n    const shots = data.shots;\n    const shotsHead = createElement("div", "section-head");\n    shotsHead.append(createElement("h3", "section-title", "\u5206\u955C"));\n    shotsHead.append(\n        createElement("span", "section-meta", shots === null ? "\u7F3A\u5931" : `${shots.summary.shots_total} \u955C`),\n    );\n    viewRoot.append(shotsHead);\n    if (shots === null || shots.shots.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u5206\u955C", "\u4F7F\u7528 daoyan story shots set \u5199\u5165\u672C\u96C6\u5206\u955C\u3002"));\n    } else {\n        const grid = createElement("div", "shot-grid");\n        for (const shot of shots.shots) grid.append(renderShotCard(shot));\n        viewRoot.append(grid);\n    }\n    // \u4EFB\u52A1\n    const taskHead = createElement("div", "section-head");\n    taskHead.append(createElement("h3", "section-title", "\u672C\u96C6\u4EFB\u52A1"));\n    taskHead.append(createElement("span", "section-meta", `${data.tasks.length} \u4E2A`));\n    viewRoot.append(taskHead);\n    if (data.tasks.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u4EFB\u52A1", "\u62CD\u6444\u672C\u96C6\u540E\uFF0Ctask \u4F1A\u51FA\u73B0\u5728\u8FD9\u91CC\u3002"));\n    } else {\n        const list = createElement("div", "task-list");\n        for (const task of data.tasks.slice(0, 10)) {\n            const row = createElement("div", "task-row");\n            row.append(createElement("span", "mono", task.task_id));\n            row.append(createElement("span", "", task.command));\n            row.append(statusBadge(task.status));\n            list.append(row);\n        }\n        viewRoot.append(list);\n    }\n    // \u6210\u7247\n    const finalHead = createElement("div", "section-head");\n    finalHead.append(createElement("h3", "section-title", "\u6210\u7247"));\n    finalHead.append(createElement("span", "section-meta", `${data.finals.length} \u4E2A`));\n    viewRoot.append(finalHead);\n    if (data.finals.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u6210\u7247", "\u8FD0\u884C daoyan wrap --episode <id> \u540E\u51FA\u73B0\u3002"));\n    } else {\n        const list = createElement("div", "task-list");\n        for (const item of data.finals) {\n            const row = createElement("div", "task-row");\n            row.append(createElement("span", "mono", item.name));\n            row.append(createElement("span", "", formatTime(item.created_at ?? "")));\n            const play = createElement("button", "button", "\u64AD\u653E");\n            play.type = "button";\n            play.addEventListener("click", () => {\n                openPlayer([{ title: item.name, url: item.media_url, kind: "video" }], 0);\n            });\n            row.append(play);\n            list.append(row);\n        }\n        viewRoot.append(list);\n    }\n}\n\n/**\n * \u56FE\u8C31\u91CD\u8981\u5EA6\u5FBD\u6807\u3002\n */\nfunction mapImportanceBadge(importance) {\n    // \u6587\u6848\n    const label = importance === "major" ? "\u5173\u952E" : importance === "minor" ? "\u8FC7\u573A" : "\u5E38\u89C4";\n    return badge(label, `importance-${importance}`);\n}\n\n/**\n * \u56FE\u8C31\u5C31\u7EEA\u5FBD\u6807\u3002\n */\nfunction mapReadyBadge(gen) {\n    if (gen === undefined) return badge("\u65E0\u4E0A\u4E0B\u6587", "map-unknown");\n    if (gen.ready) return badge("\u53EF\u751F\u6210", "map-ready");\n    // \u963B\u585E\u6570\n    const blockers = gen.gaps.filter((gap) => gap.severity === "blocker").length;\n    return badge(`\u963B\u585E ${blockers}`, "map-blocked");\n}\n\n/**\n * \u56FE\u8C31\u6E32\u67D3\u5FBD\u6807\u3002\n */\nfunction mapRenderBadge(gen) {\n    // \u72B6\u6001\n    const status = gen?.render?.latest_status;\n    if (status === "succeeded") return badge("\u5DF2\u751F\u6210", "map-rendered");\n    if (status === "failed") return badge("\u5931\u8D25", "map-failed");\n    if (status === "cancelled" || status === "interrupted") return badge(STATUS_LABEL[status] ?? status, "map-failed");\n    return badge("\u672A\u751F\u6210", "map-pending");\n}\n\n/**\n * SVG \u8282\u70B9\u3002\n */\nfunction svgNode(tag, attrs) {\n    // \u8282\u70B9\n    const node = document.createElementNS(SVG_NS, tag);\n    if (attrs !== undefined) {\n        for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, String(value));\n    }\n    return node;\n}\n\n/**\n * \u65F6\u95F4\u7801\u3002\n */\nfunction formatTimecode(seconds) {\n    // \u6570\u503C\n    const value = Math.max(0, Math.round(Number(seconds) || 0));\n    // \u5206\u949F\n    const minutes = Math.floor(value / 60);\n    // \u79D2\n    const rest = value % 60;\n    return `${String(minutes).padStart(2, "0")}:${String(rest).padStart(2, "0")}`;\n}\n\n/**\n * \u56FE\u8C31\u7D22\u5F15\u3002\n */\nfunction mapIndexes(map) {\n    // \u89D2\u8272\n    const characters = new Map();\n    for (const item of map.catalog.characters) characters.set(item.id, item);\n    // \u573A\u666F\n    const scenes = new Map();\n    for (const item of map.catalog.scenes) scenes.set(item.id, item);\n    // \u97F3\u8272\n    const voices = new Map();\n    for (const item of map.catalog.voices) voices.set(item.id, item);\n    // \u751F\u6210\u4E8B\u4EF6\n    const generation = new Map();\n    for (const item of map.generation.events) generation.set(item.shot_id, item);\n    return { characters, scenes, voices, generation };\n}\n\n/**\n * \u67E5\u627E\u5F62\u6001\u3002\n */\nfunction formOf(character, formId) {\n    if (character === undefined || character === null) return null;\n    return character.forms.find((form) => form.id === formId) ?? null;\n}\n\n/**\n * \u8D44\u4EA7\u72B6\u6001\u3002\n */\nfunction assetStatus(asset) {\n    if (asset === null || asset === undefined) return "missing";\n    if (asset.lfs_pointer) return "lfs";\n    if (!asset.present) return "absent";\n    return "ready";\n}\n\n/**\n * \u8D44\u4EA7\u72B6\u6001\u6587\u6848\u3002\n */\nfunction assetStatusLabel(status) {\n    if (status === "lfs") return "LFS \u672A\u62C9\u53D6";\n    if (status === "absent") return "\u6587\u4EF6\u7F3A\u5931";\n    if (status === "missing") return "\u672A\u6307\u5B9A";\n    return "\u53EF\u7528";\n}\n\n/**\n * \u8D44\u4EA7\u7F29\u7565 / \u9884\u89C8\u3002\n */\nfunction mapAssetNode(asset, compact) {\n    // \u5BB9\u5668\n    const box = createElement("span", compact === true ? "map-asset compact" : "map-asset");\n    if (asset === null || asset === undefined) {\n        box.append(createElement("span", "map-asset-missing", "\u672A\u6307\u5B9A"));\n        return box;\n    }\n    // \u72B6\u6001\n    const status = assetStatus(asset);\n    if (status !== "ready") {\n        box.append(createElement("span", "map-asset-missing", `${asset.id} \xB7 ${assetStatusLabel(status)}`));\n        return box;\n    }\n    // \u5185\u5BB9\u7C7B\u578B\n    const contentType = typeof asset.content_type === "string" ? asset.content_type : "";\n    if (contentType.startsWith("image/")) {\n        // \u9884\u89C8\u6309\u94AE\n        const button = createElement("button", "map-asset-thumb");\n        button.type = "button";\n        button.title = `\u9884\u89C8 ${asset.id}`;\n        button.setAttribute("aria-label", `\u9884\u89C8 ${asset.id}`);\n        // \u56FE\u7247\n        const image = document.createElement("img");\n        image.src = asset.media_url;\n        image.alt = asset.id;\n        image.loading = "lazy";\n        button.append(image);\n        button.append(createElement("span", "mono", asset.id));\n        button.addEventListener("click", () => openImageUrl(asset.media_url, asset.path));\n        box.append(button);\n        return box;\n    }\n    if (contentType.startsWith("audio/")) {\n        // \u8BD5\u542C\u6309\u94AE\n        const button = createElement("button", "map-asset-thumb", `\u266A ${asset.id}`);\n        button.type = "button";\n        button.addEventListener("click", () => {\n            openPlayer([{ title: asset.path, url: asset.media_url, kind: "audio" }], 0);\n        });\n        box.append(button);\n        return box;\n    }\n    box.append(createElement("span", "mono", asset.id));\n    return box;\n}\n\n/**\n * \u8D44\u4EA7\u5217\u8868\u3002\n */\nfunction mapAssetList(container, assets) {\n    // \u5217\u8868\n    const row = createElement("div", "map-assets");\n    if (!Array.isArray(assets) || assets.length === 0) {\n        row.append(createElement("span", "muted", "\u65E0"));\n        container.append(row);\n        return;\n    }\n    for (const asset of assets) row.append(mapAssetNode(asset, true));\n    container.append(row);\n}\n\n/**\n * \u56FE\u8C31\u7B5B\u9009\u6587\u6848\u3002\n */\nfunction mapFocusLabel(map, focus) {\n    if (focus === null) return "";\n    if (focus.kind === "scene") {\n        // \u573A\u666F\n        const scene = map.catalog.scenes.find((item) => item.id === focus.id);\n        return scene !== undefined ? `\u573A\u666F\uFF1A${scene.name}` : `\u573A\u666F\uFF1A${focus.id}`;\n    }\n    // \u89D2\u8272\n    const character = map.catalog.characters.find((item) => item.id === focus.id);\n    return character !== undefined ? `\u89D2\u8272\uFF1A${character.name}` : `\u89D2\u8272\uFF1A${focus.id}`;\n}\n\n/**\n * \u573A\u666F\u8272\u8C03\u3002\n */\nfunction sceneTone(indexes, sceneId) {\n    if (sceneId === undefined || sceneId === null) return "tone-other";\n    // \u573A\u666F\n    const scene = indexes.scenes.get(sceneId);\n    // \u65F6\u95F4\n    const value = typeof scene?.time_of_day === "string" ? scene.time_of_day.toLowerCase() : "";\n    if (value.includes("night") || value.includes("\u591C")) return "tone-night";\n    if (value.includes("dusk") || value.includes("\u9EC4\u660F")) return "tone-dusk";\n    if (value.includes("dawn") || value.includes("\u6668")) return "tone-dawn";\n    if (value.includes("day") || value.includes("\u65E5")) return "tone-day";\n    return "tone-other";\n}\n\n/**\n * \u56FE\u8C31\u884C\u3002\n */\nfunction mapRow(label, value) {\n    // \u884C\n    const row = createElement("div", "map-row");\n    row.append(createElement("span", "map-row-label", label));\n    row.append(createElement("span", "map-row-value", value));\n    return row;\n}\n\n/**\n * \u56FE\u8C31\u8BE6\u60C5\u3002\n */\nfunction renderMapDetail(container, map, refresh) {\n    // \u7D22\u5F15\n    const indexes = mapIndexes(map);\n    // \u9762\u677F\n    const panel = createElement("div", "map-detail");\n    if (mapFocus === null) {\n        panel.append(createElement("p", "muted", "\u70B9\u51FB\u89D2\u8272\u3001\u5F62\u6001\u6216\u573A\u666F\u8282\u70B9\u67E5\u770B\u8BE6\u60C5\uFF1B\u70B9\u51FB\u540E\u53EF\u5728\u65F6\u5E8F\u56FE\u4E2D\u7B5B\u9009\u3002"));\n        container.append(panel);\n        return;\n    }\n    // \u5934\u90E8\n    const head = createElement("div", "map-detail-head");\n    head.append(createElement("strong", "", mapFocusLabel(map, mapFocus)));\n    // \u6E05\u9664\n    const clear = createElement("button", "button ghost", "\u6E05\u9664\u7B5B\u9009");\n    clear.type = "button";\n    clear.addEventListener("click", () => {\n        mapFocus = null;\n        refresh();\n    });\n    head.append(clear);\n    // \u65F6\u5E8F\n    const timeline = createElement("button", "button", "\u5728\u65F6\u5E8F\u4E2D\u7B5B\u9009");\n    timeline.type = "button";\n    timeline.addEventListener("click", () => {\n        mapTab = "timeline";\n        refresh();\n    });\n    head.append(timeline);\n    panel.append(head);\n    if (mapFocus.kind === "scene") {\n        // \u573A\u666F\n        const scene = indexes.scenes.get(mapFocus.id);\n        if (scene === undefined) {\n            panel.append(createElement("p", "muted", "\u573A\u666F\u4E0D\u5728\u672C\u96C6\u8D44\u4EA7\u76EE\u5F55\u4E2D\u3002"));\n            container.append(panel);\n            return;\n        }\n        panel.append(mapRow("\u65F6\u95F4", `${scene.time_of_day ?? "\u672A\u6807\u6CE8"} \xB7 ${scene.interior_exterior ?? "\u672A\u6807\u6CE8"}`));\n        panel.append(mapRow("\u4F7F\u7528", `${scene.event_count} \u955C`));\n        panel.append(createElement("p", "map-detail-label", "\u4E3B\u53C2\u8003 / \u8D44\u4EA7"));\n        mapAssetList(\n            panel,\n            [scene.reference_asset, ...scene.assets.filter((asset) => asset.id !== scene.reference_asset?.id)].filter(\n                (asset) => asset !== null,\n            ),\n        );\n        // \u89D2\u8272\n        const graphScene = map.graph.scenes.find((node) => String(node.id) === scene.id);\n        // \u89D2\u8272\u540D\n        const names = (graphScene?.character_ids ?? [])\n            .map((id) => indexes.characters.get(String(id))?.name ?? String(id))\n            .join("\u3001");\n        panel.append(mapRow("\u51FA\u573A\u89D2\u8272", names === "" ? "\u65E0" : names));\n        container.append(panel);\n        return;\n    }\n    // \u89D2\u8272\n    const character = indexes.characters.get(mapFocus.id);\n    if (character === undefined) {\n        panel.append(createElement("p", "muted", "\u89D2\u8272\u4E0D\u5728\u672C\u96C6\u8D44\u4EA7\u76EE\u5F55\u4E2D\u3002"));\n        container.append(panel);\n        return;\n    }\n    panel.append(mapRow("\u89D2\u8272\u5B9A\u4F4D", character.role ?? "\u672A\u6807\u6CE8"));\n    // \u5F62\u6001\n    const forms =\n        mapFocus.form === null || mapFocus.form === undefined\n            ? character.forms\n            : character.forms.filter((form) => form.id === mapFocus.form);\n    for (const form of forms) {\n        const section = createElement("div", "map-detail-section");\n        section.append(\n            createElement(\n                "p",\n                "map-detail-label",\n                `${form.name} \xB7 ${form.id}${form.used ? `\uFF08${form.event_count} \u955C\uFF09` : "\uFF08\u672C\u96C6\u672A\u4F7F\u7528\uFF09"}`,\n            ),\n        );\n        section.append(mapRow("\u4E3B\u53C2\u8003", assetStatusLabel(assetStatus(form.reference_asset))));\n        mapAssetList(\n            section,\n            [form.reference_asset, ...form.assets.filter((asset) => asset.id !== form.reference_asset?.id)].filter(\n                (asset) => asset !== null,\n            ),\n        );\n        panel.append(section);\n    }\n    // \u573A\u666F\n    const graphCharacter = map.graph.characters.find((node) => String(node.id) === character.id);\n    // \u573A\u666F\u540D\n    const sceneNames = (graphCharacter?.scene_ids ?? [])\n        .map((id) => indexes.scenes.get(String(id))?.name ?? String(id))\n        .join("\u3001");\n    panel.append(mapRow("\u51FA\u73B0\u573A\u666F", sceneNames === "" ? "\u65E0" : sceneNames));\n    // \u5171\u73B0\n    const cooccur = map.graph.cooccurrence_edges.filter((edge) => edge.a === character.id || edge.b === character.id);\n    // \u5171\u73B0\u6587\u6848\n    const cooccurText = cooccur\n        .map((edge) => {\n            // \u5BF9\u65B9\n            const other = edge.a === character.id ? String(edge.b) : String(edge.a);\n            return `${indexes.characters.get(other)?.name ?? other}\uFF08${edge.event_count} \u955C\uFF09`;\n        })\n        .join("\u3001");\n    panel.append(mapRow("\u5171\u73B0\u89D2\u8272", cooccurText === "" ? "\u65E0" : cooccurText));\n    // \u751F\u6210\u4F7F\u7528\n    const related = map.generation.events.filter((event) => event.cast.some((cast) => cast.id === character.id));\n    // \u5C31\u7EEA\u6570\n    const ready = related.filter((event) => event.ready).length;\n    panel.append(mapRow("\u751F\u6210\u4E0A\u4E0B\u6587", `${related.length} \u955C\u76F8\u5173 \xB7 ${ready} \u53EF\u751F\u6210 \xB7 ${related.length - ready} \u963B\u585E`));\n    container.append(panel);\n}\n\n/**\n * \u62D3\u6251\u8282\u70B9\u3002\n */\nfunction renderTopologyNode(svg, x, y, node, refresh) {\n    // \u5206\u7EC4\n    const group = svgNode("g", {\n        class: `map-node status-${node.status}`,\n        tabindex: "0",\n        role: "button",\n        "aria-label": `${node.kind === "scene" ? "\u573A\u666F" : "\u89D2\u8272"} ${node.name}`,\n    });\n    // \u80CC\u666F\n    group.append(\n        svgNode("rect", { x, y, width: MAP_NODE_WIDTH, height: MAP_NODE_HEIGHT, rx: 10, class: "map-node-bg" }),\n    );\n    // \u5934\u50CF\n    group.append(svgNode("circle", { cx: x + 22, cy: y + 24, r: 13, class: "map-node-avatar" }));\n    // \u9996\u5B57\n    const initial = svgNode("text", { x: x + 22, y: y + 28, class: "map-node-initial", "text-anchor": "middle" });\n    initial.textContent = node.name.slice(0, 1);\n    group.append(initial);\n    // \u540D\u79F0\n    const name = svgNode("text", { x: x + 42, y: y + 21, class: "map-node-name" });\n    name.textContent = node.name;\n    group.append(name);\n    // \u526F\u6807\u9898\n    const subtitle = svgNode("text", { x: x + 42, y: y + 37, class: "map-node-sub" });\n    subtitle.textContent = node.subtitle;\n    group.append(subtitle);\n    // \u63D0\u793A\n    const title = svgNode("title");\n    title.textContent = `${node.name} \xB7 ${node.status === "warn" ? "\u8D44\u4EA7\u5F02\u5E38" : "\u5C31\u7EEA"}`;\n    group.append(title);\n    // \u7126\u70B9\n    const focus = () => {\n        mapFocus = { kind: node.kind === "scene" ? "scene" : "character", id: node.id, form: node.form ?? null };\n        refresh();\n    };\n    group.addEventListener("click", focus);\n    group.addEventListener("keydown", (event) => {\n        if (event.key === "Enter" || event.key === " ") {\n            event.preventDefault();\n            focus();\n        }\n    });\n    // \u805A\u7126 / \u6DE1\u51FA\n    if (node.kind === "scene") {\n        if (mapFocus !== null && mapFocus.kind === "scene")\n            group.classList.add(mapFocus.id === node.id ? "is-focus" : "is-dim");\n    } else if (mapFocus !== null && mapFocus.kind === "character") {\n        group.classList.add(mapFocus.id === node.id ? "is-focus" : "is-dim");\n    }\n    svg.append(group);\n}\n\n/**\n * \u62D3\u6251\u56FE\u3002\n */\nfunction renderMapTopology(container, map, refresh) {\n    // \u7D22\u5F15\n    const indexes = mapIndexes(map);\n    // \u5DE6\u5217\u8282\u70B9\n    const left = [];\n    for (const node of map.graph.characters) {\n        // \u89D2\u8272\n        const character = indexes.characters.get(String(node.id));\n        // \u5F62\u6001\u8282\u70B9\n        const forms = Array.isArray(node.forms) ? node.forms : [];\n        if (mapMode === "form") {\n            for (const formNode of forms) {\n                // \u5F62\u6001\n                const form = formOf(character, String(formNode.id));\n                left.push({\n                    key: `form:${node.id}/${formNode.id}`,\n                    kind: "form",\n                    id: String(node.id),\n                    form: String(formNode.id),\n                    name: `${String(node.name ?? node.id)} \xB7 ${String(formNode.name ?? formNode.id)}`,\n                    subtitle: character?.role ?? "",\n                    status:\n                        form !== null && form.used && assetStatus(form.reference_asset) !== "ready" ? "warn" : "ready",\n                });\n            }\n            continue;\n        }\n        // \u4F7F\u7528\u5F62\u6001\n        const usedForms = forms\n            .map((formNode) => formOf(character, String(formNode.id)))\n            .filter((form) => form !== null && form.used);\n        left.push({\n            key: `character:${node.id}`,\n            kind: "character",\n            id: String(node.id),\n            form: null,\n            name: String(node.name ?? node.id),\n            subtitle: forms.map((formNode) => String(formNode.name ?? formNode.id)).join(" / "),\n            status: usedForms.some((form) => assetStatus(form.reference_asset) !== "ready") ? "warn" : "ready",\n        });\n    }\n    // \u573A\u666F\u8282\u70B9\n    const scenes = map.graph.scenes.map((node) => {\n        // \u573A\u666F\n        const scene = indexes.scenes.get(String(node.id));\n        return {\n            key: `scene:${node.id}`,\n            kind: "scene",\n            id: String(node.id),\n            form: null,\n            name: String(node.name ?? node.id),\n            subtitle: scene?.time_of_day ?? "",\n            status:\n                scene !== undefined && scene.used && assetStatus(scene.reference_asset) !== "ready" ? "warn" : "ready",\n        };\n    });\n    // \u884C\u6570\n    const rows = Math.max(left.length, scenes.length);\n    // \u9AD8\u5EA6\n    const height = MAP_TOP * 2 + rows * MAP_ROW_HEIGHT;\n    // SVG\n    const svg = svgNode("svg", {\n        viewBox: `0 0 ${MAP_WIDTH} ${height}`,\n        class: "map-graph",\n        role: "img",\n        "aria-label": "\u89D2\u8272\u3001\u5F62\u6001\u4E0E\u573A\u666F\u5173\u7CFB\u56FE",\n    });\n    // \u5DE6\u5217\u4F4D\u7F6E\n    const leftPositions = new Map();\n    for (const [index, node] of left.entries()) {\n        leftPositions.set(node.key, { x: MAP_LEFT_X, y: MAP_TOP + index * MAP_ROW_HEIGHT, node });\n    }\n    // \u53F3\u5217\u4F4D\u7F6E\n    const rightPositions = new Map();\n    for (const [index, node] of scenes.entries()) {\n        rightPositions.set(node.key, { x: MAP_RIGHT_X, y: MAP_TOP + index * MAP_ROW_HEIGHT, node });\n    }\n    // \u8FB9\n    const edges = mapMode === "form" ? map.graph.form_scene_edges : map.graph.character_scene_edges;\n    for (const edge of edges) {\n        // \u5DE6\u952E\n        const leftKey =\n            mapMode === "form" ? `form:${edge.character_id}/${edge.form_id}` : `character:${edge.character_id}`;\n        // \u7AEF\u70B9\n        const from = leftPositions.get(leftKey);\n        const to = rightPositions.get(`scene:${edge.scene_id}`);\n        if (from === undefined || to === undefined) continue;\n        // \u6B21\u6570\n        const count = Number(edge.event_count) || 1;\n        // \u8DEF\u5F84\n        const path = svgNode("path", {\n            d: `M ${from.x + MAP_NODE_WIDTH} ${from.y + MAP_NODE_HEIGHT / 2} C ${(from.x + MAP_NODE_WIDTH + to.x) / 2} ${from.y + MAP_NODE_HEIGHT / 2}, ${(from.x + MAP_NODE_WIDTH + to.x) / 2} ${to.y + MAP_NODE_HEIGHT / 2}, ${to.x} ${to.y + MAP_NODE_HEIGHT / 2}`,\n            class: "map-edge",\n            "stroke-width": 1.5 + Math.min(4, Math.sqrt(count) * 1.2),\n            opacity: 0.25 + Math.min(0.55, count * 0.08),\n        });\n        // \u63D0\u793A\n        const title = svgNode("title");\n        title.textContent = `${from.node.name} \u2192 ${to.node.name}\uFF1A${count} \u955C`;\n        path.append(title);\n        // \u805A\u7126\n        if (mapFocus !== null) {\n            // \u662F\u5426\u76F8\u5173\n            const related = mapFocus.kind === "scene" ? to.node.id === mapFocus.id : from.node.id === mapFocus.id;\n            if (!related) path.classList.add("is-dim");\n        }\n        svg.append(path);\n    }\n    // \u5171\u73B0\u5F27\n    if (mapMode === "character") {\n        const arcs = map.graph.cooccurrence_edges.slice(0, MAP_MAX_ARCS);\n        for (const edge of arcs) {\n            // \u7AEF\u70B9\n            const from = leftPositions.get(`character:${edge.a}`);\n            const to = leftPositions.get(`character:${edge.b}`);\n            if (from === undefined || to === undefined) continue;\n            // \u8DEF\u5F84\n            const path = svgNode("path", {\n                d: `M ${from.x} ${from.y + MAP_NODE_HEIGHT / 2} C ${Math.max(4, from.x - 30)} ${from.y + MAP_NODE_HEIGHT / 2}, ${Math.max(4, to.x - 30)} ${to.y + MAP_NODE_HEIGHT / 2}, ${to.x} ${to.y + MAP_NODE_HEIGHT / 2}`,\n                class: "map-cooccur",\n            });\n            // \u63D0\u793A\n            const title = svgNode("title");\n            title.textContent = `\u5171\u73B0\uFF1A${from.node.name} / ${to.node.name}\uFF08${edge.event_count} \u955C\uFF09`;\n            path.append(title);\n            svg.append(path);\n        }\n        // \u53D9\u4E8B\u5173\u7CFB\n        for (const relation of map.relations.slice(0, MAP_MAX_ARCS)) {\n            // \u7AEF\u70B9\n            const from = leftPositions.get(`character:${relation.from}`);\n            const to = leftPositions.get(`character:${relation.to}`);\n            if (from === undefined || to === undefined) continue;\n            // \u8DEF\u5F84\n            const path = svgNode("path", {\n                d: `M ${from.x} ${from.y + MAP_NODE_HEIGHT / 2} C ${Math.max(4, from.x - 50)} ${from.y + MAP_NODE_HEIGHT / 2}, ${Math.max(4, to.x - 50)} ${to.y + MAP_NODE_HEIGHT / 2}, ${to.x} ${to.y + MAP_NODE_HEIGHT / 2}`,\n                class: "map-relation",\n            });\n            // \u6807\u7B7E\n            const label = svgNode("text", {\n                x: Math.max(12, MAP_LEFT_X - 120),\n                y: (from.y + to.y) / 2 + MAP_NODE_HEIGHT / 2,\n                class: "map-relation-label",\n            });\n            label.textContent = relation.label;\n            svg.append(path, label);\n        }\n    }\n    // \u8282\u70B9\n    for (const node of left) {\n        // \u4F4D\u7F6E\n        const position = leftPositions.get(node.key);\n        if (position !== undefined) renderTopologyNode(svg, position.x, position.y, node, refresh);\n    }\n    for (const node of scenes) {\n        // \u4F4D\u7F6E\n        const position = rightPositions.get(node.key);\n        if (position !== undefined) renderTopologyNode(svg, position.x, position.y, node, refresh);\n    }\n    // \u5BB9\u5668\n    const wrap = createElement("div", "map-graph-wrap");\n    wrap.append(svg);\n    container.append(wrap);\n    // \u56FE\u4F8B\n    const legend = createElement("div", "map-legend");\n    legend.append(createElement("span", "", "\u5B9E\u7EBF\uFF1A\u89D2\u8272 / \u5F62\u6001\u51FA\u73B0\u5728\u573A\u666F"));\n    legend.append(createElement("span", "", "\u865A\u7EBF\uFF1A\u5171\u73B0\u6216\u53D9\u4E8B\u5173\u7CFB"));\n    legend.append(createElement("span", "", "\u7EBF\u5BBD\uFF1A\u51FA\u573A\u955C\u5934\u6570"));\n    container.append(legend);\n    // \u8BE6\u60C5\n    renderMapDetail(container, map, refresh);\n}\n\n/**\n * \u65F6\u5E8F\u4E8B\u4EF6\u8BE6\u60C5\u3002\n */\nfunction renderTimelineDetail(container, event, gen, map, indexes) {\n    // \u5185\u5BB9\n    const body = createElement("div", "map-event-detail");\n    // workflow\n    body.append(mapRow("Workflow", gen?.assigned_workflow ?? "\u672A\u6307\u5B9A"));\n    body.append(mapRow("\u6765\u6E90", gen?.workflow_source ?? "none"));\n    // \u69FD\u4F4D\n    if (gen?.workflow !== null && gen?.workflow !== undefined) {\n        const slots = createElement("div", "map-slots");\n        for (const slot of gen.workflow.slots) {\n            // \u69FD\u4F4D\n            const row = createElement("div", "map-slot");\n            row.append(createElement("span", "mono", `${slot.slot} \u2192 ${slot.target}`));\n            row.append(createElement("span", "", `${slot.owner ?? "\u2014"} \xB7 ${slot.asset?.id ?? "\u2014"}`));\n            row.append(badge(slot.status, `map-slot-${slot.status}`));\n            slots.append(row);\n        }\n        if (gen.workflow.slots.length > 0) {\n            body.append(createElement("p", "map-detail-label", "\u8D44\u4EA7\u69FD\u4F4D"));\n            body.append(slots);\n        }\n    }\n    // \u5019\u9009 workflow\n    if (gen !== undefined && gen.candidate_workflows.length > 0) {\n        const section = createElement("div", "map-detail-section");\n        section.append(createElement("p", "map-detail-label", "\u5019\u9009 workflow"));\n        for (const candidate of gen.candidate_workflows) {\n            // \u5019\u9009\u884C\n            const row = createElement("div", "map-slot");\n            row.append(createElement("span", "mono", candidate.name));\n            row.append(badge(candidate.fit, `map-fit-${candidate.fit}`));\n            if (candidate.reasons.length > 0) row.append(createElement("span", "muted", candidate.reasons.join("\uFF1B")));\n            section.append(row);\n        }\n        body.append(section);\n    }\n    // \u89D2\u8272\u8D44\u4EA7\n    const cast = createElement("div", "map-detail-section");\n    cast.append(createElement("p", "map-detail-label", "\u89D2\u8272\u4E0E\u5F62\u6001"));\n    for (const item of event.characters) {\n        // \u89D2\u8272\n        const character = indexes.characters.get(item.id);\n        // \u5F62\u6001\n        const form = formOf(character, item.form);\n        cast.append(\n            mapRow(\n                `${item.name} \xB7 ${item.form_name}`,\n                `${assetStatusLabel(assetStatus(form?.reference_asset))} \xB7 ${form?.assets.length ?? 0} \u4E2A\u8D44\u4EA7`,\n            ),\n        );\n        mapAssetList(\n            cast,\n            [\n                form?.reference_asset,\n                ...(form?.assets ?? []).filter((asset) => asset.id !== form?.reference_asset?.id),\n            ].filter((asset) => asset !== null && asset !== undefined),\n        );\n    }\n    body.append(cast);\n    // \u573A\u666F\u8D44\u4EA7\n    const scene = indexes.scenes.get(event.scene?.id ?? "");\n    if (scene !== undefined) {\n        const section = createElement("div", "map-detail-section");\n        section.append(createElement("p", "map-detail-label", `\u573A\u666F \xB7 ${scene.name}`));\n        mapAssetList(\n            section,\n            [scene.reference_asset, ...scene.assets.filter((asset) => asset.id !== scene.reference_asset?.id)].filter(\n                (asset) => asset !== null,\n            ),\n        );\n        body.append(section);\n    }\n    // \u97F3\u8272\n    if (gen !== undefined && gen.voices.length > 0) {\n        const section = createElement("div", "map-detail-section");\n        section.append(createElement("p", "map-detail-label", "\u97F3\u8272"));\n        for (const voice of gen.voices)\n            section.append(mapRow(voice.voice_id, voice.reference_present ? "\u53C2\u8003\u97F3\u9891\u53EF\u7528" : "\u53C2\u8003\u97F3\u9891\u7F3A\u5931"));\n        body.append(section);\n    }\n    // \u8FDE\u7EED\u6027\n    if (gen !== undefined) {\n        const section = createElement("div", "map-detail-section");\n        section.append(createElement("p", "map-detail-label", "\u8FDE\u7EED\u6027"));\n        section.append(mapRow("\u573A\u666F", gen.continuity.scene_changed ? "\u5207\u6362" : "\u5EF6\u7EED"));\n        section.append(\n            mapRow(\n                "\u5F62\u6001\u53D8\u5316",\n                gen.continuity.form_changes.length === 0\n                    ? "\u65E0"\n                    : gen.continuity.form_changes\n                          .map((change) => `${change.character_id}: ${change.from} \u2192 ${change.to}`)\n                          .join("\uFF1B"),\n            ),\n        );\n        section.append(\n            mapRow(\n                "Relay",\n                `${gen.continuity.relay_from ?? "\u65E0"} \u2192 ${gen.continuity.relay_targets.join(" / ") || "\u65E0"}`,\n            ),\n        );\n        section.append(mapRow("Anchor", gen.continuity.anchor?.path ?? "\u65E0"));\n        body.append(section);\n    }\n    // \u6E32\u67D3\n    if (gen !== undefined) {\n        const section = createElement("div", "map-detail-section");\n        section.append(createElement("p", "map-detail-label", "\u6E32\u67D3"));\n        section.append(mapRow("Run", `${gen.render.runs_count} \u6B21 \xB7 ${gen.render.succeeded_count} \u6210\u529F`));\n        section.append(mapRow("\u6700\u65B0\u72B6\u6001", gen.render.latest_status ?? "\u672A\u751F\u6210"));\n        if (gen.render.latest_error !== null) section.append(mapRow("\u9519\u8BEF", gen.render.latest_error));\n        // \u4EA7\u7269\n        const outputs = createElement("div", "map-assets");\n        for (const output of gen.render.latest_outputs) {\n            // \u6253\u5F00\u6309\u94AE\n            const button = createElement(\n                "button",\n                "button ghost",\n                `${output.kind === "video" ? "\u64AD\u653E" : output.kind === "image" ? "\u67E5\u770B" : "\u6253\u5F00"} ${output.name}`,\n            );\n            button.type = "button";\n            button.addEventListener("click", () => {\n                if (output.kind === "video" || output.kind === "audio")\n                    openPlayer([{ title: output.name, url: output.media_url, kind: output.kind }], 0);\n                else if (output.kind === "image") openImageUrl(output.media_url, output.name);\n                else window.open(output.media_url, "_blank", "noopener");\n            });\n            outputs.append(button);\n        }\n        if (outputs.childElementCount > 0) section.append(outputs);\n        body.append(section);\n    }\n    // \u7F3A\u53E3\n    if (gen !== undefined && gen.gaps.length > 0) {\n        const section = createElement("div", "map-detail-section");\n        section.append(createElement("p", "map-detail-label", "\u7F3A\u53E3"));\n        for (const gap of gen.gaps) {\n            // \u7F3A\u53E3\n            const row = createElement("div", `map-gap ${gap.severity === "blocker" ? "is-blocker" : ""}`);\n            row.append(createElement("span", "mono", gap.code));\n            row.append(createElement("span", "", gap.message));\n            row.append(createElement("span", "muted", gap.hint));\n            section.append(row);\n        }\n        body.append(section);\n    }\n    container.append(body);\n}\n\n/**\n * \u65F6\u5E8F\u4E8B\u4EF6\u3002\n */\nfunction renderTimelineEvent(event, gen, map, indexes, refresh) {\n    // \u5BB9\u5668\n    const item = createElement("article", "timeline-event");\n    if (event.importance === "major") item.classList.add("is-major");\n    if (gen !== undefined && !gen.ready) item.classList.add("is-blocked");\n    // \u65F6\u95F4\n    const time = createElement("div", "timeline-time");\n    // \u65F6\u95F4\u6587\u6848\n    const timecode =\n        map.time.basis === "order"\n            ? `#${event.shot_id}`\n            : `${event.at_estimated ? "~" : ""}${formatTimecode(event.at_seconds)}`;\n    time.append(createElement("span", "timeline-timecode mono", timecode));\n    time.append(\n        createElement(\n            "span",\n            "muted",\n            event.duration_seconds !== null ? formatSeconds(event.duration_seconds) : "\u65F6\u957F\u672A\u77E5",\n        ),\n    );\n    if (event.story_time !== null) time.append(createElement("span", "timeline-story-time", event.story_time));\n    item.append(time);\n    // \u4E3B\u4F53\n    const main = createElement("div", "timeline-main");\n    const titleRow = createElement("div", "timeline-title-row");\n    titleRow.append(createElement("span", "shot-id", event.shot_id));\n    titleRow.append(createElement("h4", "timeline-title", event.title));\n    titleRow.append(mapImportanceBadge(event.importance));\n    titleRow.append(badge(gen?.assigned_workflow ?? "\u672A\u6307\u5B9A", "map-workflow"));\n    titleRow.append(mapReadyBadge(gen));\n    titleRow.append(mapRenderBadge(gen));\n    main.append(titleRow);\n    main.append(createElement("p", "timeline-summary", event.summary));\n    // chips\n    const chips = createElement("div", "chip-row");\n    if (event.scene !== null) {\n        // \u573A\u666F chip\n        const sceneChip = createElement("button", "chip chip-scene map-chip-button", event.scene.name);\n        sceneChip.type = "button";\n        sceneChip.addEventListener("click", () => {\n            mapFocus = { kind: "scene", id: event.scene.id };\n            refresh();\n        });\n        chips.append(sceneChip);\n    }\n    for (const character of event.characters) {\n        // \u89D2\u8272 chip\n        const chip = createElement(\n            "button",\n            "chip chip-character map-chip-button",\n            `${character.name} \xB7 ${character.form_name}`,\n        );\n        chip.type = "button";\n        chip.addEventListener("click", () => {\n            mapFocus = { kind: "character", id: character.id };\n            refresh();\n        });\n        chips.append(chip);\n    }\n    for (const beat of event.beats) {\n        chips.append(badge(beat.id, "map-beat"));\n    }\n    if (event.dialogue_count > 0) chips.append(createElement("span", "muted", `${event.dialogue_count} \u53E5\u53F0\u8BCD`));\n    main.append(chips);\n    // \u64CD\u4F5C\n    const actions = createElement("div", "timeline-actions");\n    const locate = createElement("button", "button ghost", "\u5B9A\u4F4D\u5206\u955C");\n    locate.type = "button";\n    locate.addEventListener("click", () => {\n        // \u76EE\u6807\u4EFB\u52A1\n        const target = document.getElementById(`shot-${event.shot_id}`);\n        if (target !== null) target.scrollIntoView({ behavior: "smooth", block: "start" });\n    });\n    actions.append(locate);\n    main.append(actions);\n    // \u8BE6\u60C5\n    const details = createElement("details", "timeline-details");\n    details.append(createElement("summary", "", "\u751F\u6210\u4E0A\u4E0B\u6587"));\n    // \u8BE6\u60C5\u5BB9\u5668\n    const detailBody = createElement("div");\n    renderTimelineDetail(detailBody, event, gen, map, indexes);\n    details.append(detailBody);\n    main.append(details);\n    item.append(main);\n    return item;\n}\n\n/**\n * \u65F6\u5E8F\u56FE\u3002\n */\nfunction renderMapTimeline(container, map, refresh) {\n    // \u7D22\u5F15\n    const indexes = mapIndexes(map);\n    // \u8FC7\u6EE4\n    let events = map.events.slice();\n    if (mapFocus !== null && mapFocus.kind === "character")\n        events = events.filter((event) => event.characters.some((character) => character.id === mapFocus.id));\n    if (mapFocus !== null && mapFocus.kind === "scene")\n        events = events.filter((event) => event.scene?.id === mapFocus.id);\n    if (mapOnlyMajor) events = events.filter((event) => event.importance === "major");\n    if (mapBlockedOnly) events = events.filter((event) => indexes.generation.get(event.shot_id)?.ready !== true);\n    if (events.length === 0) {\n        container.append(emptyNode("\u5F53\u524D\u7B5B\u9009\u6CA1\u6709\u4E8B\u4EF6", "\u6E05\u9664\u7B5B\u9009\u540E\u67E5\u770B\u5168\u90E8\u4E8B\u4EF6\u3002"));\n        return;\n    }\n    // \u603B\u89C8\n    const overview = createElement("div", "timeline-overview");\n    for (const event of map.events) {\n        // \u7247\u6BB5\n        const segment = createElement("button", `timeline-seg ${sceneTone(indexes, event.scene?.id)}`);\n        segment.type = "button";\n        segment.style.flexGrow = String(event.duration_seconds ?? 1);\n        segment.title = `${formatTimecode(event.at_seconds)} ${event.title}`;\n        if (event.importance === "major") segment.classList.add("is-major");\n        segment.addEventListener("click", () => {\n            // \u76EE\u6807\u4EFB\u52A1\n            const target = document.getElementById(`map-event-${event.shot_id}`);\n            if (target !== null) target.scrollIntoView({ behavior: "smooth", block: "center" });\n        });\n        overview.append(segment);\n    }\n    container.append(overview);\n    // \u5217\u8868\n    const list = createElement("div", "timeline-list");\n    for (const event of events) {\n        // \u751F\u6210\u4E0A\u4E0B\u6587\n        const gen = indexes.generation.get(event.shot_id);\n        // \u4E8B\u4EF6\u8282\u70B9\n        const item = renderTimelineEvent(event, gen, map, indexes, refresh);\n        item.id = `map-event-${event.shot_id}`;\n        list.append(item);\n    }\n    container.append(list);\n}\n\n/**\n * \u5267\u60C5\u56FE\u8C31\u533A\u5757\u3002\n */\nfunction renderStoryMap(map) {\n    // \u533A\u5757\n    const section = createElement("section", "map-section");\n    if (map === null || map === undefined) {\n        section.append(emptyNode("\u5267\u60C5\u56FE\u8C31\u4E0D\u53EF\u7528", "\u5F53\u524D\u5267\u96C6\u8FD8\u6CA1\u6709\u53EF\u89E3\u6790\u7684\u56FE\u8C31\u6570\u636E\u3002"));\n        return section;\n    }\n    // \u5934\u90E8\n    const head = createElement("div", "section-head");\n    // \u6807\u9898\u533A\n    const heading = createElement("div");\n    heading.append(createElement("h3", "section-title", "\u5267\u60C5\u56FE\u8C31"));\n    // \u7EDF\u8BA1\n    const counts = map.generation.readiness.counts;\n    heading.append(\n        createElement(\n            "p",\n            "map-subtitle",\n            `${map.events.length} \u4E8B\u4EF6 \xB7 ${map.catalog.characters.length} \u89D2\u8272 \xB7 ${map.catalog.scenes.length} \u573A\u666F \xB7 \u53EF\u751F\u6210 ${counts.ready} / \u963B\u585E ${counts.blocked} / \u5DF2\u751F\u6210 ${counts.rendered}`,\n        ),\n    );\n    head.append(heading);\n    // Tab\n    const tabs = createElement("div", "map-tabs");\n    const graphTab = createElement("button", "map-tab", "\u62D3\u6251\u56FE");\n    graphTab.type = "button";\n    const timelineTab = createElement("button", "map-tab", "\u65F6\u5E8F\u56FE");\n    timelineTab.type = "button";\n    tabs.append(graphTab, timelineTab);\n    head.append(tabs);\n    section.append(head);\n    // \u6765\u6E90\n    const origin = createElement(\n        "p",\n        "map-origin",\n        `${map.origin.annotated ? `\u542B ${map.origin.author} \u53D9\u4E8B\u6807\u6CE8` : "dycli \u81EA\u52A8\u63A8\u5BFC"}${map.origin.stale ? " \xB7 \u6807\u6CE8\u57FA\u4E8E\u65E7\u5206\u955C" : ""}`,\n    );\n    section.append(origin);\n    // \u8B66\u544A\n    if (map.warnings.length > 0) {\n        const callout = createElement("div", "callout warn map-warning");\n        callout.append(createElement("strong", "", `\u56FE\u8C31\u63D0\u793A ${map.warnings.length} \u9879`));\n        const list = createElement("ul", "mini-list");\n        for (const warning of map.warnings.slice(0, 8)) list.append(createElement("li", "", warning.message));\n        callout.append(list);\n        section.append(callout);\n    }\n    // \u4E3B\u4F53\n    const body = createElement("div", "map-body");\n    section.append(body);\n    /**\n     * \u5237\u65B0\u4E3B\u4F53\u3002\n     */\n    function refresh() {\n        // Tab \u72B6\u6001\n        graphTab.classList.toggle("is-active", mapTab === "graph");\n        graphTab.setAttribute("aria-selected", mapTab === "graph" ? "true" : "false");\n        timelineTab.classList.toggle("is-active", mapTab === "timeline");\n        timelineTab.setAttribute("aria-selected", mapTab === "timeline" ? "true" : "false");\n        clearNode(body);\n        if (map.events.length === 0) {\n            body.append(emptyNode("\u8FD8\u6CA1\u6709\u53EF\u5206\u6790\u7684\u955C\u5934", "\u5148\u5199\u5165\u672C\u96C6\u5206\u955C\uFF0C\u518D\u67E5\u770B\u89D2\u8272\u3001\u5F62\u6001\u3001\u573A\u666F\u4E0E\u751F\u6210\u4E0A\u4E0B\u6587\u3002"));\n            return;\n        }\n        body.append(renderMapToolbar(map, refresh));\n        if (mapTab === "timeline") renderMapTimeline(body, map, refresh);\n        else renderMapTopology(body, map, refresh);\n    }\n    graphTab.addEventListener("click", () => {\n        mapTab = "graph";\n        refresh();\n    });\n    timelineTab.addEventListener("click", () => {\n        mapTab = "timeline";\n        refresh();\n    });\n    refresh();\n    return section;\n}\n\n/**\n * \u56FE\u8C31\u5DE5\u5177\u680F\u3002\n */\nfunction renderMapToolbar(map, refresh) {\n    // \u5DE5\u5177\u680F\n    const bar = createElement("div", "map-toolbar");\n    // \u7B5B\u9009 chip\n    if (mapFocus !== null) {\n        const chip = createElement("span", "map-filter", mapFocusLabel(map, mapFocus));\n        const clear = createElement("button", "map-filter-clear", "\xD7");\n        clear.type = "button";\n        clear.setAttribute("aria-label", "\u6E05\u9664\u56FE\u8C31\u7B5B\u9009");\n        clear.addEventListener("click", () => {\n            mapFocus = null;\n            refresh();\n        });\n        chip.append(clear);\n        bar.append(chip);\n    }\n    // \u6A21\u5F0F / \u8FC7\u6EE4\n    const group = createElement("div", "map-toolbar-group");\n    if (mapTab === "graph") {\n        const characterButton = createElement("button", "button ghost map-toggle", "\u6309\u89D2\u8272");\n        characterButton.type = "button";\n        characterButton.classList.toggle("is-active", mapMode === "character");\n        characterButton.addEventListener("click", () => {\n            mapMode = "character";\n            refresh();\n        });\n        const formButton = createElement("button", "button ghost map-toggle", "\u6309\u5F62\u6001");\n        formButton.type = "button";\n        formButton.classList.toggle("is-active", mapMode === "form");\n        formButton.addEventListener("click", () => {\n            mapMode = "form";\n            refresh();\n        });\n        group.append(characterButton, formButton);\n    } else {\n        const majorButton = createElement("button", "button ghost map-toggle", "\u53EA\u770B\u5173\u952E\u4E8B\u4EF6");\n        majorButton.type = "button";\n        majorButton.classList.toggle("is-active", mapOnlyMajor);\n        majorButton.addEventListener("click", () => {\n            mapOnlyMajor = !mapOnlyMajor;\n            refresh();\n        });\n        const blockedButton = createElement("button", "button ghost map-toggle", "\u53EA\u770B\u963B\u585E");\n        blockedButton.type = "button";\n        blockedButton.classList.toggle("is-active", mapBlockedOnly);\n        blockedButton.addEventListener("click", () => {\n            mapBlockedOnly = !mapBlockedOnly;\n            refresh();\n        });\n        group.append(majorButton, blockedButton);\n    }\n    bar.append(group);\n    return bar;\n}\n\n/**\n * \u89D2\u8272\u9875\u3002\n */\nfunction renderCharacters(data) {\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", "Characters"));\n    headText.append(createElement("h2", "page-title", "\u89D2\u8272\u4E0E\u5F62\u6001"));\n    headText.append(createElement("p", "page-subtitle", "\u8DE8\u96C6\u5171\u4EAB\u7684\u5168\u5C40\u8BBE\u5B9A\uFF1B\u4E3B\u53C2\u8003\u7531 AI / \u7528\u6237\u663E\u5F0F\u6307\u5B9A\u3002"));\n    head.append(headText);\n    viewRoot.append(head);\n    // \u89D2\u8272\n    const items = Array.isArray(data.items) ? data.items : [];\n    if (items.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u89D2\u8272", "\u4F7F\u7528 daoyan story characters set \u5199\u5165\u5168\u5C40\u89D2\u8272\u3002"));\n        return;\n    }\n    const grid = createElement("div", "grid");\n    for (const character of items) {\n        // \u5361\u7247\n        const card = createElement("article", "card entity-card");\n        const body = createElement("div", "card-body");\n        body.append(createElement("h3", "card-title", `${character.name} \xB7 ${character.id}`));\n        body.append(createElement("p", "muted", character.summary ?? ""));\n        for (const form of character.forms) {\n            // \u5F62\u6001\n            const block = createElement("div", "form-block");\n            block.append(createElement("h4", "form-title", `${form.name} \xB7 ${form.id}`));\n            // \u4E3B\u53C2\u8003\n            const reference = form.reference_asset\n                ? form.assets.find((asset) => asset.id === form.reference_asset)\n                : null;\n            block.append(assetNode(reference, false));\n            // \u5176\u5B83\u8D44\u4EA7\n            const more = createElement("div", "asset-row");\n            for (const asset of form.assets) {\n                if (reference !== null && asset.id === reference.id) continue;\n                more.append(assetNode(asset, true));\n            }\n            if (more.childElementCount > 0) block.append(more);\n            body.append(block);\n        }\n        card.append(body);\n        grid.append(card);\n    }\n    viewRoot.append(grid);\n}\n\n/**\n * \u573A\u666F\u9875\u3002\n */\nfunction renderScenes(data) {\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", "Scenes"));\n    headText.append(createElement("h2", "page-title", "\u573A\u666F"));\n    headText.append(createElement("p", "page-subtitle", "\u8DE8\u96C6\u5171\u4EAB\u7684\u573A\u666F\u53C2\u8003\u8D44\u4EA7\u3002"));\n    head.append(headText);\n    viewRoot.append(head);\n    // \u573A\u666F\n    const items = Array.isArray(data.items) ? data.items : [];\n    if (items.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u573A\u666F", "\u4F7F\u7528 daoyan story scenes set \u5199\u5165\u5168\u5C40\u573A\u666F\u3002"));\n        return;\n    }\n    const grid = createElement("div", "grid");\n    for (const scene of items) {\n        // \u5361\u7247\n        const card = createElement("article", "card entity-card");\n        const body = createElement("div", "card-body");\n        body.append(createElement("h3", "card-title", `${scene.name} \xB7 ${scene.id}`));\n        body.append(createElement("p", "muted", scene.description ?? ""));\n        const reference = scene.reference_asset\n            ? scene.assets.find((asset) => asset.id === scene.reference_asset)\n            : null;\n        body.append(assetNode(reference, false));\n        const more = createElement("div", "asset-row");\n        for (const asset of scene.assets) {\n            if (reference !== null && asset.id === reference.id) continue;\n            more.append(assetNode(asset, true));\n        }\n        if (more.childElementCount > 0) body.append(more);\n        card.append(body);\n        grid.append(card);\n    }\n    viewRoot.append(grid);\n}\n\n/**\n * \u97F3\u8272\u9875\u3002\n */\nfunction renderVoices(data) {\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", "Voices"));\n    headText.append(createElement("h2", "page-title", "\u97F3\u8272"));\n    headText.append(createElement("p", "page-subtitle", "\u89D2\u8272\u97F3\u8272\u6863\u6848\uFF1Breference \u6A21\u5F0F\u5FC5\u987B\u6709\u663E\u5F0F\u53C2\u8003\u97F3\u9891\u3002"));\n    head.append(headText);\n    viewRoot.append(head);\n    // \u97F3\u8272\n    const items = Array.isArray(data.items) ? data.items : [];\n    if (items.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u97F3\u8272", "\u4F7F\u7528 daoyan story voices set \u5199\u5165\u97F3\u8272\u3002"));\n        return;\n    }\n    const grid = createElement("div", "grid");\n    for (const voice of items) {\n        // \u5361\u7247\n        const card = createElement("article", "card entity-card");\n        const body = createElement("div", "card-body");\n        body.append(createElement("h3", "card-title", `${voice.name} \xB7 ${voice.id}`));\n        body.append(createElement("p", "muted", `${voice.character_id} \xB7 ${voice.mode}`));\n        body.append(createElement("p", "", voice.description ?? ""));\n        const reference = voice.reference_asset\n            ? voice.assets.find((asset) => asset.id === voice.reference_asset)\n            : null;\n        body.append(assetNode(reference, false));\n        if (voice.sample_text) body.append(createElement("blockquote", "quote", voice.sample_text));\n        card.append(body);\n        grid.append(card);\n    }\n    viewRoot.append(grid);\n}\n\n/**\n * \u8BBE\u5B9A\u8D44\u4EA7\u9875\u3002\n */\nfunction renderAssets(data) {\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", "Story assets"));\n    headText.append(createElement("h2", "page-title", "\u8BBE\u5B9A\u8D44\u4EA7"));\n    headText.append(createElement("p", "page-subtitle", "\u53C2\u8003\u56FE\u4E0E\u53C2\u8003\u97F3\u9891\uFF1B* \u8868\u793A\u5F53\u524D\u4E3B\u53C2\u8003\u3002"));\n    head.append(headText);\n    viewRoot.append(head);\n    // \u8D44\u4EA7\n    const items = Array.isArray(data.items) ? data.items : [];\n    if (items.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u8BBE\u5B9A\u8D44\u4EA7", "\u4F7F\u7528 daoyan story asset add \u5165\u5E93\u53C2\u8003\u56FE / \u97F3\u9891\u3002"));\n        return;\n    }\n    const grid = createElement("div", "grid");\n    for (const item of items) {\n        // \u5361\u7247\n        const card = createElement("article", "card entity-card");\n        const body = createElement("div", "card-body");\n        const owner = `${item.owner_kind}:${item.owner_id}${item.form_id !== null ? `/${item.form_id}` : ""}`;\n        body.append(createElement("h3", "card-title", `${item.reference ? "* " : ""}${item.asset.id}`));\n        body.append(createElement("p", "muted", `${owner} \xB7 ${item.owner_name}`));\n        body.append(assetNode(item.asset, false));\n        card.append(body);\n        grid.append(card);\n    }\n    viewRoot.append(grid);\n}\n\n/**\n * \u6982\u89C8\u9875\u3002\n */\nfunction renderOverview(data) {\n    // \u7EDF\u8BA1\n    const stats = data.stats ?? {};\n    // \u5206\u955C\u89C6\u56FE\n    const storyboard = data.storyboard !== undefined ? data.storyboard : null;\n    // \u7CFB\u5217\u72B6\u6001\n    const story = data.story !== undefined ? data.story : null;\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    // \u9875\u5934\u6587\u672C\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", "Overview"));\n    headText.append(createElement("h2", "page-title", data.project !== undefined ? data.project.name : "\u9879\u76EE\u6982\u89C8"));\n    // \u9879\u76EE\u6458\u8981\n    const subtitle = [`${data.mode ?? "\u672A\u7ED1\u5B9A\u672C\u673A"} \xB7 ${data.machine_id ?? "\u672C\u673A\u672A\u521D\u59CB\u5316"}`];\n    if (storyboard !== null && storyboard.summary !== undefined) {\n        subtitle.push(\n            `${storyboard.summary.shots_total} \u955C \xB7 ${storyboard.summary.characters_total} \u89D2\u8272 \xB7 ${storyboard.summary.scenes_total} \u573A\u666F`,\n        );\n    }\n    headText.append(createElement("p", "page-subtitle", subtitle.join(" \xB7 ")));\n    head.append(headText);\n    viewRoot.append(head);\n\n    if (data.machine === null) {\n        // \u672A\u521D\u59CB\u5316\u63D0\u793A\n        const callout = createElement("div", "callout");\n        callout.append(createElement("strong", "", "\u672C\u673A\u5C1A\u672A\u521D\u59CB\u5316\u3002"));\n        callout.append(document.createTextNode(" \u5F53\u524D\u4EC5\u5C55\u793A\u5171\u4EAB\u6570\u636E\uFF1B\u8FD0\u884C "));\n        callout.append(createElement("code", "mono", "daoyan init --mode=local|remote"));\n        callout.append(document.createTextNode(" \u7ED1\u5B9A\u672C\u673A\u540E\u5373\u53EF\u770B\u5230\u5F15\u64CE\u4E0E\u673A\u5668\u72B6\u6001\u3002"));\n        viewRoot.append(callout);\n    }\n\n    // \u7EDF\u8BA1\u7F51\u683C\n    const statsGrid = createElement("div", "stats-grid");\n    if (story !== null) {\n        statsGrid.append(\n            statCard(\n                "\u5267\u96C6",\n                `${story.series.episodes_ready ?? 0}/${story.series.episodes_total ?? 0}`,\n                "\u53EF\u62CD / \u603B\u96C6\u6570",\n            ),\n        );\n        statsGrid.append(statCard("\u89D2\u8272", stats.characters_total ?? 0, `${stats.forms_total ?? 0} \u4E2A\u5F62\u6001`));\n        statsGrid.append(statCard("\u573A\u666F", stats.scenes_total ?? 0, "\u5168\u5C40\u573A\u666F"));\n        statsGrid.append(statCard("\u97F3\u8272", stats.voices_total ?? 0, "\u5168\u5C40\u97F3\u8272"));\n        statsGrid.append(statCard("\u8BBE\u5B9A\u8D44\u4EA7", stats.assets_total ?? 0, "\u53C2\u8003\u56FE / \u97F3\u9891"));\n        statsGrid.append(statCard("\u955C\u5934", stats.shots_total ?? 0, `\u6210\u529F run ${stats.runs_succeeded ?? 0}`));\n    } else {\n        statsGrid.append(statCard("\u955C\u5934", `${stats.shots_done ?? 0}/${stats.shots_total ?? 0}`, "\u5DF2\u5B8C\u6210 / \u603B\u6570"));\n        statsGrid.append(statCard("\u4EBA\u7269", stats.characters_total ?? 0, "\u5DF2\u767B\u8BB0\u89D2\u8272"));\n        statsGrid.append(statCard("\u573A\u666F", stats.scenes_total ?? 0, "\u5DF2\u767B\u8BB0\u573A\u666F"));\n        statsGrid.append(statCard("\u4EA7\u51FA\u7269", stats.outputs_total ?? 0, formatBytes(stats.outputs_bytes ?? 0)));\n        statsGrid.append(\n            statCard(\n                "\u6210\u529F run",\n                `${stats.runs_succeeded ?? 0}/${stats.runs_total ?? 0}`,\n                `\u5931\u8D25 ${stats.runs_failed ?? 0}`,\n            ),\n        );\n        statsGrid.append(statCard("\u8FD0\u884C\u4E2D\u4EFB\u52A1", stats.tasks_active ?? 0, `\u5171 ${stats.tasks_total ?? 0} \u4E2A\u4EFB\u52A1`));\n    }\n    viewRoot.append(statsGrid);\n\n    if (story !== null) {\n        renderStorySeries(story);\n    } else if (storyboard !== null) {\n        viewRoot.append(renderProjectProfile(storyboard));\n        viewRoot.append(renderEntitySection("character", storyboard.characters));\n        viewRoot.append(renderEntitySection("scene", storyboard.scenes));\n        viewRoot.append(renderStoryboardPanel(storyboard));\n    } else {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u5206\u955C\u8BBE\u5B9A", "\u521B\u5EFA shots.json \u540E\uFF0C\u8FD9\u91CC\u4F1A\u5C55\u793A\u955C\u5934\u3001\u4EBA\u7269\u3001\u573A\u666F\u548C\u9010\u955C\u4EA7\u51FA\u3002"));\n    }\n\n    // \u4E24\u5217\u4FE1\u606F\n    const layout = createElement("div", "layout-two");\n    layout.append(renderEnginePanel(data));\n    layout.append(renderEnvironmentPanel(data));\n    viewRoot.append(layout);\n\n    // \u6700\u8FD1\u4EA7\u7269\n    const artifacts = Array.isArray(data.recent_artifacts) ? data.recent_artifacts : [];\n    // \u4EA7\u7269\u533A\u5757\u5934\n    const artifactHead = createElement("div", "section-head");\n    artifactHead.append(createElement("h3", "section-title", "\u6700\u8FD1\u4EA7\u51FA\u7269"));\n    artifactHead.append(createElement("span", "section-meta", `${artifacts.length} \u4E2A`));\n    viewRoot.append(artifactHead);\n    if (artifacts.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u4EA7\u51FA\u7269", "\u6267\u884C shot / run \u540E\uFF0C\u89C6\u9891\u4E0E\u56FE\u7247\u4F1A\u51FA\u73B0\u5728\u8FD9\u91CC\u3002"));\n    } else {\n        // \u4EA7\u7269\u7F51\u683C\n        const grid = createElement("div", "grid");\n        renderArtifactCards(grid, artifacts);\n        viewRoot.append(grid);\n    }\n\n    // \u6700\u8FD1\u4EFB\u52A1\n    const tasks = Array.isArray(data.recent_tasks) ? data.recent_tasks : [];\n    // \u4EFB\u52A1\u533A\u5757\u5934\n    const taskHead = createElement("div", "section-head");\n    taskHead.append(createElement("h3", "section-title", "\u6700\u8FD1\u4EFB\u52A1"));\n    taskHead.append(createElement("span", "section-meta", `${tasks.length} \u4E2A`));\n    viewRoot.append(taskHead);\n    if (tasks.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u4EFB\u52A1", "daoyan shot / batch \u521B\u5EFA\u7684\u4EFB\u52A1\u4F1A\u5728\u8FD9\u91CC\u51FA\u73B0\u3002"));\n    } else {\n        viewRoot.append(renderTaskList(tasks));\n    }\n}\n\n/**\n * \u9879\u76EE\u6863\u6848\u9762\u677F\u3002\n */\nfunction renderProjectProfile(storyboard) {\n    // \u9762\u677F\n    const panel = createElement("section", "panel profile-panel");\n    // \u9762\u677F\u5934\n    const head = createElement("div", "panel-head");\n    // \u6807\u9898\u5BB9\u5668\n    const titles = createElement("div");\n    titles.append(createElement("h3", "panel-title", "\u9879\u76EE\u6863\u6848"));\n    titles.append(createElement("p", "panel-sub", "\u5267\u60C5\u3001\u753B\u9762\u4E0E\u751F\u6210\u53C2\u6570"));\n    head.append(titles);\n    panel.append(head);\n\n    if (storyboard.synopsis !== null && storyboard.synopsis !== undefined) {\n        panel.append(createElement("p", "profile-synopsis", storyboard.synopsis));\n    }\n\n    // \u6458\u8981\n    const summary = storyboard.summary ?? {};\n    // \u9ED8\u8BA4\u53C2\u6570\n    const defaults = storyboard.defaults ?? {};\n    // \u952E\u503C\u5217\u8868\n    const kv = createElement("dl", "kv");\n    appendKv(kv, "\u7247\u540D", storyboard.title ?? "\u672A\u547D\u540D");\n    appendKv(kv, "\u5206\u8FA8\u7387", summary.resolution ?? "\u2014");\n    appendKv(kv, "\u5E27\u7387", summary.fps !== null && summary.fps !== undefined ? `${summary.fps} fps` : "\u672A\u8BBE\u7F6E");\n    appendKv(kv, "\u603B\u5E27\u6570", summary.total_frames ?? 0);\n    appendKv(\n        kv,\n        "\u603B\u65F6\u957F",\n        summary.total_duration_seconds !== null && summary.total_duration_seconds !== undefined\n            ? formatSeconds(summary.total_duration_seconds)\n            : "\u90E8\u5206\u955C\u5934\u672A\u77E5",\n    );\n    appendKv(kv, "\u98CE\u683C", storyboard.style_prefix ?? "\u2014");\n    appendKv(kv, "workflow", storyboard.workflow ?? "\u2014");\n    if (defaults.steps !== undefined) appendKv(kv, "\u9ED8\u8BA4 steps", defaults.steps);\n    if (defaults.cfg !== undefined) appendKv(kv, "\u9ED8\u8BA4 cfg", defaults.cfg);\n    if (defaults.negative !== undefined) appendKv(kv, "\u8D1F\u5411\u63D0\u793A\u8BCD", defaults.negative);\n    panel.append(kv);\n    return panel;\n}\n\n/**\n * \u4EBA\u7269 / \u573A\u666F\u533A\u5757\u3002\n */\nfunction renderEntitySection(kind, entities) {\n    // \u662F\u5426\u4EBA\u7269\n    const isCharacter = kind === "character";\n    // \u533A\u5757\n    const section = createElement("section", "entity-section");\n    // \u533A\u5757\u5934\n    const head = createElement("div", "section-head");\n    head.append(createElement("h3", "section-title", isCharacter ? "\u4EBA\u7269\u8BBE\u5B9A" : "\u573A\u666F\u8BBE\u5B9A"));\n    head.append(createElement("span", "section-meta", `${Array.isArray(entities) ? entities.length : 0} \u4E2A`));\n    section.append(head);\n    if (!Array.isArray(entities) || entities.length === 0) {\n        section.append(\n            emptyNode(\n                isCharacter ? "\u8FD8\u6CA1\u6709\u4EBA\u7269\u8BBE\u5B9A" : "\u8FD8\u6CA1\u6709\u573A\u666F\u8BBE\u5B9A",\n                isCharacter\n                    ? "\u5728 shots.json \u7684 meta.characters \u767B\u8BB0\u4EBA\u7269\uFF0C\u5E76\u5728\u955C\u5934\u7684 characters \u5B57\u6BB5\u5F15\u7528\u3002"\n                    : "\u5728 shots.json \u7684 meta.scenes \u767B\u8BB0\u573A\u666F\uFF0C\u5E76\u5728\u955C\u5934\u7684 scene \u5B57\u6BB5\u5F15\u7528\u3002",\n            ),\n        );\n        return section;\n    }\n    // \u5361\u7247\u7F51\u683C\n    const grid = createElement("div", "entity-grid");\n    for (const entity of entities) {\n        // \u5B9E\u4F53\u5361\u7247\n        const card = createElement("article", "entity-card");\n        // \u5361\u7247\u5934\n        const cardHead = createElement("div", "entity-head");\n        cardHead.append(createElement("h4", "entity-name", entity.name));\n        cardHead.append(\n            entity.count > 0\n                ? badge(`\u51FA\u573A ${entity.count} \u955C`, isCharacter ? "kind-image" : "kind-video")\n                : badge("\u672A\u51FA\u573A", ""),\n        );\n        card.append(cardHead);\n        if (entity.description) card.append(createElement("p", "entity-desc", entity.description));\n        if (entity.reference) card.append(createElement("p", "entity-ref mono", entity.reference));\n        // \u51FA\u573A\u955C\u53F7\n        const shots = createElement("div", "chip-row");\n        if (Array.isArray(entity.shots) && entity.shots.length > 0) {\n            for (const shotId of entity.shots) shots.append(createElement("span", "chip chip-small", `\u955C ${shotId}`));\n        } else {\n            shots.append(createElement("span", "muted", "\u6682\u65E0\u51FA\u573A\u955C\u5934"));\n        }\n        card.append(shots);\n        grid.append(card);\n    }\n    section.append(grid);\n    return section;\n}\n\n/**\n * \u5206\u955C\u4E00\u89C8\u9762\u677F\u3002\n */\nfunction renderStoryboardPanel(storyboard) {\n    // \u955C\u5934\n    const shots = Array.isArray(storyboard.shots) ? storyboard.shots : [];\n    // \u533A\u5757\n    const section = createElement("section", "storyboard-section");\n    // \u533A\u5757\u5934\n    const head = createElement("div", "section-head");\n    head.append(createElement("h3", "section-title", "\u5206\u955C\u4E00\u89C8"));\n    head.append(createElement("span", "section-meta", `${shots.length} \u955C`));\n    // \u67E5\u770B\u5168\u90E8\n    const more = createElement("button", "button ghost", "\u67E5\u770B\u5206\u955C\u8BE6\u60C5");\n    more.type = "button";\n    more.addEventListener("click", () => {\n        window.location.hash = `${HASH_PREFIX}shots`;\n    });\n    head.append(more);\n    section.append(head);\n    if (shots.length === 0) {\n        section.append(emptyNode("\u8FD8\u6CA1\u6709\u955C\u5934", "\u5728 shots.json \u7684 shots \u6570\u7EC4\u91CC\u6DFB\u52A0\u955C\u5934\u3002"));\n        return section;\n    }\n    // \u5206\u955C\u5217\u8868\n    const list = createElement("div", "storyboard-list");\n    // \u8868\u5934\n    const header = createElement("div", "storyboard-row storyboard-header");\n    for (const label of ["\u955C\u53F7", "\u5185\u5BB9", "\u573A\u666F", "\u4EBA\u7269", "\u4EA7\u51FA"]) header.append(createElement("span", "", label));\n    list.append(header);\n    for (const shot of shots) {\n        // \u6570\u636E\u884C\n        const row = createElement("div", "storyboard-row");\n        // \u955C\u53F7\n        const idCell = createElement("div", "storyboard-id-cell");\n        idCell.append(createElement("span", "storyboard-id", shot.id));\n        idCell.append(shotStatusBadge(shot));\n        row.append(idCell);\n        // \u5185\u5BB9\n        const content = createElement("div", "storyboard-content");\n        content.append(createElement("div", "storyboard-title", shot.title ?? shot.slug ?? `\u955C\u5934 ${shot.id}`));\n        content.append(createElement("p", "storyboard-summary", shot.summary));\n        row.append(content);\n        // \u573A\u666F\n        row.append(\n            shot.scene !== null && shot.scene !== undefined\n                ? entityChip(shot.scene, "chip-scene")\n                : createElement("span", "muted", "\u2014"),\n        );\n        // \u4EBA\u7269\n        const cast = createElement("div", "chip-row");\n        if (Array.isArray(shot.characters) && shot.characters.length > 0) {\n            for (const character of shot.characters) cast.append(entityChip(character, "chip-character"));\n        } else {\n            cast.append(createElement("span", "muted", "\u2014"));\n        }\n        row.append(cast);\n        // \u4EA7\u51FA\n        const artifacts = Array.isArray(shot.artifacts) ? shot.artifacts : [];\n        const artifactCell = createElement("div", "storyboard-artifacts");\n        artifactCell.append(createElement("span", "muted", `${artifacts.length} \u4E2A`));\n        // \u53EF\u64AD\u653E\u4EA7\u7269\n        const playable = artifacts.find(\n            (item) =>\n                item.output.present === true && item.output.lfs_pointer !== true && PREVIEW_KINDS.has(item.output.kind),\n        );\n        if (playable !== undefined) {\n            // \u64AD\u653E\u6309\u94AE\n            const play = createElement("button", "button ghost", "\u64AD\u653E");\n            play.type = "button";\n            play.addEventListener("click", () => openArtifact(playable, artifacts));\n            artifactCell.append(play);\n        }\n        row.append(artifactCell);\n        list.append(row);\n    }\n    section.append(list);\n    return section;\n}\n\n/**\n * \u5F15\u64CE\u9762\u677F\u3002\n */\nfunction renderEnginePanel(data) {\n    // \u9762\u677F\n    const panel = createElement("section", "panel");\n    // \u9762\u677F\u5934\n    const head = createElement("div", "panel-head");\n    // \u6807\u9898\u5BB9\u5668\n    const titles = createElement("div");\n    titles.append(createElement("h3", "panel-title", "\u5F15\u64CE"));\n    titles.append(createElement("p", "panel-sub", data.engine === null ? "\u672A\u7ED1\u5B9A\u672C\u673A" : data.engine.mode));\n    head.append(titles);\n    if (data.engine !== null) {\n        head.append(data.engine.up === true ? badge("\u53EF\u8FBE", "status-succeeded") : badge("\u4E0D\u53EF\u8FBE", "status-failed"));\n    }\n    panel.append(head);\n    if (data.engine === null) {\n        panel.append(createElement("p", "muted", "\u8FD0\u884C init \u7ED1\u5B9A\u672C\u673A\u540E\u663E\u793A\u5F15\u64CE\u72B6\u6001\u3002"));\n        return panel;\n    }\n    // \u952E\u503C\u5217\u8868\n    const kv = createElement("dl", "kv");\n    appendKv(kv, "\u5730\u5740", data.engine.url);\n    appendKv(kv, "PID", data.engine.pid);\n    if (data.engine.queue !== null && data.engine.queue !== undefined) {\n        appendKv(kv, "\u961F\u5217", `\u6267\u884C\u4E2D ${data.engine.queue.running} / \u7B49\u5F85 ${data.engine.queue.pending}`);\n    }\n    appendKv(kv, "\u6A21\u5F0F", data.mode);\n    panel.append(kv);\n    return panel;\n}\n\n/**\n * \u673A\u5668 / GPU / Skill \u9762\u677F\u3002\n */\nfunction renderEnvironmentPanel(data) {\n    // \u9762\u677F\n    const panel = createElement("section", "panel");\n    // \u9762\u677F\u5934\n    const head = createElement("div", "panel-head");\n    // \u6807\u9898\u5BB9\u5668\n    const titles = createElement("div");\n    titles.append(createElement("h3", "panel-title", "\u673A\u5668\u4E0E\u8FD0\u884C\u73AF\u5883"));\n    titles.append(createElement("p", "panel-sub", data.machine_id ?? "\u672C\u673A\u672A\u521D\u59CB\u5316"));\n    head.append(titles);\n    panel.append(head);\n\n    // \u952E\u503C\u5217\u8868\n    const kv = createElement("dl", "kv");\n    // \u673A\u5668\u9501\u72B6\u6001\n    const lock = data.machine_lock;\n    if (lock === null || lock === undefined) {\n        appendKv(kv, "\u673A\u5668\u9501", "\u2014");\n    } else if (lock.status === "held" && lock.owner !== undefined) {\n        appendKv(kv, "\u673A\u5668\u9501", `${lock.owner.command}\uFF08task ${lock.owner.task_id}\uFF0Cpid ${lock.owner.pid}\uFF09`);\n    } else {\n        appendKv(kv, "\u673A\u5668\u9501", STATUS_LABEL[lock.status] ?? lock.status);\n    }\n\n    // GPU \u72B6\u6001\n    const gpu = data.gpu;\n    if (gpu === null || gpu === undefined) {\n        appendKv(kv, "GPU", "\u2014");\n    } else if (gpu.supported === true && Array.isArray(gpu.devices) && gpu.devices.length > 0) {\n        appendKv(kv, "GPU", `${gpu.devices[0].usedMb} MiB / ${gpu.devices[0].totalMb} MiB`);\n    } else {\n        appendKv(kv, "GPU", gpu.reason ?? "\u4E0D\u53EF\u7528");\n    }\n\n    // Skill \u72B6\u6001\n    const skill = data.skill;\n    if (skill === null || skill === undefined) {\n        appendKv(kv, "Skill", "\u2014");\n    } else if (skill.present !== true) {\n        appendKv(kv, "Skill", "\u7F3A\u5931\uFF08\u8FD0\u884C daoyan skill update\uFF09");\n    } else {\n        appendKv(kv, "Skill", skill.stale === true ? "\u9700\u8981\u66F4\u65B0" : "\u5DF2\u5C31\u7EEA");\n    }\n    panel.append(kv);\n\n    // \u4E0B\u4E00\u6B65\u52A8\u4F5C\n    const actions = Array.isArray(data.next_actions) ? data.next_actions : [];\n    if (actions.length > 0) {\n        // \u4E0B\u4E00\u6B65\n        const next = createElement("div", "card-actions");\n        for (const action of actions) next.append(createElement("code", "mono", action));\n        panel.append(next);\n    }\n    return panel;\n}\n\n/**\n * \u5206\u955C\u9875\u3002\n */\nfunction renderShots(data) {\n    if (data === null) {\n        // \u9875\u5934\n        const head = createElement("div", "view-head");\n        head.append(createElement("h2", "page-title", "\u5206\u955C"));\n        viewRoot.append(head);\n        viewRoot.append(emptyNode("\u672A\u914D\u7F6E shots.json", "\u5728\u9879\u76EE\u6839\u521B\u5EFA shots.json \u540E\u5237\u65B0\u3002"));\n        return;\n    }\n    // \u9875\u9762\u6807\u9898\n    const title = data.title !== null && data.title !== undefined ? data.title : "\u5206\u955C";\n    // \u7EDF\u8BA1\n    const stats = data.summary ?? {};\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    // \u9875\u5934\u6587\u672C\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", "Storyboard"));\n    headText.append(createElement("h2", "page-title", title));\n    // \u9875\u5934\u526F\u6807\u9898\n    const subtitle = [];\n    if (data.style_prefix) subtitle.push(`\u98CE\u683C ${data.style_prefix}`);\n    if (data.workflow) subtitle.push(`workflow ${data.workflow}`);\n    if (stats.resolution) subtitle.push(stats.resolution);\n    if (stats.fps) subtitle.push(`${stats.fps} fps`);\n    headText.append(createElement("p", "page-subtitle", subtitle.join(" \xB7 ") || "\u6309\u955C\u5934\u67E5\u770B\u5185\u5BB9\u3001\u4EBA\u7269\u3001\u573A\u666F\u4E0E\u4EA7\u51FA"));\n    head.append(headText);\n    viewRoot.append(head);\n\n    if (data.synopsis !== null && data.synopsis !== undefined) {\n        viewRoot.append(createElement("p", "profile-synopsis", data.synopsis));\n    }\n\n    // \u7EDF\u8BA1\u5361\u7247\n    const statsGrid = createElement("div", "stats-grid");\n    statsGrid.append(statCard("\u955C\u5934", `${stats.shots_done ?? 0}/${stats.shots_total ?? 0}`, "\u5DF2\u5B8C\u6210 / \u603B\u6570"));\n    statsGrid.append(statCard("\u4EBA\u7269", stats.characters_total ?? 0, "\u5168\u7247\u89D2\u8272"));\n    statsGrid.append(statCard("\u573A\u666F", stats.scenes_total ?? 0, "\u5168\u7247\u573A\u666F"));\n    statsGrid.append(\n        statCard(\n            "\u4EA7\u51FA\u7269",\n            stats.artifacts_total ?? 0,\n            `${stats.total_frames ?? 0} \u5E27 \xB7 ${\n                stats.total_duration_seconds !== null && stats.total_duration_seconds !== undefined\n                    ? formatSeconds(stats.total_duration_seconds)\n                    : "\u90E8\u5206\u955C\u5934\u672A\u77E5"\n            }`,\n        ),\n    );\n    viewRoot.append(statsGrid);\n\n    // \u955C\u5934\u5217\u8868\n    const shots = Array.isArray(data.shots) ? data.shots : [];\n    if (shots.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u955C\u5934", "\u5728 shots.json \u7684 shots \u6570\u7EC4\u91CC\u6DFB\u52A0\u955C\u5934\u3002"));\n        return;\n    }\n\n    // \u4EBA\u7269\u7B5B\u9009\u503C -> \u540D\u79F0\n    const characterOptions = {};\n    for (const entity of Array.isArray(data.characters) ? data.characters : []) {\n        characterOptions[entityKey(entity)] = entity.name;\n    }\n    // \u573A\u666F\u7B5B\u9009\u503C -> \u540D\u79F0\n    const sceneOptions = {};\n    for (const entity of Array.isArray(data.scenes) ? data.scenes : []) {\n        sceneOptions[entityKey(entity)] = entity.name;\n    }\n    // \u72B6\u6001\u6587\u6848\n    const statusLabels = { done: "\u5DF2\u5B8C\u6210", pending: "\u672A\u5B8C\u6210", failed: "\u5931\u8D25", running: "\u8FD0\u884C\u4E2D" };\n\n    // \u7B5B\u9009\u680F\n    const filters = createElement("div", "filter-bar");\n    filters.append(\n        buildSelect(\n            "\u4EBA\u7269",\n            Object.keys(characterOptions),\n            shotFilters.character,\n            (value) => {\n                shotFilters.character = value;\n                refresh();\n            },\n            "\u5168\u90E8\u4EBA\u7269",\n            characterOptions,\n        ),\n    );\n    filters.append(\n        buildSelect(\n            "\u573A\u666F",\n            Object.keys(sceneOptions),\n            shotFilters.scene,\n            (value) => {\n                shotFilters.scene = value;\n                refresh();\n            },\n            "\u5168\u90E8\u573A\u666F",\n            sceneOptions,\n        ),\n    );\n    filters.append(\n        buildSelect(\n            "\u72B6\u6001",\n            ["done", "pending", "failed", "running"],\n            shotFilters.status,\n            (value) => {\n                shotFilters.status = value;\n                refresh();\n            },\n            "\u5168\u90E8\u72B6\u6001",\n            statusLabels,\n        ),\n    );\n    // \u641C\u7D22\u6846\n    const search = createElement("input", "input search");\n    search.type = "search";\n    search.placeholder = "\u641C\u7D22\u955C\u53F7 / \u5185\u5BB9 / \u4EBA\u7269 / \u573A\u666F";\n    search.value = shotFilters.search;\n    search.addEventListener("input", () => {\n        shotFilters.search = search.value;\n        refresh();\n    });\n    filters.append(search);\n    viewRoot.append(filters);\n\n    // \u7ED3\u679C\u5934\n    const listHead = createElement("div", "section-head");\n    listHead.append(createElement("h3", "section-title", "\u5206\u955C\u5217\u8868"));\n    // \u7ED3\u679C\u6458\u8981\n    const resultMeta = createElement("span", "section-meta", "");\n    listHead.append(resultMeta);\n    viewRoot.append(listHead);\n\n    // \u955C\u5934\u7F51\u683C\n    const grid = createElement("div", "grid shot-grid");\n    viewRoot.append(grid);\n\n    /**\n     * \u6309\u7B5B\u9009\u6761\u4EF6\u5237\u65B0\u955C\u5934\u5361\u7247\u3002\n     */\n    function refresh() {\n        // \u8FC7\u6EE4\u7ED3\u679C\n        const filtered = filterShots(shots);\n        resultMeta.textContent = `\u663E\u793A ${filtered.length} / ${shots.length}`;\n        clearNode(grid);\n        if (filtered.length === 0) {\n            grid.append(emptyNode("\u6CA1\u6709\u5339\u914D\u7684\u955C\u5934", "\u8C03\u6574\u4EBA\u7269\u3001\u573A\u666F\u3001\u72B6\u6001\u6216\u641C\u7D22\u6761\u4EF6\u3002"));\n            return;\n        }\n        for (const shot of filtered) grid.append(renderShotCard(shot));\n    }\n\n    refresh();\n}\n\n/**\n * \u6309\u5F53\u524D\u7B5B\u9009\u6761\u4EF6\u8FC7\u6EE4\u955C\u5934\u3002\n */\nfunction filterShots(shots) {\n    // \u641C\u7D22\u8BCD\n    const search = shotFilters.search.trim().toLowerCase();\n    return shots.filter((shot) => {\n        if (\n            shotFilters.character !== "" &&\n            !(\n                Array.isArray(shot.characters) &&\n                shot.characters.some((entity) => entityKey(entity) === shotFilters.character)\n            )\n        ) {\n            return false;\n        }\n        if (\n            shotFilters.scene !== "" &&\n            (shot.scene === null || shot.scene === undefined || entityKey(shot.scene) !== shotFilters.scene)\n        ) {\n            return false;\n        }\n        if (shotFilters.status === "done" && shot.done !== true) return false;\n        if (shotFilters.status === "pending" && shot.done === true) return false;\n        if (shotFilters.status === "failed" && shot.latest_status !== "failed") return false;\n        if (shotFilters.status === "running" && shot.latest_status !== "running" && shot.latest_status !== "queued") {\n            return false;\n        }\n        if (search !== "") {\n            // \u641C\u7D22\u6587\u672C\n            const haystack = `${shot.id} ${shot.title ?? ""} ${shot.slug ?? ""} ${shot.summary} ${shot.prompt} ${(\n                shot.characters ?? []\n            )\n                .map((entity) => entity.name)\n                .join(" ")} ${shot.scene !== null && shot.scene !== undefined ? shot.scene.name : ""}`.toLowerCase();\n            if (!haystack.includes(search)) return false;\n        }\n        return true;\n    });\n}\n\n/**\n * \u5355\u4E2A\u5206\u955C\u5361\u7247\u3002\n */\nfunction renderShotCard(shot) {\n    // \u5361\u7247\n    const card = createElement("article", "card shot-card shot-card-rich");\n    card.id = `shot-${shot.id}`;\n    // \u5361\u7247\u5934\n    const cardHead = createElement("div", "shot-head");\n    // \u6807\u9898\u5BB9\u5668\n    const titles = createElement("div", "shot-title");\n    titles.append(createElement("span", "shot-id", shot.id));\n    titles.append(createElement("span", "shot-title-text", shot.title ?? shot.slug ?? `\u955C\u5934 ${shot.id}`));\n    if (shot.slug && shot.title) titles.append(createElement("span", "shot-slug", shot.slug));\n    cardHead.append(titles);\n    // \u72B6\u6001\u4E0E\u573A\u666F\n    const headBadges = createElement("div", "chip-row");\n    headBadges.append(shotStatusBadge(shot));\n    if (shot.scene !== null && shot.scene !== undefined) headBadges.append(entityChip(shot.scene, "chip-scene"));\n    cardHead.append(headBadges);\n    card.append(cardHead);\n\n    // \u5185\u5BB9\u6458\u8981\n    const summary = createElement("p", "shot-summary", shot.summary);\n    card.append(summary);\n\n    // \u4EBA\u7269\n    const cast = createElement("div", "shot-line");\n    cast.append(createElement("span", "shot-line-label", "\u4EBA\u7269"));\n    cast.append(entityChips(shot.characters, "chip-character"));\n    card.append(cast);\n\n    // \u5236\u4F5C\u53C2\u6570\n    const meta = createElement("div", "shot-meta-grid");\n    meta.append(createElement("span", "", `seed ${shot.seed}`));\n    meta.append(createElement("span", "", shot.length !== null ? `${shot.length} \u5E27` : "\u5E27\u6570\u672A\u77E5"));\n    meta.append(\n        createElement("span", "", shot.duration_seconds !== null ? formatSeconds(shot.duration_seconds) : "\u65F6\u957F\u672A\u77E5"),\n    );\n    meta.append(createElement("span", "", `${shot.width}x${shot.height}`));\n    meta.append(createElement("span", "", shot.steps !== null ? `steps ${shot.steps}` : "steps \u9ED8\u8BA4"));\n    meta.append(createElement("span", "", shot.cfg !== null ? `cfg ${shot.cfg}` : "cfg \u9ED8\u8BA4"));\n    meta.append(createElement("span", "", `\u9996\u5E27 ${shot.first_frame ?? "\u65E0"}`));\n    meta.append(createElement("span", "", shot.workflow ?? "\u9ED8\u8BA4 workflow"));\n    meta.append(createElement("span", "", `${shot.runs_count} run / ${shot.succeeded_count} \u6210\u529F`));\n    card.append(meta);\n\n    // \u5B8C\u6574\u63D0\u793A\u8BCD\n    const promptDetails = createElement("details", "shot-prompt");\n    promptDetails.append(createElement("summary", "", "\u5B8C\u6574\u63D0\u793A\u8BCD"));\n    promptDetails.append(createElement("p", "", shot.prompt));\n    card.append(promptDetails);\n\n    if (shot.notes) card.append(createElement("p", "shot-notes", `\u5907\u6CE8\uFF1A${shot.notes}`));\n\n    // \u4EA7\u7269\u533A\u5757\n    const artifacts = Array.isArray(shot.artifacts) ? shot.artifacts : [];\n    const artifactHead = createElement("div", "shot-section-head");\n    artifactHead.append(createElement("h4", "", `\u4EA7\u51FA\u7269\uFF08${artifacts.length}\uFF09`));\n    artifactHead.append(createElement("span", "muted", `${shot.runs_count} run / ${shot.succeeded_count} \u6210\u529F`));\n    card.append(artifactHead);\n    if (artifacts.length === 0) {\n        card.append(createElement("p", "muted", "\u8FD8\u6CA1\u6709\u4EA7\u51FA\u7269\u3002"));\n    } else {\n        // \u4EA7\u7269\u5217\u8868\n        const list = createElement("div", "artifact-list");\n        for (const item of artifacts) list.append(renderShotArtifactRow(item, artifacts));\n        card.append(list);\n    }\n\n    card.append(renderShotRunHistory(shot));\n    return card;\n}\n\n/**\n * \u5206\u955C\u4EA7\u7269\u7684\u5355\u884C\u5C55\u793A\u3002\n */\nfunction renderShotArtifactRow(item, all) {\n    // \u4EA7\u7269\n    const output = item.output;\n    // \u884C\n    const row = createElement("div", "artifact-row");\n    // \u7F29\u7565\u56FE\n    const thumb = createElement("div", "artifact-thumb");\n    // \u662F\u5426\u53EF\u7528\n    const available = output.present === true && output.lfs_pointer !== true;\n    if (available && output.kind === "video") {\n        // \u89C6\u9891\u9996\u5E27\n        const video = document.createElement("video");\n        video.src = `${output.media_url}#t=0.1`;\n        video.muted = true;\n        video.playsInline = true;\n        video.preload = "metadata";\n        thumb.append(video);\n    } else if (available && output.kind === "image") {\n        // \u56FE\u7247\u7F29\u7565\u56FE\n        const image = document.createElement("img");\n        image.src = output.media_url;\n        image.alt = output.name;\n        image.loading = "lazy";\n        thumb.append(image);\n    } else {\n        thumb.append(createElement("span", "artifact-thumb-icon", KIND_ICON[output.kind] ?? "\u2193"));\n    }\n    if (!output.present) thumb.append(createElement("span", "artifact-thumb-note", "\u7F3A\u5931"));\n    else if (output.lfs_pointer) thumb.append(createElement("span", "artifact-thumb-note", "LFS"));\n    row.append(thumb);\n\n    // \u4FE1\u606F\n    const info = createElement("div", "artifact-info");\n    info.append(createElement("div", "artifact-name", output.name));\n    // \u5143\u4FE1\u606F\n    const meta = createElement("div", "artifact-meta");\n    meta.append(kindBadge(output.kind));\n    meta.append(statusBadge(item.run_status));\n    meta.append(createElement("span", "", shortId(item.run_id)));\n    meta.append(createElement("span", "", formatTime(item.started_at)));\n    meta.append(createElement("span", "", formatBytes(output.bytes)));\n    info.append(meta);\n    row.append(info);\n\n    // \u64CD\u4F5C\n    const actions = createElement("div", "artifact-row-actions");\n    if (available && PREVIEW_KINDS.has(output.kind)) {\n        // \u9884\u89C8\u6309\u94AE\n        const preview = createElement("button", "button ghost", output.kind === "video" ? "\u64AD\u653E" : "\u67E5\u770B");\n        preview.type = "button";\n        preview.addEventListener("click", () => openArtifact(item, all));\n        actions.append(preview);\n    }\n    // \u4E0B\u8F7D\u94FE\u63A5\n    const download = createElement("a", "button ghost", "\u4E0B\u8F7D");\n    download.href = output.download_url;\n    actions.append(download);\n    row.append(actions);\n    return row;\n}\n\n/**\n * \u5386\u53F2 run \u6298\u53E0\u533A\u3002\n */\nfunction renderShotRunHistory(shot) {\n    // run \u5217\u8868\n    const runs = Array.isArray(shot.runs) ? shot.runs : [];\n    // \u6298\u53E0\u533A\n    const details = createElement("details", "shot-runs");\n    details.append(createElement("summary", "", `\u5386\u53F2 run\uFF08${runs.length}\uFF09`));\n    if (runs.length === 0) {\n        details.append(createElement("p", "muted", "\u8FD8\u6CA1\u6709 run\u3002"));\n        return details;\n    }\n    // \u5217\u8868\n    const list = createElement("ul", "run-list");\n    for (const run of runs) {\n        // run \u884C\n        const item = createElement("li", "run-item");\n        // \u4E3B\u4FE1\u606F\n        const main = createElement("div", "run-main");\n        main.append(statusBadge(run.status));\n        main.append(createElement("code", "mono", shortId(run.run_id)));\n        main.append(createElement("span", "", `${run.outputs.length} \u4E2A\u4EA7\u7269`));\n        main.append(\n            createElement("span", "muted", `${formatDuration(run.duration_ms)} \xB7 ${formatTime(run.started_at)}`),\n        );\n        item.append(main);\n        list.append(item);\n    }\n    details.append(list);\n    return details;\n}\n\n/**\n * \u4EA7\u51FA\u7269\u9875\u3002\n */\nfunction renderArtifacts(data) {\n    // \u5168\u90E8\u6761\u76EE\n    const items = Array.isArray(data.items) ? data.items : [];\n    // label \u5019\u9009\n    const labels = Array.isArray(data.labels) ? data.labels : [];\n    // \u7C7B\u578B\u5019\u9009\n    const kinds = Array.isArray(data.kinds) ? data.kinds : [];\n    // \u603B\u6570\n    const total = Number(data.total ?? items.length);\n\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    // \u9875\u5934\u6587\u672C\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", "Artifacts"));\n    headText.append(createElement("h2", "page-title", "\u4EA7\u51FA\u7269"));\n    headText.append(createElement("p", "page-subtitle", "\u70B9\u51FB\u89C6\u9891\u6216\u56FE\u7247\u9884\u89C8\uFF1B\u652F\u6301\u62D6\u52A8\u8FDB\u5EA6\u6761\u64AD\u653E\u3002"));\n    head.append(headText);\n    viewRoot.append(head);\n\n    // \u7B5B\u9009\u680F\n    const filters = createElement("div", "filter-bar");\n    filters.append(\n        buildSelect(\n            "\u955C\u5934",\n            labels,\n            artifactFilters.label,\n            (value) => {\n                artifactFilters.label = value;\n                refresh();\n            },\n            "\u5168\u90E8\u955C\u5934",\n        ),\n    );\n    filters.append(\n        buildSelect(\n            "\u72B6\u6001",\n            ["queued", "running", "succeeded", "failed", "cancelled", "interrupted"],\n            artifactFilters.status,\n            (value) => {\n                artifactFilters.status = value;\n                refresh();\n            },\n            "\u5168\u90E8\u72B6\u6001",\n            STATUS_LABEL,\n        ),\n    );\n    filters.append(\n        buildSelect(\n            "\u7C7B\u578B",\n            kinds,\n            artifactFilters.kind,\n            (value) => {\n                artifactFilters.kind = value;\n                refresh();\n            },\n            "\u5168\u90E8\u7C7B\u578B",\n            KIND_LABEL,\n        ),\n    );\n    // \u641C\u7D22\u6846\n    const search = createElement("input", "input search");\n    search.type = "search";\n    search.placeholder = "\u641C\u7D22 run / label / prompt / \u6587\u4EF6\u540D";\n    search.value = artifactFilters.search;\n    search.addEventListener("input", () => {\n        artifactFilters.search = search.value;\n        refresh();\n    });\n    filters.append(search);\n    viewRoot.append(filters);\n\n    // \u7ED3\u679C\u6458\u8981\n    const summaryHead = createElement("div", "section-head");\n    summaryHead.append(createElement("h3", "section-title", "\u5168\u90E8\u4EA7\u51FA\u7269"));\n    // \u6458\u8981\n    const summary = createElement("span", "section-meta", "");\n    summaryHead.append(summary);\n    viewRoot.append(summaryHead);\n\n    // \u7F51\u683C\n    const grid = createElement("div", "grid");\n    viewRoot.append(grid);\n\n    /**\n     * \u6309\u5F53\u524D\u7B5B\u9009\u5237\u65B0\u7F51\u683C\u3002\n     */\n    function refresh() {\n        // \u8FC7\u6EE4\u7ED3\u679C\n        const filtered = filterArtifacts(items);\n        summary.textContent = `\u663E\u793A ${filtered.length} / ${total}`;\n        clearNode(grid);\n        if (filtered.length === 0) {\n            grid.append(emptyNode("\u6CA1\u6709\u5339\u914D\u7684\u4EA7\u51FA\u7269", "\u8C03\u6574\u7B5B\u9009\u6761\u4EF6\u6216\u5148\u6267\u884C\u751F\u6210\u4EFB\u52A1\u3002"));\n            return;\n        }\n        renderArtifactCards(grid, filtered);\n    }\n\n    refresh();\n}\n\n/**\n * \u6784\u9020\u4E0B\u62C9\u7B5B\u9009\u3002\n */\nfunction buildSelect(label, options, value, onChange, allLabel, labels) {\n    // \u5B57\u6BB5\u5BB9\u5668\n    const field = createElement("label", "field");\n    field.append(createElement("span", "field-label", label));\n    // \u4E0B\u62C9\u6846\n    const select = createElement("select", "select");\n    select.append(new Option(allLabel, ""));\n    for (const option of options) {\n        // \u9009\u9879\u6587\u6848\n        const text = labels !== undefined ? (labels[option] ?? option) : option;\n        select.append(new Option(text, option));\n    }\n    select.value = value;\n    select.addEventListener("change", () => onChange(select.value));\n    field.append(select);\n    return field;\n}\n\n/**\n * \u6309\u7B5B\u9009\u6761\u4EF6\u8FC7\u6EE4\u4EA7\u7269\u3002\n */\nfunction filterArtifacts(items) {\n    // \u641C\u7D22\u8BCD\n    const search = artifactFilters.search.trim().toLowerCase();\n    return items.filter((item) => {\n        if (artifactFilters.label !== "" && item.label !== artifactFilters.label) return false;\n        if (artifactFilters.status !== "" && item.run_status !== artifactFilters.status) return false;\n        if (artifactFilters.kind !== "" && item.output.kind !== artifactFilters.kind) return false;\n        if (search !== "") {\n            // \u641C\u7D22\u6587\u672C\n            const haystack =\n                `${item.run_id} ${item.label ?? ""} ${item.prompt ?? ""} ${item.output.name}`.toLowerCase();\n            if (!haystack.includes(search)) return false;\n        }\n        return true;\n    });\n}\n\n/**\n * \u6E32\u67D3\u4EA7\u7269\u5361\u7247\u5217\u8868\u3002\n */\nfunction renderArtifactCards(container, items) {\n    for (const item of items) container.append(renderArtifactCard(item, items));\n}\n\n/**\n * \u5355\u4E2A\u4EA7\u7269\u5361\u7247\u3002\n */\nfunction renderArtifactCard(item, items) {\n    // \u4EA7\u7269\n    const output = item.output;\n    // \u5361\u7247\n    const card = createElement("article", "card artifact-card");\n    // \u9884\u89C8\u533A\n    const preview = createElement("div", "artifact-preview");\n    // \u662F\u5426\u53EF\u9884\u89C8\n    const available = output.present === true && output.lfs_pointer !== true;\n    if (available && (output.kind === "video" || output.kind === "image")) {\n        if (output.kind === "video") {\n            // \u89C6\u9891\u9996\u5E27\n            const video = document.createElement("video");\n            video.src = `${output.media_url}#t=0.1`;\n            video.muted = true;\n            video.playsInline = true;\n            video.preload = "metadata";\n            preview.append(video);\n        } else {\n            // \u56FE\u7247\u7F29\u7565\u56FE\n            const image = document.createElement("img");\n            image.src = output.media_url;\n            image.alt = output.name;\n            image.loading = "lazy";\n            preview.append(image);\n        }\n    } else {\n        preview.append(createElement("span", "preview-icon", KIND_ICON[output.kind] ?? "\u2193"));\n    }\n    if (!output.present) preview.append(createElement("span", "preview-note", "\u6587\u4EF6\u7F3A\u5931"));\n    else if (output.lfs_pointer) preview.append(createElement("span", "preview-note", "LFS \u672A\u62C9\u53D6"));\n    if (available && PREVIEW_KINDS.has(output.kind)) {\n        // \u64AD\u653E/\u9884\u89C8\u6309\u94AE\n        const open = createElement("button", "play-button", output.kind === "video" ? "\u25B6" : "\u2315");\n        open.type = "button";\n        open.title = output.kind === "video" ? "\u64AD\u653E" : "\u9884\u89C8";\n        open.addEventListener("click", (event) => {\n            event.stopPropagation();\n            openArtifact(item, items);\n        });\n        preview.append(open);\n    }\n    card.append(preview);\n\n    // \u5361\u7247\u5185\u5BB9\n    const body = createElement("div", "card-body");\n    // \u6807\u9898\u884C\n    const titleRow = createElement("div", "card-meta");\n    titleRow.append(createElement("h3", "card-title", output.name));\n    titleRow.append(kindBadge(output.kind));\n    body.append(titleRow);\n\n    // \u5143\u4FE1\u606F\n    const meta = createElement("div", "card-meta");\n    meta.append(createElement("span", "", item.label ?? shortId(item.run_id)));\n    meta.append(createElement("span", "", formatTime(item.started_at)));\n    meta.append(createElement("span", "", formatBytes(output.bytes)));\n    body.append(meta);\n\n    // \u64CD\u4F5C\u533A\n    const actions = createElement("div", "card-actions");\n    if (available && PREVIEW_KINDS.has(output.kind)) {\n        // \u6253\u5F00\u6309\u94AE\n        const open = createElement(\n            "button",\n            "button",\n            output.kind === "video" ? "\u64AD\u653E" : output.kind === "image" ? "\u67E5\u770B" : "\u9884\u89C8",\n        );\n        open.type = "button";\n        open.addEventListener("click", () => openArtifact(item, items));\n        actions.append(open);\n    }\n    // \u4E0B\u8F7D\u94FE\u63A5\n    const download = createElement("a", "button ghost", "\u4E0B\u8F7D");\n    download.href = output.download_url;\n    actions.append(download);\n    body.append(actions);\n    card.append(body);\n    return card;\n}\n\n/**\n * \u6253\u5F00\u4EA7\u7269\u3002\n */\nfunction openArtifact(item, list) {\n    // \u4EA7\u7269\n    const output = item.output;\n    if (output.present !== true) {\n        showToast("\u6587\u4EF6\u4E0D\u5B58\u5728\uFF0C\u53EF\u80FD\u5C1A\u672A\u4ECE Git LFS \u62C9\u53D6", true);\n        return;\n    }\n    if (output.lfs_pointer === true) {\n        showToast("\u8FD9\u662F Git LFS pointer\uFF0C\u8BF7\u5148\u6267\u884C git lfs pull", true);\n        return;\n    }\n    if (output.kind === "video" || output.kind === "audio") {\n        // \u53EF\u64AD\u653E\u6761\u76EE\n        const playable = playableItems(list ?? [item]);\n        // \u5F53\u524D\u7D22\u5F15\n        const index = playable.findIndex((entry) => entry.url === output.media_url);\n        openPlayer(playable, Math.max(index, 0));\n        return;\n    }\n    if (output.kind === "image") {\n        openImage(item);\n        return;\n    }\n    if (output.kind === "json" || output.kind === "text") {\n        void openText(item);\n        return;\n    }\n    window.location.href = output.download_url;\n}\n\n/**\n * \u53EF\u64AD\u653E\u5217\u8868\u3002\n */\nfunction playableItems(items) {\n    // \u7ED3\u679C\n    const out = [];\n    for (const item of items) {\n        // \u4EA7\u7269\n        const output = item.output;\n        if (output === undefined || output.present !== true || output.lfs_pointer === true) continue;\n        if (!PLAYABLE_KINDS.has(output.kind)) continue;\n        out.push({\n            title: `${item.label ?? item.run_id} \xB7 ${output.name}`,\n            url: output.media_url,\n            kind: output.kind,\n        });\n    }\n    return out;\n}\n\n/**\n * \u4EFB\u52A1\u9875\u3002\n */\nfunction renderTasks(data) {\n    // \u4EFB\u52A1\u5217\u8868\n    const tasks = Array.isArray(data.items) ? data.items : [];\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    // \u9875\u5934\u6587\u672C\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", "Tasks"));\n    headText.append(createElement("h2", "page-title", "\u4EFB\u52A1"));\n    headText.append(\n        createElement("p", "page-subtitle", `\u5171 ${data.total ?? tasks.length} \u4E2A\u4EFB\u52A1\uFF1B\u70B9\u51FB\u8BE6\u60C5\u67E5\u770B run \u4E0E\u4E8B\u4EF6\u3002`),\n    );\n    head.append(headText);\n    viewRoot.append(head);\n    if (tasks.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u4EFB\u52A1", "daoyan run / shot / batch \u521B\u5EFA\u7684\u4EFB\u52A1\u4F1A\u5728\u8FD9\u91CC\u51FA\u73B0\u3002"));\n        return;\n    }\n    viewRoot.append(renderTaskList(tasks));\n}\n\n/**\n * \u6E32\u67D3\u4EFB\u52A1\u5217\u8868\u3002\n */\nfunction renderTaskList(tasks) {\n    // \u5BB9\u5668\n    const list = createElement("div", "task-list");\n    for (const task of tasks) {\n        // \u4EFB\u52A1\u5361\u7247\n        const card = renderTaskCard(task);\n        list.append(card);\n        if (openTaskId === task.task_id) {\n            // \u8BE6\u60C5\u5BB9\u5668\n            const detail = card.querySelector(".task-detail");\n            void loadTaskDetail(task.task_id, detail);\n        }\n    }\n    return list;\n}\n\n/**\n * \u5355\u4E2A\u4EFB\u52A1\u5361\u7247\u3002\n */\nfunction renderTaskCard(task) {\n    // \u5361\u7247\n    const card = createElement("article", "task-card");\n    // \u5934\u90E8\n    const head = createElement("div", "task-head");\n    // \u6807\u9898\u533A\n    const title = createElement("div", "task-title");\n    title.append(statusBadge(task.status));\n    title.append(createElement("h3", "task-command", task.command));\n    title.append(badge(TASK_KIND_LABEL[task.kind] ?? task.kind, ""));\n    head.append(title);\n\n    // \u8BE6\u60C5\u6309\u94AE\n    const toggle = createElement("button", "button ghost task-toggle", openTaskId === task.task_id ? "\u6536\u8D77" : "\u8BE6\u60C5");\n    toggle.type = "button";\n    head.append(toggle);\n    card.append(head);\n\n    // \u5143\u4FE1\u606F\n    const meta = createElement("div", "task-meta");\n    meta.append(createElement("span", "", `task ${shortId(task.task_id)}`));\n    meta.append(createElement("span", "", `machine ${task.machine_id}`));\n    meta.append(createElement("span", "", `${task.run_count ?? 0} run`));\n    meta.append(createElement("span", "", formatTime(task.created_at)));\n    if (task.error !== null && task.error !== undefined) {\n        meta.append(createElement("span", "", `${task.error.code}: ${task.error.message}`));\n    }\n    card.append(meta);\n\n    // \u8BE6\u60C5\u5BB9\u5668\n    const detail = createElement("div", "task-detail");\n    detail.hidden = openTaskId !== task.task_id;\n    card.append(detail);\n    toggle.addEventListener("click", () => {\n        if (openTaskId === task.task_id) {\n            openTaskId = null;\n            detail.hidden = true;\n            toggle.textContent = "\u8BE6\u60C5";\n            return;\n        }\n        openTaskId = task.task_id;\n        for (const other of viewRoot.querySelectorAll(".task-detail")) other.hidden = true;\n        for (const button of viewRoot.querySelectorAll(".task-toggle")) button.textContent = "\u8BE6\u60C5";\n        detail.hidden = false;\n        toggle.textContent = "\u6536\u8D77";\n        void loadTaskDetail(task.task_id, detail);\n    });\n    return card;\n}\n\n/**\n * \u52A0\u8F7D\u4EFB\u52A1\u8BE6\u60C5\u3002\n */\nasync function loadTaskDetail(taskId, container) {\n    if (container === null) return;\n    container.hidden = false;\n    container.textContent = "\u52A0\u8F7D\u4E2D\u2026";\n    // \u7F13\u5B58\u9879\n    const cached = taskDetailCache.get(taskId);\n    if (cached !== undefined && Date.now() - cached.at < TASK_DETAIL_CACHE_MS) {\n        renderTaskDetail(container, cached.data);\n        return;\n    }\n    try {\n        // \u8BE6\u60C5\u6570\u636E\n        const data = await requestJson(`/api/tasks/${encodeURIComponent(taskId)}`);\n        taskDetailCache.set(taskId, { at: Date.now(), data });\n        renderTaskDetail(container, data);\n    } catch (error) {\n        container.textContent = `\u52A0\u8F7D\u5931\u8D25\uFF1A${error instanceof Error ? error.message : String(error)}`;\n    }\n}\n\n/**\n * \u6E32\u67D3\u4EFB\u52A1\u8BE6\u60C5\u3002\n */\nfunction renderTaskDetail(container, data) {\n    clearNode(container);\n    // run \u5217\u8868\n    const runs = Array.isArray(data.runs_detail) ? data.runs_detail : [];\n    container.append(createElement("h4", "", `Runs\uFF08${runs.length}\uFF09`));\n    if (runs.length === 0) {\n        container.append(createElement("p", "muted", "\u8FD8\u6CA1\u6709 run\u3002"));\n    } else {\n        // run \u5217\u8868\u8282\u70B9\n        const list = createElement("ul", "run-list");\n        for (const run of runs) {\n            // run \u884C\n            const item = createElement("li", "run-item");\n            // run \u4E3B\u4FE1\u606F\n            const main = createElement("div", "run-main");\n            main.append(statusBadge(run.status));\n            main.append(createElement("code", "mono", shortId(run.run_id)));\n            main.append(createElement("span", "", run.label ?? "\u65E0 label"));\n            main.append(\n                createElement("span", "muted", `${run.outputs.length} \u4E2A\u4EA7\u7269 \xB7 ${formatDuration(run.duration_ms)}`),\n            );\n            item.append(main);\n\n            // run \u64CD\u4F5C\n            const actions = createElement("div", "card-actions");\n            // \u9996\u4E2A\u4EA7\u7269\n            const firstOutput = run.outputs[0];\n            if (\n                firstOutput !== undefined &&\n                firstOutput.present === true &&\n                firstOutput.lfs_pointer !== true &&\n                PREVIEW_KINDS.has(firstOutput.kind)\n            ) {\n                // \u9884\u89C8\u6309\u94AE\n                const preview = createElement("button", "button ghost", "\u9884\u89C8");\n                preview.type = "button";\n                preview.addEventListener("click", () => {\n                    openArtifact(artifactItemFromRun(run, firstOutput));\n                });\n                actions.append(preview);\n            }\n            item.append(actions);\n            list.append(item);\n        }\n        container.append(list);\n    }\n\n    // \u4E8B\u4EF6\n    const events = Array.isArray(data.events) ? data.events : [];\n    container.append(createElement("h4", "", `\u4E8B\u4EF6\uFF08${events.length}\uFF09`));\n    if (events.length === 0) {\n        container.append(createElement("p", "muted", "\u6682\u65E0\u4E8B\u4EF6\u3002"));\n        return;\n    }\n    // \u4E8B\u4EF6\u5217\u8868\n    const eventList = createElement("ul", "events");\n    for (const event of events) {\n        // \u4E8B\u4EF6\u884C\n        const item = createElement("li", "event");\n        item.append(createElement("span", "event-time", event.ts.slice(11, 19)));\n        item.append(createElement("span", "event-type", event.type));\n        // \u4E8B\u4EF6\u6570\u636E\u6587\u672C\n        const dataText = JSON.stringify(event.data ?? {});\n        item.append(\n            createElement("span", "event-data", dataText.length > 220 ? `${dataText.slice(0, 220)}\u2026` : dataText),\n        );\n        eventList.append(item);\n    }\n    container.append(eventList);\n}\n\n/**\n * \u7528 run \u4FE1\u606F\u6784\u9020\u4EA7\u7269\u6761\u76EE\u3002\n */\nfunction artifactItemFromRun(run, output) {\n    return {\n        run_id: run.run_id,\n        task_id: run.task_id,\n        machine_id: run.machine_id,\n        label: run.label,\n        run_status: run.status,\n        started_at: run.started_at,\n        finished_at: run.finished_at,\n        workflow: run.workflow.path,\n        prompt: run.prompt,\n        output,\n    };\n}\n\n/**\n * \u6210\u7247\u9875\u3002\n */\nfunction renderFinals(data) {\n    // \u6210\u7247\u5217\u8868\n    const items = Array.isArray(data) ? data : [];\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    // \u9875\u5934\u6587\u672C\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", "Final cuts"));\n    headText.append(createElement("h2", "page-title", "\u6210\u7247"));\n    headText.append(createElement("p", "page-subtitle", "daoyan wrap \u751F\u6210\u7684 final/cut-* \u6587\u4EF6\u3002"));\n    head.append(headText);\n    viewRoot.append(head);\n    if (items.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u6210\u7247", "\u5B8C\u6210\u81F3\u5C11\u4E24\u4E2A\u955C\u5934\u540E\u8FD0\u884C daoyan wrap\u3002"));\n        return;\n    }\n    // \u7F51\u683C\n    const grid = createElement("div", "grid");\n    for (const item of items) {\n        // \u5361\u7247\n        const card = createElement("article", "card final-card");\n        // \u9884\u89C8\u533A\n        const preview = createElement("div", "artifact-preview");\n        if (item.present === true && item.lfs_pointer !== true) {\n            // \u89C6\u9891\u9996\u5E27\n            const video = document.createElement("video");\n            video.src = `${item.media_url}#t=0.1`;\n            video.muted = true;\n            video.playsInline = true;\n            video.preload = "metadata";\n            preview.append(video);\n            // \u64AD\u653E\u6309\u94AE\n            const play = createElement("button", "play-button", "\u25B6");\n            play.type = "button";\n            play.title = "\u64AD\u653E\u6210\u7247";\n            play.addEventListener("click", () => {\n                openPlayer([{ title: item.name, url: item.media_url, kind: "video" }], 0);\n            });\n            preview.append(play);\n        } else {\n            preview.append(createElement("span", "preview-icon", "\u25B6"));\n            preview.append(\n                createElement("span", "preview-note", item.lfs_pointer === true ? "LFS \u672A\u62C9\u53D6" : "\u6587\u4EF6\u7F3A\u5931"),\n            );\n        }\n        card.append(preview);\n\n        // \u5361\u7247\u5185\u5BB9\n        const body = createElement("div", "card-body");\n        body.append(createElement("h3", "card-title", item.name));\n        // \u5143\u4FE1\u606F\n        const meta = createElement("div", "card-meta");\n        meta.append(createElement("span", "", item.created_at !== null ? formatTime(item.created_at) : "\u65E0 manifest"));\n        meta.append(createElement("span", "", formatBytes(item.bytes)));\n        meta.append(createElement("span", "", `${item.clips.length} \u6BB5`));\n        if (item.missing.length > 0) meta.append(createElement("span", "", `\u7F3A ${item.missing.length} \u955C`));\n        body.append(meta);\n\n        // \u64CD\u4F5C\u533A\n        const actions = createElement("div", "card-actions");\n        if (item.present === true && item.lfs_pointer !== true) {\n            // \u64AD\u653E\u6309\u94AE\n            const play = createElement("button", "button", "\u64AD\u653E");\n            play.type = "button";\n            play.addEventListener("click", () => {\n                openPlayer([{ title: item.name, url: item.media_url, kind: "video" }], 0);\n            });\n            actions.append(play);\n        }\n        // \u4E0B\u8F7D\u94FE\u63A5\n        const download = createElement("a", "button ghost", "\u4E0B\u8F7D");\n        download.href = item.download_url;\n        actions.append(download);\n        body.append(actions);\n        card.append(body);\n        grid.append(card);\n    }\n    viewRoot.append(grid);\n}\n\n/**\n * \u5DE5\u4F5C\u6D41\u9875\u3002\n */\nfunction renderWorkflows(data) {\n    // \u5DE5\u4F5C\u6D41\u5217\u8868\n    const items = Array.isArray(data) ? data : [];\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    // \u9875\u5934\u6587\u672C\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", "Workflows"));\n    headText.append(createElement("h2", "page-title", "\u5DE5\u4F5C\u6D41"));\n    headText.append(createElement("p", "page-subtitle", "workflows/ \u4E0B\u7684 ComfyUI API \u56FE\u4E0E bindings\u3002"));\n    head.append(headText);\n    viewRoot.append(head);\n    if (items.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u5DE5\u4F5C\u6D41", "\u8FD0\u884C daoyan workflow new / import \u521B\u5EFA\u5DE5\u4F5C\u6D41\u3002"));\n        return;\n    }\n    // \u8868\u683C\n    const list = createElement("div", "table-list");\n    // \u8868\u5934\n    const header = createElement("div", "table-row header");\n    for (const label of ["\u5DE5\u4F5C\u6D41", "\u8282\u70B9", "bindings", "\u9ED8\u8BA4", "\u72B6\u6001"]) header.append(createElement("span", "", label));\n    list.append(header);\n    for (const item of items) {\n        // \u6570\u636E\u884C\n        const row = createElement("div", "table-row");\n        // \u540D\u79F0\u533A\n        const name = createElement("div");\n        name.append(createElement("div", "workflow-name", item.name));\n        name.append(createElement("div", "muted mono", item.path));\n        row.append(name);\n        row.append(createElement("span", "", item.nodes));\n        row.append(createElement("span", "", item.bindings ? "\u6709" : "\u65E0"));\n        row.append(createElement("span", "", item.default ? "\u662F" : "\u2014"));\n        row.append(createElement("span", "", item.valid ? "\u53EF\u89E3\u6790" : "JSON \u635F\u574F"));\n        list.append(row);\n    }\n    viewRoot.append(list);\n}\n\n/**\n * \u6253\u5F00\u64AD\u653E\u5668\u3002\n */\nfunction openPlayer(items, index) {\n    if (items.length === 0) {\n        showToast("\u6CA1\u6709\u53EF\u64AD\u653E\u7684\u4EA7\u7269", true);\n        return;\n    }\n    playerItems = items.slice(0, MAX_PLAYLIST);\n    playerIndex = Math.max(0, Math.min(index, playerItems.length - 1));\n    renderPlayerItem();\n}\n\n/**\n * \u6E32\u67D3\u5F53\u524D\u64AD\u653E\u9879\u3002\n */\nfunction renderPlayerItem() {\n    // \u5F53\u524D\u9879\n    const item = playerItems[playerIndex];\n    if (item === undefined) {\n        closeModal();\n        return;\n    }\n    // \u5A92\u4F53\u5143\u7D20\n    const media = document.createElement(item.kind === "video" ? "video" : "audio");\n    media.controls = true;\n    media.autoplay = true;\n    media.playsInline = true;\n    media.src = item.url;\n    setModal(item.title, media, `${playerIndex + 1} / ${playerItems.length}`);\n    modalPrev.disabled = playerIndex <= 0;\n    modalNext.disabled = playerIndex >= playerItems.length - 1;\n}\n\n/**\n * \u6253\u5F00\u56FE\u7247\u9884\u89C8\u3002\n */\nfunction openImageUrl(url, title) {\n    // \u56FE\u7247\u5143\u7D20\n    const image = document.createElement("img");\n    image.src = url;\n    image.alt = title;\n    setModal(title, image, "\u56FE\u7247");\n    modalPrev.disabled = true;\n    modalNext.disabled = true;\n}\n\n/**\n * \u6253\u5F00\u4EA7\u7269\u56FE\u7247\u3002\n */\nfunction openImage(item) {\n    openImageUrl(item.output.media_url, item.output.name);\n}\n\n/**\n * \u6253\u5F00\u6587\u672C\u9884\u89C8\u3002\n */\nasync function openText(item) {\n    // \u9884\u89C8\u8282\u70B9\n    const pre = createElement("pre", "", "\u52A0\u8F7D\u4E2D\u2026");\n    setModal(item.output.name, pre, "\u6587\u672C\u9884\u89C8");\n    modalPrev.disabled = true;\n    modalNext.disabled = true;\n    try {\n        // \u6587\u672C\u54CD\u5E94\n        const response = await fetch(item.output.media_url);\n        if (!response.ok) throw new Error(`HTTP ${response.status}`);\n        // \u539F\u59CB\u6587\u672C\n        const raw = await response.text();\n        // \u5C55\u793A\u6587\u672C\n        let text = raw;\n        if (item.output.kind === "json") {\n            try {\n                text = JSON.stringify(JSON.parse(raw), null, 2);\n            } catch {\n                text = raw;\n            }\n        }\n        pre.textContent =\n            text.length > TEXT_PREVIEW_LIMIT\n                ? `${text.slice(0, TEXT_PREVIEW_LIMIT)}\\n\\n\u2026\uFF08\u5DF2\u622A\u65AD\uFF0C\u5B8C\u6574\u5185\u5BB9\u8BF7\u4E0B\u8F7D\uFF09`\n                : text;\n    } catch (error) {\n        pre.textContent = `\u8BFB\u53D6\u5931\u8D25\uFF1A${error instanceof Error ? error.message : String(error)}`;\n    }\n}\n\n/**\n * \u8BBE\u7F6E\u6A21\u6001\u6846\u5185\u5BB9\u3002\n */\nfunction setModal(title, content, counter) {\n    modalTitle.textContent = title;\n    clearNode(modalContent);\n    modalContent.append(content);\n    modalCounter.textContent = counter ?? "";\n    modalRoot.hidden = false;\n}\n\n/**\n * \u5173\u95ED\u6A21\u6001\u6846\u3002\n */\nfunction closeModal() {\n    modalRoot.hidden = true;\n    clearNode(modalContent);\n    modalTitle.textContent = "\u9884\u89C8";\n    modalCounter.textContent = "";\n    playerItems = [];\n    playerIndex = 0;\n}\n\n/**\n * \u4E0A\u4E00\u4E2A\u64AD\u653E\u9879\u3002\n */\nfunction modalPrevStep() {\n    if (playerItems.length === 0 || playerIndex <= 0) return;\n    playerIndex -= 1;\n    renderPlayerItem();\n}\n\n/**\n * \u4E0B\u4E00\u4E2A\u64AD\u653E\u9879\u3002\n */\nfunction modalNextStep() {\n    if (playerItems.length === 0 || playerIndex >= playerItems.length - 1) return;\n    playerIndex += 1;\n    renderPlayerItem();\n}\n\n/**\n * \u952E\u76D8\u64CD\u4F5C\u3002\n */\nfunction handleKeydown(event) {\n    if (modalRoot.hidden) return;\n    if (event.key === "Escape") closeModal();\n    else if (event.key === "ArrowLeft") modalPrevStep();\n    else if (event.key === "ArrowRight") modalNextStep();\n}\n\n/**\n * \u542F\u52A8\u5E94\u7528\u3002\n */\nfunction start() {\n    renderShell();\n    renderNav();\n    setActiveNav();\n    modalClose.addEventListener("click", closeModal);\n    modalPrev.addEventListener("click", modalPrevStep);\n    modalNext.addEventListener("click", modalNextStep);\n    // \u906E\u7F69\u5C42\n    const backdrop = document.querySelector(".modal-backdrop");\n    if (backdrop !== null) backdrop.addEventListener("click", closeModal);\n    window.addEventListener("hashchange", onHashChange);\n    window.addEventListener("keydown", handleKeydown);\n    document.addEventListener("visibilitychange", () => {\n        if (!document.hidden) void loadCurrent();\n    });\n    void loadHeader();\n    onHashChange();\n}\n\nstart();\n';
   }
 });
 
@@ -17845,7 +19595,7 @@ var init_app = __esm({
 var style_default;
 var init_style = __esm({
   "src/core/web/ui/style.css"() {
-    style_default = '/* daoyan web \u2014\u2014 \u53EA\u8BFB\u9879\u76EE\u67E5\u770B\u5668\uFF1B\u539F\u751F CSS\uFF0C\u65E0\u5916\u90E8\u4F9D\u8D56\u3002 */\n:root {\n    color-scheme: light dark;\n    --bg: #f4f5f7;\n    --bg-elevated: #ffffff;\n    --bg-soft: #eceef2;\n    --panel: #ffffff;\n    --panel-strong: #ffffff;\n    --border: #d9dde4;\n    --border-strong: #c3c9d3;\n    --text: #1c2027;\n    --text-soft: #5c6470;\n    --text-muted: #8a919c;\n    --accent: #2f6fed;\n    --accent-soft: #e8f0ff;\n    --green: #16845b;\n    --green-soft: #e4f6ee;\n    --amber: #a56700;\n    --amber-soft: #fff2d9;\n    --red: #b42318;\n    --red-soft: #fde8e6;\n    --violet: #6b4fd8;\n    --violet-soft: #eee9ff;\n    --shadow: 0 10px 30px rgba(20, 28, 44, 0.08);\n    --radius: 14px;\n    --radius-sm: 10px;\n    --sidebar-width: 232px;\n}\n\n@media (prefers-color-scheme: dark) {\n    :root {\n        --bg: #101318;\n        --bg-elevated: #161a21;\n        --bg-soft: #1d222b;\n        --panel: #161a21;\n        --panel-strong: #1b2029;\n        --border: #2a303a;\n        --border-strong: #3a424f;\n        --text: #eef1f6;\n        --text-soft: #b3bac6;\n        --text-muted: #808895;\n        --accent: #7aa2ff;\n        --accent-soft: #1c2a4a;\n        --green: #5bd3a0;\n        --green-soft: #143329;\n        --amber: #f0b44c;\n        --amber-soft: #392b13;\n        --red: #ff8f86;\n        --red-soft: #3a1b1b;\n        --violet: #b19cff;\n        --violet-soft: #2a2148;\n        --shadow: 0 14px 40px rgba(0, 0, 0, 0.35);\n    }\n}\n\n* {\n    box-sizing: border-box;\n}\n\n[hidden] {\n    display: none !important;\n}\n\nhtml,\nbody {\n    margin: 0;\n    min-height: 100%;\n}\n\nbody {\n    background: var(--bg);\n    color: var(--text);\n    font-family:\n        -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;\n    font-size: 14px;\n    line-height: 1.55;\n    -webkit-font-smoothing: antialiased;\n}\n\nbutton,\ninput,\nselect {\n    font: inherit;\n    color: inherit;\n}\n\na {\n    color: var(--accent);\n    text-decoration: none;\n}\n\na:hover {\n    text-decoration: underline;\n}\n\n.app-shell {\n    display: grid;\n    grid-template-columns: var(--sidebar-width) minmax(0, 1fr);\n    min-height: 100vh;\n}\n\n.sidebar {\n    position: sticky;\n    top: 0;\n    display: flex;\n    flex-direction: column;\n    gap: 22px;\n    height: 100vh;\n    padding: 24px 16px 18px;\n    border-right: 1px solid var(--border);\n    background: var(--bg-elevated);\n}\n\n.brand {\n    padding: 0 8px;\n}\n\n.brand-mark {\n    display: inline-flex;\n    align-items: center;\n    gap: 8px;\n    font-size: 17px;\n    font-weight: 700;\n    letter-spacing: 0.01em;\n}\n\n.brand-dot {\n    display: inline-block;\n    width: 10px;\n    height: 10px;\n    border-radius: 50%;\n    background: var(--accent);\n    box-shadow: 0 0 0 4px var(--accent-soft);\n}\n\n.brand-sub {\n    margin: 6px 0 0;\n    color: var(--text-muted);\n    font-size: 12px;\n}\n\n.nav {\n    display: flex;\n    flex-direction: column;\n    gap: 4px;\n}\n\n.nav-item {\n    display: flex;\n    flex-direction: column;\n    align-items: flex-start;\n    gap: 1px;\n    width: 100%;\n    padding: 9px 10px;\n    border: 0;\n    border-radius: 9px;\n    background: transparent;\n    cursor: pointer;\n    text-align: left;\n}\n\n.nav-item:hover {\n    background: var(--bg-soft);\n}\n\n.nav-item.active {\n    background: var(--accent-soft);\n    color: var(--accent);\n}\n\n.nav-label {\n    font-weight: 600;\n}\n\n.nav-hint {\n    color: var(--text-muted);\n    font-size: 11px;\n}\n\n.nav-item.active .nav-hint {\n    color: color-mix(in srgb, var(--accent) 72%, var(--text-muted));\n}\n\n.sidebar-foot {\n    margin-top: auto;\n    padding: 12px 10px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius-sm);\n    color: var(--text-muted);\n    font-size: 11px;\n    line-height: 1.5;\n}\n\n.sidebar-foot code {\n    color: var(--text-soft);\n    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;\n    font-size: 11px;\n}\n\n.main {\n    min-width: 0;\n}\n\n.topbar {\n    position: sticky;\n    top: 0;\n    z-index: 10;\n    display: flex;\n    align-items: center;\n    justify-content: space-between;\n    gap: 16px;\n    padding: 16px 28px;\n    border-bottom: 1px solid var(--border);\n    background: color-mix(in srgb, var(--bg) 88%, transparent);\n    backdrop-filter: blur(12px);\n}\n\n.topbar-left {\n    display: flex;\n    align-items: baseline;\n    gap: 12px;\n    min-width: 0;\n}\n\n.project-name {\n    margin: 0;\n    overflow: hidden;\n    font-size: 16px;\n    font-weight: 700;\n    text-overflow: ellipsis;\n    white-space: nowrap;\n}\n\n.project-mode {\n    flex: none;\n    padding: 2px 8px;\n    border: 1px solid var(--border);\n    border-radius: 99px;\n    color: var(--text-soft);\n    font-size: 11px;\n}\n\n.topbar-right {\n    display: flex;\n    align-items: center;\n    gap: 14px;\n    color: var(--text-muted);\n    font-size: 12px;\n}\n\n.connection {\n    display: inline-flex;\n    align-items: center;\n    gap: 6px;\n}\n\n.connection-dot {\n    width: 7px;\n    height: 7px;\n    border-radius: 50%;\n    background: var(--text-muted);\n}\n\n.connection.ok .connection-dot {\n    background: var(--green);\n    box-shadow: 0 0 0 3px var(--green-soft);\n}\n\n.connection.error .connection-dot {\n    background: var(--red);\n    box-shadow: 0 0 0 3px var(--red-soft);\n}\n\n.content {\n    max-width: 1280px;\n    margin: 0 auto;\n    padding: 28px;\n}\n\n.view-head {\n    display: flex;\n    align-items: flex-end;\n    justify-content: space-between;\n    gap: 20px;\n    margin-bottom: 22px;\n}\n\n.eyebrow {\n    margin: 0 0 4px;\n    color: var(--text-muted);\n    font-size: 11px;\n    font-weight: 600;\n    letter-spacing: 0.08em;\n    text-transform: uppercase;\n}\n\n.page-title {\n    margin: 0;\n    font-size: 26px;\n    letter-spacing: -0.02em;\n}\n\n.page-subtitle {\n    margin: 6px 0 0;\n    color: var(--text-soft);\n    font-size: 13px;\n}\n\n.stats-grid {\n    display: grid;\n    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));\n    gap: 12px;\n    margin-bottom: 20px;\n}\n\n.stat-card {\n    padding: 16px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius);\n    background: var(--panel);\n}\n\n.stat-label {\n    margin: 0;\n    color: var(--text-muted);\n    font-size: 12px;\n}\n\n.stat-value {\n    margin: 6px 0 0;\n    font-size: 24px;\n    font-weight: 700;\n    letter-spacing: -0.02em;\n}\n\n.stat-hint {\n    margin: 4px 0 0;\n    color: var(--text-muted);\n    font-size: 11px;\n}\n\n.layout-two {\n    display: grid;\n    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);\n    gap: 16px;\n    margin-bottom: 20px;\n}\n\n.panel {\n    padding: 18px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius);\n    background: var(--panel);\n}\n\n.panel-head {\n    display: flex;\n    align-items: center;\n    justify-content: space-between;\n    gap: 12px;\n    margin-bottom: 12px;\n}\n\n.panel-title {\n    margin: 0;\n    font-size: 15px;\n    font-weight: 700;\n}\n\n.panel-sub {\n    margin: 2px 0 0;\n    color: var(--text-muted);\n    font-size: 12px;\n}\n\n.kv {\n    display: grid;\n    grid-template-columns: 92px minmax(0, 1fr);\n    gap: 7px 12px;\n    margin: 0;\n    font-size: 13px;\n}\n\n.kv dt {\n    color: var(--text-muted);\n}\n\n.kv dd {\n    margin: 0;\n    overflow-wrap: anywhere;\n}\n\n.badge {\n    display: inline-flex;\n    align-items: center;\n    gap: 5px;\n    padding: 2px 8px;\n    border-radius: 99px;\n    background: var(--bg-soft);\n    color: var(--text-soft);\n    font-size: 11px;\n    font-weight: 600;\n    white-space: nowrap;\n}\n\n.badge.status-succeeded {\n    background: var(--green-soft);\n    color: var(--green);\n}\n\n.badge.status-running {\n    background: var(--accent-soft);\n    color: var(--accent);\n}\n\n.badge.status-queued {\n    background: var(--amber-soft);\n    color: var(--amber);\n}\n\n.badge.status-failed {\n    background: var(--red-soft);\n    color: var(--red);\n}\n\n.badge.status-cancelled,\n.badge.status-interrupted {\n    background: var(--violet-soft);\n    color: var(--violet);\n}\n\n.badge.kind-video {\n    background: var(--violet-soft);\n    color: var(--violet);\n}\n\n.badge.kind-image {\n    background: var(--green-soft);\n    color: var(--green);\n}\n\n.badge.kind-audio {\n    background: var(--amber-soft);\n    color: var(--amber);\n}\n\n.badge.kind-json,\n.badge.kind-text {\n    background: var(--accent-soft);\n    color: var(--accent);\n}\n\n.muted {\n    color: var(--text-muted);\n}\n\n.mono {\n    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;\n    font-size: 12px;\n}\n\n.section-head {\n    display: flex;\n    align-items: center;\n    justify-content: space-between;\n    gap: 12px;\n    margin: 24px 0 12px;\n}\n\n.section-title {\n    margin: 0;\n    font-size: 16px;\n    font-weight: 700;\n}\n\n.section-meta {\n    color: var(--text-muted);\n    font-size: 12px;\n}\n\n.grid {\n    display: grid;\n    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));\n    gap: 14px;\n}\n\n.card {\n    overflow: hidden;\n    border: 1px solid var(--border);\n    border-radius: var(--radius);\n    background: var(--panel);\n}\n\n.card-body {\n    padding: 13px 14px 14px;\n}\n\n.card-title {\n    margin: 0;\n    overflow: hidden;\n    font-size: 14px;\n    font-weight: 700;\n    text-overflow: ellipsis;\n    white-space: nowrap;\n}\n\n.card-meta {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 6px 10px;\n    margin-top: 7px;\n    color: var(--text-muted);\n    font-size: 11px;\n}\n\n.card-actions {\n    display: flex;\n    flex-wrap: wrap;\n    gap: 8px;\n    margin-top: 12px;\n}\n\n.artifact-card {\n    display: flex;\n    flex-direction: column;\n}\n\n.artifact-preview {\n    position: relative;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    aspect-ratio: 16 / 10;\n    overflow: hidden;\n    background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 10%, var(--bg-soft)), var(--bg-soft));\n}\n\n.artifact-preview video,\n.artifact-preview img {\n    width: 100%;\n    height: 100%;\n    object-fit: cover;\n}\n\n.artifact-preview .preview-icon {\n    font-size: 38px;\n    opacity: 0.65;\n}\n\n.artifact-preview .preview-note {\n    position: absolute;\n    inset: auto 8px 8px;\n    padding: 4px 8px;\n    border-radius: 8px;\n    background: rgba(0, 0, 0, 0.62);\n    color: #fff;\n    font-size: 11px;\n    text-align: center;\n}\n\n.play-button {\n    position: absolute;\n    display: inline-flex;\n    align-items: center;\n    justify-content: center;\n    width: 46px;\n    height: 46px;\n    border: 0;\n    border-radius: 50%;\n    background: rgba(0, 0, 0, 0.62);\n    color: #fff;\n    cursor: pointer;\n    font-size: 18px;\n}\n\n.play-button:hover {\n    background: var(--accent);\n}\n\n.button {\n    display: inline-flex;\n    align-items: center;\n    justify-content: center;\n    gap: 6px;\n    padding: 6px 11px;\n    border: 1px solid var(--border-strong);\n    border-radius: 8px;\n    background: var(--panel-strong);\n    cursor: pointer;\n    font-size: 12px;\n    font-weight: 600;\n}\n\n.button:hover {\n    border-color: var(--accent);\n    color: var(--accent);\n}\n\n.button.primary {\n    border-color: var(--accent);\n    background: var(--accent);\n    color: #fff;\n}\n\n.button.primary:hover {\n    color: #fff;\n    filter: brightness(1.06);\n}\n\n.button.ghost {\n    border-color: transparent;\n    background: transparent;\n    color: var(--text-soft);\n}\n\n.button:disabled {\n    cursor: not-allowed;\n    opacity: 0.4;\n}\n\n.icon-button {\n    display: inline-flex;\n    align-items: center;\n    justify-content: center;\n    width: 34px;\n    height: 34px;\n    border: 1px solid var(--border);\n    border-radius: 9px;\n    background: transparent;\n    cursor: pointer;\n    font-size: 20px;\n    line-height: 1;\n}\n\n.filter-bar {\n    display: flex;\n    flex-wrap: wrap;\n    gap: 10px;\n    margin-bottom: 16px;\n    padding: 12px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius);\n    background: var(--panel);\n}\n\n.field {\n    display: flex;\n    flex-direction: column;\n    gap: 4px;\n}\n\n.field-label {\n    color: var(--text-muted);\n    font-size: 11px;\n    font-weight: 600;\n}\n\n.input,\n.select {\n    min-width: 140px;\n    padding: 7px 9px;\n    border: 1px solid var(--border);\n    border-radius: 8px;\n    background: var(--bg-elevated);\n    font-size: 12px;\n}\n\n.input:focus,\n.select:focus {\n    border-color: var(--accent);\n    outline: 2px solid var(--accent-soft);\n}\n\n.input.search {\n    min-width: 210px;\n}\n\n.shot-card {\n    display: flex;\n    flex-direction: column;\n    gap: 10px;\n    padding: 14px;\n}\n\n.shot-title {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: baseline;\n    gap: 8px;\n    min-width: 0;\n}\n\n.shot-head {\n    display: flex;\n    align-items: flex-start;\n    justify-content: space-between;\n    gap: 10px;\n}\n\n.shot-id {\n    font-size: 18px;\n    font-weight: 800;\n    letter-spacing: -0.02em;\n}\n\n.shot-slug {\n    color: var(--text-muted);\n    font-size: 12px;\n}\n\n.prompt {\n    display: -webkit-box;\n    overflow: hidden;\n    margin: 0;\n    color: var(--text-soft);\n    font-size: 12px;\n    -webkit-box-orient: vertical;\n    -webkit-line-clamp: 3;\n}\n\n.meta-row {\n    display: flex;\n    flex-wrap: wrap;\n    gap: 6px 12px;\n    color: var(--text-muted);\n    font-size: 11px;\n}\n\n.task-list {\n    display: flex;\n    flex-direction: column;\n    gap: 10px;\n}\n\n.task-card {\n    padding: 14px 16px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius);\n    background: var(--panel);\n}\n\n.task-head {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    justify-content: space-between;\n    gap: 10px;\n}\n\n.task-title {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 8px;\n    min-width: 0;\n}\n\n.task-command {\n    margin: 0;\n    font-size: 14px;\n    font-weight: 700;\n}\n\n.task-meta {\n    display: flex;\n    flex-wrap: wrap;\n    gap: 6px 12px;\n    margin-top: 7px;\n    color: var(--text-muted);\n    font-size: 11px;\n}\n\n.task-detail {\n    margin-top: 14px;\n    padding-top: 14px;\n    border-top: 1px dashed var(--border);\n}\n\n.task-detail h4 {\n    margin: 0 0 8px;\n    font-size: 13px;\n}\n\n.run-list {\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n    margin: 0;\n    padding: 0;\n    list-style: none;\n}\n\n.run-item {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    justify-content: space-between;\n    gap: 8px;\n    padding: 8px 10px;\n    border-radius: 8px;\n    background: var(--bg-soft);\n    font-size: 12px;\n}\n\n.run-main {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 8px;\n    min-width: 0;\n}\n\n.events {\n    display: flex;\n    flex-direction: column;\n    gap: 4px;\n    max-height: 320px;\n    margin: 0;\n    padding: 0;\n    overflow: auto;\n    list-style: none;\n}\n\n.event {\n    display: grid;\n    grid-template-columns: 48px 132px minmax(0, 1fr);\n    gap: 8px;\n    padding: 4px 6px;\n    border-radius: 6px;\n    color: var(--text-soft);\n    font-size: 11px;\n}\n\n.event:nth-child(odd) {\n    background: var(--bg-soft);\n}\n\n.event-time {\n    color: var(--text-muted);\n}\n\n.event-type {\n    font-weight: 600;\n}\n\n.event-data {\n    overflow: hidden;\n    color: var(--text-muted);\n    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;\n    text-overflow: ellipsis;\n    white-space: nowrap;\n}\n\n.table-list {\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n}\n\n.table-row {\n    display: grid;\n    grid-template-columns: minmax(150px, 1.4fr) 80px 80px 90px minmax(0, 1fr);\n    gap: 10px;\n    align-items: center;\n    padding: 11px 14px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius-sm);\n    background: var(--panel);\n    font-size: 12px;\n}\n\n.table-row.header {\n    border-color: transparent;\n    background: transparent;\n    color: var(--text-muted);\n    font-size: 11px;\n    font-weight: 600;\n}\n\n.workflow-name {\n    font-weight: 700;\n}\n\n.final-card .artifact-preview {\n    aspect-ratio: 16 / 9;\n}\n\n.empty {\n    padding: 42px 20px;\n    border: 1px dashed var(--border-strong);\n    border-radius: var(--radius);\n    background: var(--panel);\n    color: var(--text-muted);\n    text-align: center;\n}\n\n.empty-title {\n    margin: 0 0 5px;\n    color: var(--text-soft);\n    font-size: 15px;\n    font-weight: 700;\n}\n\n.empty-body {\n    margin: 0;\n    font-size: 12px;\n}\n\n.loading {\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    gap: 10px;\n    padding: 60px 20px;\n    color: var(--text-muted);\n    font-size: 13px;\n}\n\n.spinner {\n    width: 18px;\n    height: 18px;\n    border: 2px solid var(--border);\n    border-top-color: var(--accent);\n    border-radius: 50%;\n    animation: spin 0.8s linear infinite;\n}\n\n@keyframes spin {\n    to {\n        transform: rotate(360deg);\n    }\n}\n\n.error-banner {\n    margin-bottom: 16px;\n    padding: 10px 13px;\n    border: 1px solid color-mix(in srgb, var(--red) 35%, var(--border));\n    border-radius: var(--radius-sm);\n    background: var(--red-soft);\n    color: var(--red);\n    font-size: 12px;\n}\n\n.callout {\n    margin-bottom: 18px;\n    padding: 13px 15px;\n    border: 1px solid var(--border);\n    border-left: 3px solid var(--amber);\n    border-radius: var(--radius-sm);\n    background: var(--amber-soft);\n    color: var(--text-soft);\n    font-size: 12px;\n}\n\n.callout strong {\n    color: var(--text);\n}\n\n.modal {\n    position: fixed;\n    inset: 0;\n    z-index: 50;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    padding: 24px;\n}\n\n.modal-backdrop {\n    position: absolute;\n    inset: 0;\n    background: rgba(7, 10, 16, 0.72);\n    backdrop-filter: blur(4px);\n}\n\n.modal-panel {\n    position: relative;\n    display: flex;\n    flex-direction: column;\n    width: min(100%, 980px);\n    max-height: calc(100vh - 48px);\n    overflow: hidden;\n    border: 1px solid var(--border-strong);\n    border-radius: 18px;\n    background: var(--panel-strong);\n    box-shadow: var(--shadow);\n}\n\n.modal-head {\n    display: flex;\n    align-items: flex-start;\n    justify-content: space-between;\n    gap: 16px;\n    padding: 16px 18px;\n    border-bottom: 1px solid var(--border);\n}\n\n.modal-heading h2 {\n    margin: 0;\n    overflow: hidden;\n    font-size: 17px;\n    text-overflow: ellipsis;\n    white-space: nowrap;\n}\n\n.modal-content {\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    min-height: 220px;\n    padding: 16px;\n    overflow: auto;\n    background: #05070a;\n}\n\n.modal-content video,\n.modal-content audio {\n    width: 100%;\n    max-height: calc(100vh - 260px);\n    border-radius: 10px;\n}\n\n.modal-content audio {\n    max-width: 620px;\n}\n\n.modal-content img {\n    max-width: 100%;\n    max-height: calc(100vh - 250px);\n    border-radius: 10px;\n    object-fit: contain;\n}\n\n.modal-content pre {\n    width: 100%;\n    max-height: calc(100vh - 260px);\n    margin: 0;\n    padding: 16px;\n    overflow: auto;\n    border-radius: 10px;\n    background: #0d1117;\n    color: #d6deeb;\n    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;\n    font-size: 12px;\n    line-height: 1.6;\n    white-space: pre-wrap;\n}\n\n.modal-foot {\n    display: flex;\n    align-items: center;\n    justify-content: space-between;\n    gap: 12px;\n    padding: 10px 16px;\n    border-top: 1px solid var(--border);\n}\n\n.toast {\n    position: fixed;\n    right: 24px;\n    bottom: 24px;\n    z-index: 60;\n    max-width: 360px;\n    padding: 10px 14px;\n    border: 1px solid var(--border-strong);\n    border-radius: 10px;\n    background: var(--panel-strong);\n    box-shadow: var(--shadow);\n    font-size: 12px;\n}\n\n.toast.error {\n    border-color: color-mix(in srgb, var(--red) 45%, var(--border));\n    color: var(--red);\n}\n\n.profile-panel {\n    margin-bottom: 20px;\n}\n\n.profile-synopsis {\n    margin: 0 0 14px;\n    padding: 12px 14px;\n    border-left: 3px solid var(--accent);\n    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;\n    background: var(--accent-soft);\n    color: var(--text-soft);\n    font-size: 13px;\n    line-height: 1.65;\n}\n\n.entity-section {\n    margin-bottom: 8px;\n}\n\n.entity-grid {\n    display: grid;\n    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));\n    gap: 12px;\n}\n\n.entity-card {\n    padding: 14px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius);\n    background: var(--panel);\n}\n\n.entity-head {\n    display: flex;\n    align-items: center;\n    justify-content: space-between;\n    gap: 10px;\n}\n\n.entity-name {\n    margin: 0;\n    font-size: 15px;\n    font-weight: 700;\n}\n\n.entity-desc {\n    margin: 8px 0 0;\n    color: var(--text-soft);\n    font-size: 12px;\n    line-height: 1.6;\n}\n\n.entity-ref {\n    margin: 6px 0 0;\n    color: var(--text-muted);\n    font-size: 11px;\n}\n\n.chip-row {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 6px;\n}\n\n.chip {\n    display: inline-flex;\n    align-items: center;\n    padding: 3px 8px;\n    border: 1px solid var(--border);\n    border-radius: 99px;\n    background: var(--bg-soft);\n    color: var(--text-soft);\n    font-size: 11px;\n    white-space: nowrap;\n}\n\n.chip-small {\n    padding: 2px 7px;\n    font-size: 10px;\n}\n\n.chip-character {\n    border-color: color-mix(in srgb, var(--green) 30%, var(--border));\n    background: var(--green-soft);\n    color: var(--green);\n}\n\n.chip-scene {\n    border-color: color-mix(in srgb, var(--violet) 30%, var(--border));\n    background: var(--violet-soft);\n    color: var(--violet);\n}\n\n.storyboard-section {\n    margin-top: 8px;\n}\n\n.storyboard-list {\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n}\n\n.storyboard-row {\n    display: grid;\n    grid-template-columns: 96px minmax(220px, 1.8fr) 120px minmax(140px, 1fr) 110px;\n    gap: 12px;\n    align-items: center;\n    padding: 12px 14px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius-sm);\n    background: var(--panel);\n    font-size: 12px;\n}\n\n.storyboard-header {\n    padding-top: 0;\n    padding-bottom: 4px;\n    border-color: transparent;\n    background: transparent;\n    color: var(--text-muted);\n    font-size: 11px;\n    font-weight: 600;\n}\n\n.storyboard-id-cell {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 6px;\n}\n\n.storyboard-id {\n    font-size: 16px;\n    font-weight: 800;\n    letter-spacing: -0.02em;\n}\n\n.storyboard-content {\n    min-width: 0;\n}\n\n.storyboard-title {\n    overflow: hidden;\n    font-weight: 700;\n    text-overflow: ellipsis;\n    white-space: nowrap;\n}\n\n.storyboard-summary {\n    display: -webkit-box;\n    overflow: hidden;\n    margin: 3px 0 0;\n    color: var(--text-muted);\n    font-size: 11px;\n    -webkit-box-orient: vertical;\n    -webkit-line-clamp: 2;\n}\n\n.storyboard-artifacts {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 6px;\n}\n\n.shot-grid {\n    grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));\n}\n\n.shot-card-rich {\n    gap: 12px;\n}\n\n.shot-title-text {\n    overflow: hidden;\n    font-size: 15px;\n    font-weight: 700;\n    text-overflow: ellipsis;\n    white-space: nowrap;\n}\n\n.shot-summary {\n    margin: 0;\n    color: var(--text-soft);\n    font-size: 13px;\n    line-height: 1.7;\n}\n\n.shot-line {\n    display: flex;\n    align-items: flex-start;\n    gap: 10px;\n}\n\n.shot-line-label {\n    flex: none;\n    padding-top: 3px;\n    color: var(--text-muted);\n    font-size: 11px;\n    font-weight: 600;\n}\n\n.shot-meta-grid {\n    display: flex;\n    flex-wrap: wrap;\n    gap: 6px 12px;\n    padding: 10px 12px;\n    border-radius: var(--radius-sm);\n    background: var(--bg-soft);\n    color: var(--text-muted);\n    font-size: 11px;\n}\n\n.shot-prompt,\n.shot-runs {\n    border-top: 1px dashed var(--border);\n    padding-top: 10px;\n}\n\n.shot-prompt summary,\n.shot-runs summary {\n    color: var(--text-soft);\n    cursor: pointer;\n    font-size: 12px;\n    font-weight: 600;\n}\n\n.shot-prompt p {\n    margin: 8px 0 0;\n    color: var(--text-soft);\n    font-size: 12px;\n    line-height: 1.7;\n    white-space: pre-wrap;\n}\n\n.shot-notes {\n    margin: 0;\n    color: var(--text-muted);\n    font-size: 12px;\n}\n\n.shot-section-head {\n    display: flex;\n    align-items: center;\n    justify-content: space-between;\n    gap: 10px;\n    margin-top: 4px;\n}\n\n.shot-section-head h4 {\n    margin: 0;\n    font-size: 13px;\n}\n\n.artifact-list {\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n}\n\n.artifact-row {\n    display: grid;\n    grid-template-columns: 84px minmax(0, 1fr) auto;\n    gap: 10px;\n    align-items: center;\n    padding: 8px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius-sm);\n    background: var(--bg-elevated);\n}\n\n.artifact-thumb {\n    position: relative;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    width: 84px;\n    height: 56px;\n    overflow: hidden;\n    border-radius: 7px;\n    background: var(--bg-soft);\n}\n\n.artifact-thumb video,\n.artifact-thumb img {\n    width: 100%;\n    height: 100%;\n    object-fit: cover;\n}\n\n.artifact-thumb-icon {\n    font-size: 22px;\n    opacity: 0.7;\n}\n\n.artifact-thumb-note {\n    position: absolute;\n    inset: auto 3px 3px;\n    padding: 1px 4px;\n    border-radius: 4px;\n    background: rgba(0, 0, 0, 0.65);\n    color: #fff;\n    font-size: 9px;\n    text-align: center;\n}\n\n.artifact-info {\n    min-width: 0;\n}\n\n.artifact-name {\n    overflow: hidden;\n    font-size: 12px;\n    font-weight: 700;\n    text-overflow: ellipsis;\n    white-space: nowrap;\n}\n\n.artifact-meta {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 5px 8px;\n    margin-top: 4px;\n    color: var(--text-muted);\n    font-size: 10px;\n}\n\n.artifact-row-actions {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 4px;\n}\n\n@media (max-width: 980px) {\n    .app-shell {\n        grid-template-columns: 1fr;\n    }\n\n    .sidebar {\n        position: static;\n        display: block;\n        height: auto;\n        padding: 16px;\n        border-right: 0;\n        border-bottom: 1px solid var(--border);\n    }\n\n    .brand-sub,\n    .sidebar-foot {\n        display: none;\n    }\n\n    .nav {\n        flex-direction: row;\n        flex-wrap: wrap;\n        margin-top: 12px;\n    }\n\n    .nav-item {\n        width: auto;\n        padding: 7px 10px;\n    }\n\n    .nav-hint {\n        display: none;\n    }\n\n    .topbar {\n        padding: 12px 18px;\n    }\n\n    .content {\n        padding: 18px;\n    }\n\n    .stats-grid {\n        grid-template-columns: repeat(2, minmax(0, 1fr));\n    }\n\n    .layout-two {\n        grid-template-columns: 1fr;\n    }\n\n    .shot-grid {\n        grid-template-columns: 1fr;\n    }\n\n    .storyboard-row {\n        grid-template-columns: 1fr;\n        gap: 6px;\n    }\n\n    .storyboard-header {\n        display: none;\n    }\n\n    .artifact-row {\n        grid-template-columns: 72px minmax(0, 1fr);\n    }\n\n    .artifact-row-actions {\n        grid-column: 1 / -1;\n        justify-content: flex-end;\n    }\n\n    .table-row {\n        grid-template-columns: minmax(0, 1fr) 70px 70px;\n    }\n\n    .table-row.header span:nth-child(n + 3) {\n        display: none;\n    }\n}\n\n@media (max-width: 560px) {\n    .stats-grid {\n        grid-template-columns: 1fr;\n    }\n\n    .grid {\n        grid-template-columns: 1fr;\n    }\n\n    .entity-grid {\n        grid-template-columns: 1fr;\n    }\n\n    .artifact-row {\n        grid-template-columns: 64px minmax(0, 1fr);\n    }\n\n    .artifact-thumb {\n        width: 64px;\n        height: 46px;\n    }\n\n    .view-head {\n        align-items: flex-start;\n        flex-direction: column;\n    }\n\n    .modal {\n        padding: 8px;\n    }\n\n    .modal-panel {\n        max-height: calc(100vh - 16px);\n        border-radius: 12px;\n    }\n\n    .event {\n        grid-template-columns: 38px 100px minmax(0, 1fr);\n    }\n}\n\n/* ---- story / episode ---- */\n.episode-card {\n    min-height: 100%;\n}\n\n.script-text {\n    margin: 0 0 18px;\n    padding: 16px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius-sm);\n    background: var(--panel);\n    color: var(--text);\n    font-family: "SFMono-Regular", ui-monospace, Menlo, Consolas, monospace;\n    font-size: 12.5px;\n    line-height: 1.7;\n    white-space: pre-wrap;\n    word-break: break-word;\n    max-height: 460px;\n    overflow: auto;\n}\n\n.form-block {\n    margin-top: 14px;\n    padding-top: 12px;\n    border-top: 1px solid var(--border);\n}\n\n.form-title {\n    margin: 0 0 8px;\n    font-size: 13px;\n    color: var(--text-soft);\n}\n\n.asset-tile,\n.asset-compact {\n    display: flex;\n    flex-direction: column;\n    gap: 6px;\n    min-width: 0;\n}\n\n.asset-tile img,\n.asset-compact img {\n    width: 100%;\n    max-height: 220px;\n    object-fit: contain;\n    border-radius: var(--radius-sm);\n    background: var(--bg-soft);\n    border: 1px solid var(--border);\n}\n\n.asset-compact img {\n    max-height: 96px;\n}\n\n.asset-tile audio,\n.asset-compact audio {\n    width: 100%;\n}\n\n.asset-name {\n    font-size: 10.5px;\n    color: var(--text-muted);\n    overflow: hidden;\n    text-overflow: ellipsis;\n    white-space: nowrap;\n}\n\n.asset-missing {\n    display: inline-flex;\n    align-items: center;\n    min-height: 64px;\n    padding: 10px 12px;\n    border: 1px dashed var(--border-strong);\n    border-radius: var(--radius-sm);\n    color: var(--text-muted);\n    font-size: 12px;\n    background: var(--bg-soft);\n}\n\n.asset-row {\n    display: grid;\n    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));\n    gap: 8px;\n    margin-top: 8px;\n}\n\n.mini-list {\n    margin: 8px 0 0;\n    padding-left: 18px;\n    color: var(--text-soft);\n    font-size: 12.5px;\n    line-height: 1.65;\n}\n\n.text-warn {\n    color: var(--amber);\n}\n\n.callout.warn {\n    border-color: var(--amber);\n    background: var(--amber-soft);\n}\n\n.task-list {\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n    margin-bottom: 18px;\n}\n\n.task-row {\n    display: flex;\n    align-items: center;\n    gap: 12px;\n    padding: 10px 12px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius-sm);\n    background: var(--panel);\n    font-size: 12.5px;\n}\n\n.task-row > span:nth-child(2) {\n    flex: 1;\n    min-width: 0;\n    overflow: hidden;\n    text-overflow: ellipsis;\n    white-space: nowrap;\n    color: var(--text-soft);\n}\n\n.quote {\n    margin: 10px 0 0;\n    padding: 8px 12px;\n    border-left: 3px solid var(--violet);\n    background: var(--violet-soft);\n    color: var(--text-soft);\n    font-size: 12.5px;\n    line-height: 1.6;\n}\n\n.badge.stage-script,\n.badge.stage-breakdown {\n    background: var(--amber-soft);\n    color: var(--amber);\n}\n\n.badge.stage-assets,\n.badge.stage-storyboard,\n.badge.stage-workflow {\n    background: var(--violet-soft);\n    color: var(--violet);\n}\n\n.badge.stage-ready,\n.badge.stage-wrapped {\n    background: var(--green-soft);\n    color: var(--green);\n}\n';
+    style_default = '/* daoyan web \u2014\u2014 \u53EA\u8BFB\u9879\u76EE\u67E5\u770B\u5668\uFF1B\u539F\u751F CSS\uFF0C\u65E0\u5916\u90E8\u4F9D\u8D56\u3002 */\n:root {\n    color-scheme: light dark;\n    --bg: #f4f5f7;\n    --bg-elevated: #ffffff;\n    --bg-soft: #eceef2;\n    --panel: #ffffff;\n    --panel-strong: #ffffff;\n    --border: #d9dde4;\n    --border-strong: #c3c9d3;\n    --text: #1c2027;\n    --text-soft: #5c6470;\n    --text-muted: #8a919c;\n    --accent: #2f6fed;\n    --accent-soft: #e8f0ff;\n    --green: #16845b;\n    --green-soft: #e4f6ee;\n    --amber: #a56700;\n    --amber-soft: #fff2d9;\n    --red: #b42318;\n    --red-soft: #fde8e6;\n    --violet: #6b4fd8;\n    --violet-soft: #eee9ff;\n    --scene-day: #d99a2b;\n    --scene-night: #5b6fb5;\n    --scene-dusk: #a46bc4;\n    --scene-dawn: #4fa8a0;\n    --scene-other: #8a919c;\n    --shadow: 0 10px 30px rgba(20, 28, 44, 0.08);\n    --radius: 14px;\n    --radius-sm: 10px;\n    --sidebar-width: 232px;\n}\n\n@media (prefers-color-scheme: dark) {\n    :root {\n        --bg: #101318;\n        --bg-elevated: #161a21;\n        --bg-soft: #1d222b;\n        --panel: #161a21;\n        --panel-strong: #1b2029;\n        --border: #2a303a;\n        --border-strong: #3a424f;\n        --text: #eef1f6;\n        --text-soft: #b3bac6;\n        --text-muted: #808895;\n        --accent: #7aa2ff;\n        --accent-soft: #1c2a4a;\n        --green: #5bd3a0;\n        --green-soft: #143329;\n        --amber: #f0b44c;\n        --amber-soft: #392b13;\n        --red: #ff8f86;\n        --red-soft: #3a1b1b;\n        --violet: #b19cff;\n        --violet-soft: #2a2148;\n        --scene-day: #f0c060;\n        --scene-night: #8ea2e8;\n        --scene-dusk: #c79ae0;\n        --scene-dawn: #7ed0c7;\n        --scene-other: #808895;\n        --shadow: 0 14px 40px rgba(0, 0, 0, 0.35);\n    }\n}\n\n* {\n    box-sizing: border-box;\n}\n\n[hidden] {\n    display: none !important;\n}\n\nhtml,\nbody {\n    margin: 0;\n    min-height: 100%;\n}\n\nbody {\n    background: var(--bg);\n    color: var(--text);\n    font-family:\n        -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;\n    font-size: 14px;\n    line-height: 1.55;\n    -webkit-font-smoothing: antialiased;\n}\n\nbutton,\ninput,\nselect {\n    font: inherit;\n    color: inherit;\n}\n\na {\n    color: var(--accent);\n    text-decoration: none;\n}\n\na:hover {\n    text-decoration: underline;\n}\n\n.app-shell {\n    display: grid;\n    grid-template-columns: var(--sidebar-width) minmax(0, 1fr);\n    min-height: 100vh;\n}\n\n.sidebar {\n    position: sticky;\n    top: 0;\n    display: flex;\n    flex-direction: column;\n    gap: 22px;\n    height: 100vh;\n    padding: 24px 16px 18px;\n    border-right: 1px solid var(--border);\n    background: var(--bg-elevated);\n}\n\n.brand {\n    padding: 0 8px;\n}\n\n.brand-mark {\n    display: inline-flex;\n    align-items: center;\n    gap: 8px;\n    font-size: 17px;\n    font-weight: 700;\n    letter-spacing: 0.01em;\n}\n\n.brand-dot {\n    display: inline-block;\n    width: 10px;\n    height: 10px;\n    border-radius: 50%;\n    background: var(--accent);\n    box-shadow: 0 0 0 4px var(--accent-soft);\n}\n\n.brand-sub {\n    margin: 6px 0 0;\n    color: var(--text-muted);\n    font-size: 12px;\n}\n\n.nav {\n    display: flex;\n    flex-direction: column;\n    gap: 4px;\n}\n\n.nav-item {\n    display: flex;\n    flex-direction: column;\n    align-items: flex-start;\n    gap: 1px;\n    width: 100%;\n    padding: 9px 10px;\n    border: 0;\n    border-radius: 9px;\n    background: transparent;\n    cursor: pointer;\n    text-align: left;\n}\n\n.nav-item:hover {\n    background: var(--bg-soft);\n}\n\n.nav-item.active {\n    background: var(--accent-soft);\n    color: var(--accent);\n}\n\n.nav-label {\n    font-weight: 600;\n}\n\n.nav-hint {\n    color: var(--text-muted);\n    font-size: 11px;\n}\n\n.nav-item.active .nav-hint {\n    color: color-mix(in srgb, var(--accent) 72%, var(--text-muted));\n}\n\n.sidebar-foot {\n    margin-top: auto;\n    padding: 12px 10px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius-sm);\n    color: var(--text-muted);\n    font-size: 11px;\n    line-height: 1.5;\n}\n\n.sidebar-foot code {\n    color: var(--text-soft);\n    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;\n    font-size: 11px;\n}\n\n.main {\n    min-width: 0;\n}\n\n.topbar {\n    position: sticky;\n    top: 0;\n    z-index: 10;\n    display: flex;\n    align-items: center;\n    justify-content: space-between;\n    gap: 16px;\n    padding: 16px 28px;\n    border-bottom: 1px solid var(--border);\n    background: color-mix(in srgb, var(--bg) 88%, transparent);\n    backdrop-filter: blur(12px);\n}\n\n.topbar-left {\n    display: flex;\n    align-items: baseline;\n    gap: 12px;\n    min-width: 0;\n}\n\n.project-name {\n    margin: 0;\n    overflow: hidden;\n    font-size: 16px;\n    font-weight: 700;\n    text-overflow: ellipsis;\n    white-space: nowrap;\n}\n\n.project-mode {\n    flex: none;\n    padding: 2px 8px;\n    border: 1px solid var(--border);\n    border-radius: 99px;\n    color: var(--text-soft);\n    font-size: 11px;\n}\n\n.topbar-right {\n    display: flex;\n    align-items: center;\n    gap: 14px;\n    color: var(--text-muted);\n    font-size: 12px;\n}\n\n.connection {\n    display: inline-flex;\n    align-items: center;\n    gap: 6px;\n}\n\n.connection-dot {\n    width: 7px;\n    height: 7px;\n    border-radius: 50%;\n    background: var(--text-muted);\n}\n\n.connection.ok .connection-dot {\n    background: var(--green);\n    box-shadow: 0 0 0 3px var(--green-soft);\n}\n\n.connection.error .connection-dot {\n    background: var(--red);\n    box-shadow: 0 0 0 3px var(--red-soft);\n}\n\n.content {\n    max-width: 1280px;\n    margin: 0 auto;\n    padding: 28px;\n}\n\n.view-head {\n    display: flex;\n    align-items: flex-end;\n    justify-content: space-between;\n    gap: 20px;\n    margin-bottom: 22px;\n}\n\n.eyebrow {\n    margin: 0 0 4px;\n    color: var(--text-muted);\n    font-size: 11px;\n    font-weight: 600;\n    letter-spacing: 0.08em;\n    text-transform: uppercase;\n}\n\n.page-title {\n    margin: 0;\n    font-size: 26px;\n    letter-spacing: -0.02em;\n}\n\n.page-subtitle {\n    margin: 6px 0 0;\n    color: var(--text-soft);\n    font-size: 13px;\n}\n\n.stats-grid {\n    display: grid;\n    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));\n    gap: 12px;\n    margin-bottom: 20px;\n}\n\n.stat-card {\n    padding: 16px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius);\n    background: var(--panel);\n}\n\n.stat-label {\n    margin: 0;\n    color: var(--text-muted);\n    font-size: 12px;\n}\n\n.stat-value {\n    margin: 6px 0 0;\n    font-size: 24px;\n    font-weight: 700;\n    letter-spacing: -0.02em;\n}\n\n.stat-hint {\n    margin: 4px 0 0;\n    color: var(--text-muted);\n    font-size: 11px;\n}\n\n.layout-two {\n    display: grid;\n    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);\n    gap: 16px;\n    margin-bottom: 20px;\n}\n\n.panel {\n    padding: 18px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius);\n    background: var(--panel);\n}\n\n.panel-head {\n    display: flex;\n    align-items: center;\n    justify-content: space-between;\n    gap: 12px;\n    margin-bottom: 12px;\n}\n\n.panel-title {\n    margin: 0;\n    font-size: 15px;\n    font-weight: 700;\n}\n\n.panel-sub {\n    margin: 2px 0 0;\n    color: var(--text-muted);\n    font-size: 12px;\n}\n\n.kv {\n    display: grid;\n    grid-template-columns: 92px minmax(0, 1fr);\n    gap: 7px 12px;\n    margin: 0;\n    font-size: 13px;\n}\n\n.kv dt {\n    color: var(--text-muted);\n}\n\n.kv dd {\n    margin: 0;\n    overflow-wrap: anywhere;\n}\n\n.badge {\n    display: inline-flex;\n    align-items: center;\n    gap: 5px;\n    padding: 2px 8px;\n    border-radius: 99px;\n    background: var(--bg-soft);\n    color: var(--text-soft);\n    font-size: 11px;\n    font-weight: 600;\n    white-space: nowrap;\n}\n\n.badge.status-succeeded {\n    background: var(--green-soft);\n    color: var(--green);\n}\n\n.badge.status-running {\n    background: var(--accent-soft);\n    color: var(--accent);\n}\n\n.badge.status-queued {\n    background: var(--amber-soft);\n    color: var(--amber);\n}\n\n.badge.status-failed {\n    background: var(--red-soft);\n    color: var(--red);\n}\n\n.badge.status-cancelled,\n.badge.status-interrupted {\n    background: var(--violet-soft);\n    color: var(--violet);\n}\n\n.badge.kind-video {\n    background: var(--violet-soft);\n    color: var(--violet);\n}\n\n.badge.kind-image {\n    background: var(--green-soft);\n    color: var(--green);\n}\n\n.badge.kind-audio {\n    background: var(--amber-soft);\n    color: var(--amber);\n}\n\n.badge.kind-json,\n.badge.kind-text {\n    background: var(--accent-soft);\n    color: var(--accent);\n}\n\n.muted {\n    color: var(--text-muted);\n}\n\n.mono {\n    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;\n    font-size: 12px;\n}\n\n.section-head {\n    display: flex;\n    align-items: center;\n    justify-content: space-between;\n    gap: 12px;\n    margin: 24px 0 12px;\n}\n\n.section-title {\n    margin: 0;\n    font-size: 16px;\n    font-weight: 700;\n}\n\n.section-meta {\n    color: var(--text-muted);\n    font-size: 12px;\n}\n\n.grid {\n    display: grid;\n    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));\n    gap: 14px;\n}\n\n.card {\n    overflow: hidden;\n    border: 1px solid var(--border);\n    border-radius: var(--radius);\n    background: var(--panel);\n}\n\n.card-body {\n    padding: 13px 14px 14px;\n}\n\n.card-title {\n    margin: 0;\n    overflow: hidden;\n    font-size: 14px;\n    font-weight: 700;\n    text-overflow: ellipsis;\n    white-space: nowrap;\n}\n\n.card-meta {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 6px 10px;\n    margin-top: 7px;\n    color: var(--text-muted);\n    font-size: 11px;\n}\n\n.card-actions {\n    display: flex;\n    flex-wrap: wrap;\n    gap: 8px;\n    margin-top: 12px;\n}\n\n.artifact-card {\n    display: flex;\n    flex-direction: column;\n}\n\n.artifact-preview {\n    position: relative;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    aspect-ratio: 16 / 10;\n    overflow: hidden;\n    background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 10%, var(--bg-soft)), var(--bg-soft));\n}\n\n.artifact-preview video,\n.artifact-preview img {\n    width: 100%;\n    height: 100%;\n    object-fit: cover;\n}\n\n.artifact-preview .preview-icon {\n    font-size: 38px;\n    opacity: 0.65;\n}\n\n.artifact-preview .preview-note {\n    position: absolute;\n    inset: auto 8px 8px;\n    padding: 4px 8px;\n    border-radius: 8px;\n    background: rgba(0, 0, 0, 0.62);\n    color: #fff;\n    font-size: 11px;\n    text-align: center;\n}\n\n.play-button {\n    position: absolute;\n    display: inline-flex;\n    align-items: center;\n    justify-content: center;\n    width: 46px;\n    height: 46px;\n    border: 0;\n    border-radius: 50%;\n    background: rgba(0, 0, 0, 0.62);\n    color: #fff;\n    cursor: pointer;\n    font-size: 18px;\n}\n\n.play-button:hover {\n    background: var(--accent);\n}\n\n.button {\n    display: inline-flex;\n    align-items: center;\n    justify-content: center;\n    gap: 6px;\n    padding: 6px 11px;\n    border: 1px solid var(--border-strong);\n    border-radius: 8px;\n    background: var(--panel-strong);\n    cursor: pointer;\n    font-size: 12px;\n    font-weight: 600;\n}\n\n.button:hover {\n    border-color: var(--accent);\n    color: var(--accent);\n}\n\n.button.primary {\n    border-color: var(--accent);\n    background: var(--accent);\n    color: #fff;\n}\n\n.button.primary:hover {\n    color: #fff;\n    filter: brightness(1.06);\n}\n\n.button.ghost {\n    border-color: transparent;\n    background: transparent;\n    color: var(--text-soft);\n}\n\n.button:disabled {\n    cursor: not-allowed;\n    opacity: 0.4;\n}\n\n.icon-button {\n    display: inline-flex;\n    align-items: center;\n    justify-content: center;\n    width: 34px;\n    height: 34px;\n    border: 1px solid var(--border);\n    border-radius: 9px;\n    background: transparent;\n    cursor: pointer;\n    font-size: 20px;\n    line-height: 1;\n}\n\n.filter-bar {\n    display: flex;\n    flex-wrap: wrap;\n    gap: 10px;\n    margin-bottom: 16px;\n    padding: 12px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius);\n    background: var(--panel);\n}\n\n.field {\n    display: flex;\n    flex-direction: column;\n    gap: 4px;\n}\n\n.field-label {\n    color: var(--text-muted);\n    font-size: 11px;\n    font-weight: 600;\n}\n\n.input,\n.select {\n    min-width: 140px;\n    padding: 7px 9px;\n    border: 1px solid var(--border);\n    border-radius: 8px;\n    background: var(--bg-elevated);\n    font-size: 12px;\n}\n\n.input:focus,\n.select:focus {\n    border-color: var(--accent);\n    outline: 2px solid var(--accent-soft);\n}\n\n.input.search {\n    min-width: 210px;\n}\n\n.shot-card {\n    display: flex;\n    flex-direction: column;\n    gap: 10px;\n    padding: 14px;\n}\n\n.shot-title {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: baseline;\n    gap: 8px;\n    min-width: 0;\n}\n\n.shot-head {\n    display: flex;\n    align-items: flex-start;\n    justify-content: space-between;\n    gap: 10px;\n}\n\n.shot-id {\n    font-size: 18px;\n    font-weight: 800;\n    letter-spacing: -0.02em;\n}\n\n.shot-slug {\n    color: var(--text-muted);\n    font-size: 12px;\n}\n\n.prompt {\n    display: -webkit-box;\n    overflow: hidden;\n    margin: 0;\n    color: var(--text-soft);\n    font-size: 12px;\n    -webkit-box-orient: vertical;\n    -webkit-line-clamp: 3;\n}\n\n.meta-row {\n    display: flex;\n    flex-wrap: wrap;\n    gap: 6px 12px;\n    color: var(--text-muted);\n    font-size: 11px;\n}\n\n.task-list {\n    display: flex;\n    flex-direction: column;\n    gap: 10px;\n}\n\n.task-card {\n    padding: 14px 16px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius);\n    background: var(--panel);\n}\n\n.task-head {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    justify-content: space-between;\n    gap: 10px;\n}\n\n.task-title {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 8px;\n    min-width: 0;\n}\n\n.task-command {\n    margin: 0;\n    font-size: 14px;\n    font-weight: 700;\n}\n\n.task-meta {\n    display: flex;\n    flex-wrap: wrap;\n    gap: 6px 12px;\n    margin-top: 7px;\n    color: var(--text-muted);\n    font-size: 11px;\n}\n\n.task-detail {\n    margin-top: 14px;\n    padding-top: 14px;\n    border-top: 1px dashed var(--border);\n}\n\n.task-detail h4 {\n    margin: 0 0 8px;\n    font-size: 13px;\n}\n\n.run-list {\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n    margin: 0;\n    padding: 0;\n    list-style: none;\n}\n\n.run-item {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    justify-content: space-between;\n    gap: 8px;\n    padding: 8px 10px;\n    border-radius: 8px;\n    background: var(--bg-soft);\n    font-size: 12px;\n}\n\n.run-main {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 8px;\n    min-width: 0;\n}\n\n.events {\n    display: flex;\n    flex-direction: column;\n    gap: 4px;\n    max-height: 320px;\n    margin: 0;\n    padding: 0;\n    overflow: auto;\n    list-style: none;\n}\n\n.event {\n    display: grid;\n    grid-template-columns: 48px 132px minmax(0, 1fr);\n    gap: 8px;\n    padding: 4px 6px;\n    border-radius: 6px;\n    color: var(--text-soft);\n    font-size: 11px;\n}\n\n.event:nth-child(odd) {\n    background: var(--bg-soft);\n}\n\n.event-time {\n    color: var(--text-muted);\n}\n\n.event-type {\n    font-weight: 600;\n}\n\n.event-data {\n    overflow: hidden;\n    color: var(--text-muted);\n    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;\n    text-overflow: ellipsis;\n    white-space: nowrap;\n}\n\n.table-list {\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n}\n\n.table-row {\n    display: grid;\n    grid-template-columns: minmax(150px, 1.4fr) 80px 80px 90px minmax(0, 1fr);\n    gap: 10px;\n    align-items: center;\n    padding: 11px 14px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius-sm);\n    background: var(--panel);\n    font-size: 12px;\n}\n\n.table-row.header {\n    border-color: transparent;\n    background: transparent;\n    color: var(--text-muted);\n    font-size: 11px;\n    font-weight: 600;\n}\n\n.workflow-name {\n    font-weight: 700;\n}\n\n.final-card .artifact-preview {\n    aspect-ratio: 16 / 9;\n}\n\n.empty {\n    padding: 42px 20px;\n    border: 1px dashed var(--border-strong);\n    border-radius: var(--radius);\n    background: var(--panel);\n    color: var(--text-muted);\n    text-align: center;\n}\n\n.empty-title {\n    margin: 0 0 5px;\n    color: var(--text-soft);\n    font-size: 15px;\n    font-weight: 700;\n}\n\n.empty-body {\n    margin: 0;\n    font-size: 12px;\n}\n\n.loading {\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    gap: 10px;\n    padding: 60px 20px;\n    color: var(--text-muted);\n    font-size: 13px;\n}\n\n.spinner {\n    width: 18px;\n    height: 18px;\n    border: 2px solid var(--border);\n    border-top-color: var(--accent);\n    border-radius: 50%;\n    animation: spin 0.8s linear infinite;\n}\n\n@keyframes spin {\n    to {\n        transform: rotate(360deg);\n    }\n}\n\n.error-banner {\n    margin-bottom: 16px;\n    padding: 10px 13px;\n    border: 1px solid color-mix(in srgb, var(--red) 35%, var(--border));\n    border-radius: var(--radius-sm);\n    background: var(--red-soft);\n    color: var(--red);\n    font-size: 12px;\n}\n\n.callout {\n    margin-bottom: 18px;\n    padding: 13px 15px;\n    border: 1px solid var(--border);\n    border-left: 3px solid var(--amber);\n    border-radius: var(--radius-sm);\n    background: var(--amber-soft);\n    color: var(--text-soft);\n    font-size: 12px;\n}\n\n.callout strong {\n    color: var(--text);\n}\n\n.modal {\n    position: fixed;\n    inset: 0;\n    z-index: 50;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    padding: 24px;\n}\n\n.modal-backdrop {\n    position: absolute;\n    inset: 0;\n    background: rgba(7, 10, 16, 0.72);\n    backdrop-filter: blur(4px);\n}\n\n.modal-panel {\n    position: relative;\n    display: flex;\n    flex-direction: column;\n    width: min(100%, 980px);\n    max-height: calc(100vh - 48px);\n    overflow: hidden;\n    border: 1px solid var(--border-strong);\n    border-radius: 18px;\n    background: var(--panel-strong);\n    box-shadow: var(--shadow);\n}\n\n.modal-head {\n    display: flex;\n    align-items: flex-start;\n    justify-content: space-between;\n    gap: 16px;\n    padding: 16px 18px;\n    border-bottom: 1px solid var(--border);\n}\n\n.modal-heading h2 {\n    margin: 0;\n    overflow: hidden;\n    font-size: 17px;\n    text-overflow: ellipsis;\n    white-space: nowrap;\n}\n\n.modal-content {\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    min-height: 220px;\n    padding: 16px;\n    overflow: auto;\n    background: #05070a;\n}\n\n.modal-content video,\n.modal-content audio {\n    width: 100%;\n    max-height: calc(100vh - 260px);\n    border-radius: 10px;\n}\n\n.modal-content audio {\n    max-width: 620px;\n}\n\n.modal-content img {\n    max-width: 100%;\n    max-height: calc(100vh - 250px);\n    border-radius: 10px;\n    object-fit: contain;\n}\n\n.modal-content pre {\n    width: 100%;\n    max-height: calc(100vh - 260px);\n    margin: 0;\n    padding: 16px;\n    overflow: auto;\n    border-radius: 10px;\n    background: #0d1117;\n    color: #d6deeb;\n    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;\n    font-size: 12px;\n    line-height: 1.6;\n    white-space: pre-wrap;\n}\n\n.modal-foot {\n    display: flex;\n    align-items: center;\n    justify-content: space-between;\n    gap: 12px;\n    padding: 10px 16px;\n    border-top: 1px solid var(--border);\n}\n\n.toast {\n    position: fixed;\n    right: 24px;\n    bottom: 24px;\n    z-index: 60;\n    max-width: 360px;\n    padding: 10px 14px;\n    border: 1px solid var(--border-strong);\n    border-radius: 10px;\n    background: var(--panel-strong);\n    box-shadow: var(--shadow);\n    font-size: 12px;\n}\n\n.toast.error {\n    border-color: color-mix(in srgb, var(--red) 45%, var(--border));\n    color: var(--red);\n}\n\n.profile-panel {\n    margin-bottom: 20px;\n}\n\n.profile-synopsis {\n    margin: 0 0 14px;\n    padding: 12px 14px;\n    border-left: 3px solid var(--accent);\n    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;\n    background: var(--accent-soft);\n    color: var(--text-soft);\n    font-size: 13px;\n    line-height: 1.65;\n}\n\n.entity-section {\n    margin-bottom: 8px;\n}\n\n.entity-grid {\n    display: grid;\n    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));\n    gap: 12px;\n}\n\n.entity-card {\n    padding: 14px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius);\n    background: var(--panel);\n}\n\n.entity-head {\n    display: flex;\n    align-items: center;\n    justify-content: space-between;\n    gap: 10px;\n}\n\n.entity-name {\n    margin: 0;\n    font-size: 15px;\n    font-weight: 700;\n}\n\n.entity-desc {\n    margin: 8px 0 0;\n    color: var(--text-soft);\n    font-size: 12px;\n    line-height: 1.6;\n}\n\n.entity-ref {\n    margin: 6px 0 0;\n    color: var(--text-muted);\n    font-size: 11px;\n}\n\n.chip-row {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 6px;\n}\n\n.chip {\n    display: inline-flex;\n    align-items: center;\n    padding: 3px 8px;\n    border: 1px solid var(--border);\n    border-radius: 99px;\n    background: var(--bg-soft);\n    color: var(--text-soft);\n    font-size: 11px;\n    white-space: nowrap;\n}\n\n.chip-small {\n    padding: 2px 7px;\n    font-size: 10px;\n}\n\n.chip-character {\n    border-color: color-mix(in srgb, var(--green) 30%, var(--border));\n    background: var(--green-soft);\n    color: var(--green);\n}\n\n.chip-scene {\n    border-color: color-mix(in srgb, var(--violet) 30%, var(--border));\n    background: var(--violet-soft);\n    color: var(--violet);\n}\n\n.storyboard-section {\n    margin-top: 8px;\n}\n\n.storyboard-list {\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n}\n\n.storyboard-row {\n    display: grid;\n    grid-template-columns: 96px minmax(220px, 1.8fr) 120px minmax(140px, 1fr) 110px;\n    gap: 12px;\n    align-items: center;\n    padding: 12px 14px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius-sm);\n    background: var(--panel);\n    font-size: 12px;\n}\n\n.storyboard-header {\n    padding-top: 0;\n    padding-bottom: 4px;\n    border-color: transparent;\n    background: transparent;\n    color: var(--text-muted);\n    font-size: 11px;\n    font-weight: 600;\n}\n\n.storyboard-id-cell {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 6px;\n}\n\n.storyboard-id {\n    font-size: 16px;\n    font-weight: 800;\n    letter-spacing: -0.02em;\n}\n\n.storyboard-content {\n    min-width: 0;\n}\n\n.storyboard-title {\n    overflow: hidden;\n    font-weight: 700;\n    text-overflow: ellipsis;\n    white-space: nowrap;\n}\n\n.storyboard-summary {\n    display: -webkit-box;\n    overflow: hidden;\n    margin: 3px 0 0;\n    color: var(--text-muted);\n    font-size: 11px;\n    -webkit-box-orient: vertical;\n    -webkit-line-clamp: 2;\n}\n\n.storyboard-artifacts {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 6px;\n}\n\n.shot-grid {\n    grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));\n}\n\n.shot-card-rich {\n    gap: 12px;\n}\n\n.shot-title-text {\n    overflow: hidden;\n    font-size: 15px;\n    font-weight: 700;\n    text-overflow: ellipsis;\n    white-space: nowrap;\n}\n\n.shot-summary {\n    margin: 0;\n    color: var(--text-soft);\n    font-size: 13px;\n    line-height: 1.7;\n}\n\n.shot-line {\n    display: flex;\n    align-items: flex-start;\n    gap: 10px;\n}\n\n.shot-line-label {\n    flex: none;\n    padding-top: 3px;\n    color: var(--text-muted);\n    font-size: 11px;\n    font-weight: 600;\n}\n\n.shot-meta-grid {\n    display: flex;\n    flex-wrap: wrap;\n    gap: 6px 12px;\n    padding: 10px 12px;\n    border-radius: var(--radius-sm);\n    background: var(--bg-soft);\n    color: var(--text-muted);\n    font-size: 11px;\n}\n\n.shot-prompt,\n.shot-runs {\n    border-top: 1px dashed var(--border);\n    padding-top: 10px;\n}\n\n.shot-prompt summary,\n.shot-runs summary {\n    color: var(--text-soft);\n    cursor: pointer;\n    font-size: 12px;\n    font-weight: 600;\n}\n\n.shot-prompt p {\n    margin: 8px 0 0;\n    color: var(--text-soft);\n    font-size: 12px;\n    line-height: 1.7;\n    white-space: pre-wrap;\n}\n\n.shot-notes {\n    margin: 0;\n    color: var(--text-muted);\n    font-size: 12px;\n}\n\n.shot-section-head {\n    display: flex;\n    align-items: center;\n    justify-content: space-between;\n    gap: 10px;\n    margin-top: 4px;\n}\n\n.shot-section-head h4 {\n    margin: 0;\n    font-size: 13px;\n}\n\n.artifact-list {\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n}\n\n.artifact-row {\n    display: grid;\n    grid-template-columns: 84px minmax(0, 1fr) auto;\n    gap: 10px;\n    align-items: center;\n    padding: 8px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius-sm);\n    background: var(--bg-elevated);\n}\n\n.artifact-thumb {\n    position: relative;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    width: 84px;\n    height: 56px;\n    overflow: hidden;\n    border-radius: 7px;\n    background: var(--bg-soft);\n}\n\n.artifact-thumb video,\n.artifact-thumb img {\n    width: 100%;\n    height: 100%;\n    object-fit: cover;\n}\n\n.artifact-thumb-icon {\n    font-size: 22px;\n    opacity: 0.7;\n}\n\n.artifact-thumb-note {\n    position: absolute;\n    inset: auto 3px 3px;\n    padding: 1px 4px;\n    border-radius: 4px;\n    background: rgba(0, 0, 0, 0.65);\n    color: #fff;\n    font-size: 9px;\n    text-align: center;\n}\n\n.artifact-info {\n    min-width: 0;\n}\n\n.artifact-name {\n    overflow: hidden;\n    font-size: 12px;\n    font-weight: 700;\n    text-overflow: ellipsis;\n    white-space: nowrap;\n}\n\n.artifact-meta {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 5px 8px;\n    margin-top: 4px;\n    color: var(--text-muted);\n    font-size: 10px;\n}\n\n.artifact-row-actions {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 4px;\n}\n\n@media (max-width: 980px) {\n    .app-shell {\n        grid-template-columns: 1fr;\n    }\n\n    .sidebar {\n        position: static;\n        display: block;\n        height: auto;\n        padding: 16px;\n        border-right: 0;\n        border-bottom: 1px solid var(--border);\n    }\n\n    .brand-sub,\n    .sidebar-foot {\n        display: none;\n    }\n\n    .nav {\n        flex-direction: row;\n        flex-wrap: wrap;\n        margin-top: 12px;\n    }\n\n    .nav-item {\n        width: auto;\n        padding: 7px 10px;\n    }\n\n    .nav-hint {\n        display: none;\n    }\n\n    .topbar {\n        padding: 12px 18px;\n    }\n\n    .content {\n        padding: 18px;\n    }\n\n    .stats-grid {\n        grid-template-columns: repeat(2, minmax(0, 1fr));\n    }\n\n    .layout-two {\n        grid-template-columns: 1fr;\n    }\n\n    .shot-grid {\n        grid-template-columns: 1fr;\n    }\n\n    .storyboard-row {\n        grid-template-columns: 1fr;\n        gap: 6px;\n    }\n\n    .storyboard-header {\n        display: none;\n    }\n\n    .artifact-row {\n        grid-template-columns: 72px minmax(0, 1fr);\n    }\n\n    .artifact-row-actions {\n        grid-column: 1 / -1;\n        justify-content: flex-end;\n    }\n\n    .table-row {\n        grid-template-columns: minmax(0, 1fr) 70px 70px;\n    }\n\n    .table-row.header span:nth-child(n + 3) {\n        display: none;\n    }\n}\n\n@media (max-width: 560px) {\n    .stats-grid {\n        grid-template-columns: 1fr;\n    }\n\n    .grid {\n        grid-template-columns: 1fr;\n    }\n\n    .entity-grid {\n        grid-template-columns: 1fr;\n    }\n\n    .artifact-row {\n        grid-template-columns: 64px minmax(0, 1fr);\n    }\n\n    .artifact-thumb {\n        width: 64px;\n        height: 46px;\n    }\n\n    .view-head {\n        align-items: flex-start;\n        flex-direction: column;\n    }\n\n    .modal {\n        padding: 8px;\n    }\n\n    .modal-panel {\n        max-height: calc(100vh - 16px);\n        border-radius: 12px;\n    }\n\n    .event {\n        grid-template-columns: 38px 100px minmax(0, 1fr);\n    }\n}\n\n/* ---- story / episode ---- */\n.episode-card {\n    min-height: 100%;\n}\n\n.script-text {\n    margin: 0 0 18px;\n    padding: 16px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius-sm);\n    background: var(--panel);\n    color: var(--text);\n    font-family: "SFMono-Regular", ui-monospace, Menlo, Consolas, monospace;\n    font-size: 12.5px;\n    line-height: 1.7;\n    white-space: pre-wrap;\n    word-break: break-word;\n    max-height: 460px;\n    overflow: auto;\n}\n\n.form-block {\n    margin-top: 14px;\n    padding-top: 12px;\n    border-top: 1px solid var(--border);\n}\n\n.form-title {\n    margin: 0 0 8px;\n    font-size: 13px;\n    color: var(--text-soft);\n}\n\n.asset-tile,\n.asset-compact {\n    display: flex;\n    flex-direction: column;\n    gap: 6px;\n    min-width: 0;\n}\n\n.asset-tile img,\n.asset-compact img {\n    width: 100%;\n    max-height: 220px;\n    object-fit: contain;\n    border-radius: var(--radius-sm);\n    background: var(--bg-soft);\n    border: 1px solid var(--border);\n}\n\n.asset-compact img {\n    max-height: 96px;\n}\n\n.asset-tile audio,\n.asset-compact audio {\n    width: 100%;\n}\n\n.asset-name {\n    font-size: 10.5px;\n    color: var(--text-muted);\n    overflow: hidden;\n    text-overflow: ellipsis;\n    white-space: nowrap;\n}\n\n.asset-thumb {\n    display: block;\n    width: 100%;\n    padding: 0;\n    border: 0;\n    background: none;\n    border-radius: var(--radius-sm);\n    cursor: zoom-in;\n}\n\n.asset-thumb:focus-visible {\n    outline: 2px solid var(--accent);\n    outline-offset: 2px;\n}\n\n.asset-thumb:hover img {\n    filter: brightness(1.08);\n}\n\n.asset-missing {\n    display: inline-flex;\n    align-items: center;\n    min-height: 64px;\n    padding: 10px 12px;\n    border: 1px dashed var(--border-strong);\n    border-radius: var(--radius-sm);\n    color: var(--text-muted);\n    font-size: 12px;\n    background: var(--bg-soft);\n}\n\n.asset-row {\n    display: grid;\n    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));\n    gap: 8px;\n    margin-top: 8px;\n}\n\n.mini-list {\n    margin: 8px 0 0;\n    padding-left: 18px;\n    color: var(--text-soft);\n    font-size: 12.5px;\n    line-height: 1.65;\n}\n\n.text-warn {\n    color: var(--amber);\n}\n\n.callout.warn {\n    border-color: var(--amber);\n    background: var(--amber-soft);\n}\n\n.task-list {\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n    margin-bottom: 18px;\n}\n\n.task-row {\n    display: flex;\n    align-items: center;\n    gap: 12px;\n    padding: 10px 12px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius-sm);\n    background: var(--panel);\n    font-size: 12.5px;\n}\n\n.task-row > span:nth-child(2) {\n    flex: 1;\n    min-width: 0;\n    overflow: hidden;\n    text-overflow: ellipsis;\n    white-space: nowrap;\n    color: var(--text-soft);\n}\n\n.quote {\n    margin: 10px 0 0;\n    padding: 8px 12px;\n    border-left: 3px solid var(--violet);\n    background: var(--violet-soft);\n    color: var(--text-soft);\n    font-size: 12.5px;\n    line-height: 1.6;\n}\n\n.badge.stage-script,\n.badge.stage-breakdown {\n    background: var(--amber-soft);\n    color: var(--amber);\n}\n\n.badge.stage-assets,\n.badge.stage-storyboard,\n.badge.stage-workflow {\n    background: var(--violet-soft);\n    color: var(--violet);\n}\n\n.badge.stage-ready,\n.badge.stage-wrapped {\n    background: var(--green-soft);\n    color: var(--green);\n}\n\n/* \u5267\u60C5\u56FE\u8C31 */\n.map-section {\n    margin-top: 18px;\n    padding: 18px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius);\n    background: var(--panel);\n}\n\n.map-section .section-head {\n    align-items: flex-start;\n}\n\n.map-subtitle {\n    margin: 6px 0 0;\n    color: var(--text-muted);\n    font-size: 12px;\n}\n\n.map-origin {\n    margin: 8px 0 0;\n    color: var(--text-muted);\n    font-size: 11.5px;\n}\n\n.map-tabs {\n    display: inline-flex;\n    gap: 4px;\n    padding: 3px;\n    border: 1px solid var(--border);\n    border-radius: 999px;\n    background: var(--bg-soft);\n}\n\n.map-tab {\n    padding: 5px 12px;\n    border: 0;\n    border-radius: 999px;\n    background: transparent;\n    color: var(--text-soft);\n    font-size: 12px;\n    cursor: pointer;\n}\n\n.map-tab.is-active {\n    background: var(--panel-strong);\n    color: var(--text);\n    box-shadow: 0 1px 4px rgba(20, 28, 44, 0.12);\n}\n\n.map-warning {\n    margin-top: 12px;\n}\n\n.map-body {\n    margin-top: 14px;\n}\n\n.map-toolbar {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    justify-content: space-between;\n    gap: 10px;\n    margin-bottom: 12px;\n}\n\n.map-toolbar-group {\n    display: flex;\n    flex-wrap: wrap;\n    gap: 6px;\n}\n\n.map-toggle.is-active {\n    border-color: var(--accent);\n    background: var(--accent-soft);\n    color: var(--accent);\n}\n\n.map-filter {\n    display: inline-flex;\n    align-items: center;\n    gap: 6px;\n    padding: 4px 10px;\n    border-radius: 999px;\n    background: var(--accent-soft);\n    color: var(--accent);\n    font-size: 12px;\n}\n\n.map-filter-clear {\n    padding: 0;\n    border: 0;\n    background: transparent;\n    color: inherit;\n    font-size: 14px;\n    line-height: 1;\n    cursor: pointer;\n}\n\n.map-graph-wrap {\n    overflow-x: auto;\n    border: 1px solid var(--border);\n    border-radius: var(--radius-sm);\n    background: var(--bg-soft);\n}\n\n.map-graph {\n    display: block;\n    width: 100%;\n    min-width: 620px;\n    height: auto;\n}\n\n.map-node {\n    cursor: pointer;\n    outline: none;\n}\n\n.map-node-bg {\n    fill: var(--panel);\n    stroke: var(--border-strong);\n    stroke-width: 1;\n}\n\n.map-node.status-warn .map-node-bg {\n    stroke: var(--amber);\n    stroke-width: 1.5;\n}\n\n.map-node.is-focus .map-node-bg {\n    fill: var(--accent-soft);\n    stroke: var(--accent);\n    stroke-width: 2;\n}\n\n.map-node.is-dim {\n    opacity: 0.28;\n}\n\n.map-node:focus-visible .map-node-bg {\n    stroke: var(--accent);\n    stroke-width: 2;\n}\n\n.map-node-avatar {\n    fill: var(--accent-soft);\n    stroke: var(--accent);\n    stroke-width: 1;\n}\n\n.map-node-initial {\n    fill: var(--accent);\n    font-size: 12px;\n    font-weight: 700;\n}\n\n.map-node-name {\n    fill: var(--text);\n    font-size: 12px;\n    font-weight: 600;\n}\n\n.map-node-sub {\n    fill: var(--text-muted);\n    font-size: 10px;\n}\n\n.map-edge {\n    fill: none;\n    stroke: var(--border-strong);\n    stroke-linecap: round;\n}\n\n.map-edge.is-dim {\n    opacity: 0.08 !important;\n}\n\n.map-cooccur {\n    fill: none;\n    stroke: var(--text-muted);\n    stroke-dasharray: 3 4;\n    stroke-width: 1;\n    opacity: 0.4;\n}\n\n.map-relation {\n    fill: none;\n    stroke: var(--accent);\n    stroke-dasharray: 5 4;\n    stroke-width: 1.4;\n    opacity: 0.75;\n}\n\n.map-relation-label {\n    fill: var(--accent);\n    font-size: 9px;\n}\n\n.map-legend {\n    display: flex;\n    flex-wrap: wrap;\n    gap: 14px;\n    margin-top: 8px;\n    color: var(--text-muted);\n    font-size: 11px;\n}\n\n.map-detail {\n    margin-top: 12px;\n    padding-top: 12px;\n    border-top: 1px solid var(--border);\n}\n\n.map-detail-head {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 8px;\n    margin-bottom: 8px;\n}\n\n.map-detail-head strong {\n    margin-right: auto;\n}\n\n.map-detail-section {\n    margin-top: 10px;\n}\n\n.map-detail-label {\n    margin: 0 0 6px;\n    color: var(--text-soft);\n    font-size: 12px;\n    font-weight: 600;\n}\n\n.map-row {\n    display: flex;\n    gap: 10px;\n    padding: 3px 0;\n    font-size: 12px;\n}\n\n.map-row-label {\n    flex: 0 0 84px;\n    color: var(--text-muted);\n}\n\n.map-row-value {\n    min-width: 0;\n    color: var(--text-soft);\n    overflow-wrap: anywhere;\n}\n\n.map-assets {\n    display: flex;\n    flex-wrap: wrap;\n    gap: 8px;\n    margin: 6px 0 2px;\n}\n\n.map-asset {\n    display: inline-flex;\n    align-items: center;\n}\n\n.map-asset-thumb {\n    display: inline-flex;\n    align-items: center;\n    gap: 6px;\n    padding: 3px 7px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius-sm);\n    background: var(--bg-soft);\n    color: var(--text-soft);\n    font-size: 10.5px;\n    cursor: zoom-in;\n}\n\n.map-asset-thumb img {\n    width: 34px;\n    height: 34px;\n    object-fit: cover;\n    border-radius: 5px;\n}\n\n.map-asset-missing {\n    display: inline-flex;\n    align-items: center;\n    padding: 4px 8px;\n    border: 1px dashed var(--border-strong);\n    border-radius: var(--radius-sm);\n    color: var(--amber);\n    font-size: 10.5px;\n}\n\n.map-slots {\n    display: flex;\n    flex-direction: column;\n    gap: 5px;\n}\n\n.map-slot {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 8px;\n    padding: 6px 8px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius-sm);\n    background: var(--bg-soft);\n    font-size: 11.5px;\n}\n\n.map-gap {\n    display: grid;\n    grid-template-columns: 140px 1fr;\n    gap: 4px 10px;\n    padding: 6px 8px;\n    border-left: 3px solid var(--amber);\n    background: var(--amber-soft);\n    font-size: 11.5px;\n}\n\n.map-gap.is-blocker {\n    border-left-color: var(--red);\n    background: var(--red-soft);\n}\n\n.map-gap .muted {\n    grid-column: 2;\n}\n\n.timeline-overview {\n    display: flex;\n    gap: 2px;\n    height: 22px;\n    margin-bottom: 12px;\n    overflow: hidden;\n    border-radius: 7px;\n    background: var(--bg-soft);\n}\n\n.timeline-seg {\n    min-width: 3px;\n    padding: 0;\n    border: 0;\n    background: var(--scene-other);\n    cursor: pointer;\n}\n\n.timeline-seg.tone-day {\n    background: var(--scene-day);\n}\n\n.timeline-seg.tone-night {\n    background: var(--scene-night);\n}\n\n.timeline-seg.tone-dusk {\n    background: var(--scene-dusk);\n}\n\n.timeline-seg.tone-dawn {\n    background: var(--scene-dawn);\n}\n\n.timeline-seg.tone-other {\n    background: var(--scene-other);\n}\n\n.timeline-seg.is-major {\n    box-shadow: inset 0 3px 0 var(--accent);\n}\n\n.timeline-list {\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n}\n\n.timeline-event {\n    display: grid;\n    grid-template-columns: 112px minmax(0, 1fr);\n    gap: 12px;\n    padding: 10px 12px;\n    border: 1px solid var(--border);\n    border-left: 3px solid transparent;\n    border-radius: var(--radius-sm);\n    background: var(--bg-soft);\n}\n\n.timeline-event.is-major {\n    border-left-color: var(--accent);\n}\n\n.timeline-event.is-blocked {\n    border-left-color: var(--red);\n    background: var(--red-soft);\n}\n\n.timeline-time {\n    display: flex;\n    flex-direction: column;\n    gap: 3px;\n    font-size: 11px;\n}\n\n.timeline-timecode {\n    color: var(--text);\n    font-size: 12px;\n}\n\n.timeline-story-time {\n    display: inline-block;\n    padding: 2px 6px;\n    border-radius: 999px;\n    background: var(--violet-soft);\n    color: var(--violet);\n    font-size: 10px;\n}\n\n.timeline-main {\n    min-width: 0;\n}\n\n.timeline-title-row {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 6px;\n}\n\n.timeline-title {\n    margin: 0;\n    font-size: 13px;\n}\n\n.timeline-summary {\n    margin: 6px 0;\n    color: var(--text-soft);\n    font-size: 12px;\n}\n\n.timeline-actions {\n    display: flex;\n    gap: 6px;\n    margin-top: 6px;\n}\n\n.timeline-details {\n    margin-top: 8px;\n    border-top: 1px dashed var(--border);\n    padding-top: 6px;\n}\n\n.timeline-details summary {\n    color: var(--text-muted);\n    font-size: 11.5px;\n    cursor: pointer;\n}\n\n.map-event-detail {\n    margin-top: 8px;\n}\n\n.map-chip-button {\n    border: 0;\n    cursor: pointer;\n    font: inherit;\n}\n\n.badge.importance-major,\n.badge.map-ready,\n.badge.map-rendered {\n    background: var(--green-soft);\n    color: var(--green);\n}\n\n.badge.importance-minor,\n.badge.map-pending,\n.badge.map-unknown,\n.badge.map-workflow {\n    background: var(--bg-soft);\n    color: var(--text-muted);\n}\n\n.badge.map-blocked,\n.badge.map-failed {\n    background: var(--red-soft);\n    color: var(--red);\n}\n\n.badge.map-beat {\n    background: var(--violet-soft);\n    color: var(--violet);\n}\n\n.badge.map-slot-ready {\n    background: var(--green-soft);\n    color: var(--green);\n}\n\n.badge.map-slot-blocker {\n    background: var(--red-soft);\n    color: var(--red);\n}\n\n.badge.map-slot-optional {\n    background: var(--bg-soft);\n    color: var(--text-muted);\n}\n\n.badge.map-fit-ready {\n    background: var(--green-soft);\n    color: var(--green);\n}\n\n.badge.map-fit-needs_assets {\n    background: var(--amber-soft);\n    color: var(--amber);\n}\n\n.badge.map-fit-unusable {\n    background: var(--red-soft);\n    color: var(--red);\n}\n\n@media (max-width: 720px) {\n    .map-section {\n        padding: 14px;\n    }\n\n    .timeline-event {\n        grid-template-columns: 1fr;\n        gap: 6px;\n    }\n\n    .timeline-time {\n        flex-direction: row;\n        align-items: center;\n        flex-wrap: wrap;\n    }\n\n    .map-gap {\n        grid-template-columns: 1fr;\n    }\n\n    .map-gap .muted {\n        grid-column: 1;\n    }\n}\n\n.map-tab {\n    white-space: nowrap;\n}\n\n@media (max-width: 720px) {\n    .map-section .section-head {\n        flex-direction: column;\n        align-items: stretch;\n    }\n\n    .map-tabs {\n        align-self: flex-start;\n        margin-top: 10px;\n    }\n}\n';
   }
 });
 
@@ -17899,9 +19649,6 @@ function openBrowser(url) {
     return false;
   }
 }
-function isLoopbackHost2(host) {
-  return host === "127.0.0.1" || host === "localhost" || host === "::1" || host === "[::1]";
-}
 async function runWeb(ctx2, args) {
   const flags = parseArgs4(args);
   const { root, config: project } = requireProject(ctx2);
@@ -17909,7 +19656,7 @@ async function runWeb(ctx2, args) {
   const shots = loadShotsIfExists(root);
   const { COMMANDS: COMMANDS2 } = await Promise.resolve().then(() => (init_registry(), registry_exports));
   const host = flags.host ?? DEFAULT_HOST2;
-  if (!isLoopbackHost2(host)) {
+  if (!isLoopbackHost(host)) {
     warn(`\u76D1\u542C ${host}\uFF1A\u5C40\u57DF\u7F51\u5185\u53EF\u8BBF\u95EE\u9879\u76EE\u4EA7\u51FA\u7269\uFF0C\u8BF7\u786E\u8BA4\u7F51\u7EDC\u73AF\u5883\u53EF\u4FE1`);
   }
   let handle;
@@ -17934,6 +19681,7 @@ async function runWeb(ctx2, args) {
   if (ctx2.json) {
     emitData({
       url: handle.url,
+      urls: handle.urls,
       host: handle.host,
       port: handle.port,
       project: project.name,
@@ -17941,7 +19689,8 @@ async function runWeb(ctx2, args) {
     });
   } else {
     say(`daoyan web \xB7 ${project.name} \xB7 ${machine?.engine.mode ?? "\u672A\u7ED1\u5B9A\u672C\u673A"}`);
-    say(`  ${handle.url}`);
+    for (const url of handle.urls.local) say(`  Local:   ${url}`);
+    for (const url of handle.urls.network) say(`  Network: ${url}`);
     say("  Ctrl+C \u505C\u6B62");
   }
   if (flags.open) openBrowser(handle.url);
@@ -17971,6 +19720,7 @@ var init_web = __esm({
     init_config();
     init_signals();
     init_server();
+    init_addresses();
     init_ui();
     init_app();
     init_style();
@@ -17982,8 +19732,8 @@ var init_web = __esm({
 });
 
 // src/commands/story.mts
-import { existsSync as existsSync37, readFileSync as readFileSync25 } from "fs";
-import { join as join35 } from "path";
+import { existsSync as existsSync38, readFileSync as readFileSync26 } from "fs";
+import { join as join36 } from "path";
 function parseFlags(args, spec) {
   const out = { positionals: [], values: {} };
   for (let i = 0; i < args.length; i++) {
@@ -18016,7 +19766,7 @@ function boolFlag(parsed, name) {
 function readTextInput(file, label) {
   if (file === void 0 || file === "") usageError(`\u9700\u8981 ${label}`);
   try {
-    return readFileSync25(file === "-" ? 0 : file, "utf8");
+    return readFileSync26(file === "-" ? 0 : file, "utf8");
   } catch (e) {
     throw new DaoyanCliError({
       code: "config_invalid",
@@ -18155,10 +19905,10 @@ async function storyEpisode(ctx2, args) {
       {
         episode: meta,
         files: {
-          script_md: existsSync37(join35(dir, "script.md")),
-          script_json: existsSync37(join35(dir, "script.json")),
-          breakdown: existsSync37(join35(dir, "breakdown.json")),
-          shots: existsSync37(join35(dir, "shots.json"))
+          script_md: existsSync38(join36(dir, "script.md")),
+          script_json: existsSync38(join36(dir, "script.json")),
+          breakdown: existsSync38(join36(dir, "breakdown.json")),
+          shots: existsSync38(join36(dir, "shots.json"))
         }
       },
       [`${meta.id}  \u7B2C ${meta.number} \u96C6  ${meta.title}`, meta.summary ?? ""]
@@ -18223,7 +19973,7 @@ async function storyScript(ctx2, args) {
       ...baseText !== void 0 ? { baseRevision: Number(baseText) } : {}
     });
     const stale = ["breakdown", "shots"].filter(
-      (name) => existsSync37(join35(context.dir, name === "breakdown" ? "breakdown.json" : "shots.json"))
+      (name) => existsSync38(join36(context.dir, name === "breakdown" ? "breakdown.json" : "shots.json"))
     );
     output(
       ctx2,
@@ -18306,7 +20056,7 @@ async function storyBreakdown(ctx2, args) {
       });
     }
     const baseSha = strFlag(parsed, "--base-sha256");
-    if (baseSha !== void 0 && existsSync37(context.breakdown_path ?? "")) {
+    if (baseSha !== void 0 && existsSync38(context.breakdown_path ?? "")) {
       if (sha256File(context.breakdown_path) !== baseSha) {
         throw new DaoyanCliError({ code: "story_conflict", message: "breakdown \u5DF2\u88AB\u5176\u5B83\u4FEE\u6539" });
       }
@@ -18396,9 +20146,9 @@ async function storyGlobal(ctx2, kind, args) {
   if (action === "set") {
     const parsed = parseFlags(rest, { "--file": "string", "--base-sha256": "string" });
     if (parsed.positionals.length > 0) usageError(`\u672A\u77E5\u53C2\u6570 ${parsed.positionals.join(" ")}`);
-    const target = kind === "characters" ? join35(root, "story/characters.json") : kind === "scenes" ? join35(root, "story/scenes.json") : join35(root, "story/voices.json");
+    const target = kind === "characters" ? join36(root, "story/characters.json") : kind === "scenes" ? join36(root, "story/scenes.json") : join36(root, "story/voices.json");
     const baseSha = strFlag(parsed, "--base-sha256");
-    if (baseSha !== void 0 && existsSync37(target) && sha256File(target) !== baseSha) {
+    if (baseSha !== void 0 && existsSync38(target) && sha256File(target) !== baseSha) {
       throw new DaoyanCliError({ code: "story_conflict", message: `${kind} \u5DF2\u88AB\u5176\u5B83\u4FEE\u6539` });
     }
     const raw = requireRecord(readJsonInput(strFlag(parsed, "--file"), "--file <json|->"), kind);
@@ -18537,7 +20287,31 @@ async function storyAsset(ctx2, args) {
 }
 async function storyShots(ctx2, args) {
   const [action, ...rest] = args;
-  if (action !== "set") usageError("\u7528\u6CD5\uFF1Adaoyan story shots set --episode <id> --file <shots.json>");
+  if (action === "show") {
+    const parsed2 = parseFlags(rest, { "--episode": "string" });
+    if (parsed2.positionals.length > 0) usageError(`\u672A\u77E5\u53C2\u6570 ${parsed2.positionals.join(" ")}`);
+    const { root: root2 } = requireProject(ctx2);
+    if (!storyEnabled(root2)) {
+      throw new DaoyanCliError({ code: "story_not_found", message: "story \u6A21\u5F0F\u672A\u542F\u7528" });
+    }
+    const context2 = resolveEpisodeContext(root2, strFlag(parsed2, "--episode"));
+    if (context2.legacy || context2.episode_id === null) {
+      throw new DaoyanCliError({ code: "story_not_found", message: "story \u6A21\u5F0F\u672A\u542F\u7528" });
+    }
+    const shots2 = loadEpisodeShots(root2, context2.episode_id);
+    if (shots2 === null) {
+      throw new DaoyanCliError({
+        code: "story_invalid",
+        message: `\u5267\u96C6 ${context2.episode_id} \u6CA1\u6709 shots.json`,
+        hint: `\u5148\u6267\u884C story shots set --episode ${context2.episode_id} --file <shots.json>\u3002`
+      });
+    }
+    output(ctx2, { episode_id: context2.episode_id, path: `${context2.rel_dir}/${SHOTS_FILE}`, shots: shots2 }, [
+      `\u5206\u955C ${context2.episode_id}\uFF1A${shots2.shots.length} \u955C\uFF08script revision ${shots2.meta.script_revision ?? 0}\uFF09`
+    ]);
+    return 0;
+  }
+  if (action !== "set") usageError("\u7528\u6CD5\uFF1Adaoyan story shots show|set --episode <id> [--file <shots.json>]");
   const { root } = requireProject(ctx2);
   if (!storyEnabled(root)) {
     throw new DaoyanCliError({ code: "story_not_found", message: "story \u6A21\u5F0F\u672A\u542F\u7528" });
@@ -18561,7 +20335,7 @@ async function storyShots(ctx2, args) {
     throw new DaoyanCliError({ code: "story_invalid", message: "\u62C6\u89E3\u4E0D\u5B58\u5728\uFF0C\u4E0D\u80FD\u5199\u5206\u955C" });
   }
   const baseSha = strFlag(parsed, "--base-sha256");
-  if (baseSha !== void 0 && existsSync37(context.shots_path) && sha256File(context.shots_path) !== baseSha) {
+  if (baseSha !== void 0 && existsSync38(context.shots_path) && sha256File(context.shots_path) !== baseSha) {
     throw new DaoyanCliError({ code: "story_conflict", message: "shots.json \u5DF2\u88AB\u5176\u5B83\u4FEE\u6539" });
   }
   const raw = requireRecord(readJsonInput(strFlag(parsed, "--file"), "--file <shots.json|->"), "shots");
@@ -18589,6 +20363,145 @@ async function storyShots(ctx2, args) {
     `\u4E0B\u4E00\u6B65\uFF1Adaoyan status --episode ${context.episode_id} --json`
   ]);
   return 0;
+}
+async function storyMap(ctx2, args) {
+  const [action, ...rest] = args;
+  const { root, config } = requireProject(ctx2);
+  if (!storyEnabled(root)) {
+    throw new DaoyanCliError({ code: "story_not_found", message: "story \u6A21\u5F0F\u672A\u542F\u7528" });
+  }
+  if (action === "show") {
+    const parsed = parseFlags(rest, { "--episode": "string", "--raw": "boolean" });
+    if (parsed.positionals.length > 0) usageError(`\u672A\u77E5\u53C2\u6570 ${parsed.positionals.join(" ")}`);
+    const context = resolveEpisodeContext(root, strFlag(parsed, "--episode"));
+    if (context.legacy || context.episode_id === null) {
+      throw new DaoyanCliError({ code: "story_not_found", message: "story \u6A21\u5F0F\u672A\u542F\u7528" });
+    }
+    const path = `${context.rel_dir}/${STORY_MAP_FILE}`;
+    if (boolFlag(parsed, "--raw")) {
+      const doc = loadStoryMap(root, context.episode_id);
+      if (doc === null) {
+        throw new DaoyanCliError({
+          code: "story_invalid",
+          message: `\u5267\u96C6 ${context.episode_id} \u6CA1\u6709 story-map.json`,
+          hint: `\u5148\u6267\u884C story map build --episode ${context.episode_id}\u3002`
+        });
+      }
+      output(ctx2, { episode_id: context.episode_id, path, story_map: doc }, [
+        `\u6807\u6CE8\u6587\u4EF6 ${path}\uFF1A${doc.events.length} \u4E8B\u4EF6 / ${doc.relations.length} \u5173\u7CFB`
+      ]);
+      return 0;
+    }
+    const map = buildStoryMap(root, context.episode_id, config);
+    if (map === null) {
+      throw new DaoyanCliError({ code: "episode_not_found", message: `\u672A\u627E\u5230\u5267\u96C6 ${context.episode_id}` });
+    }
+    output(ctx2, { episode_id: context.episode_id, map }, [
+      `\u5267\u60C5\u56FE\u8C31 ${context.episode_id}\uFF1A${map.events.length} \u4E8B\u4EF6 / ${map.catalog.characters.length} \u89D2\u8272 / ${map.catalog.scenes.length} \u573A\u666F`,
+      `\u53EF\u751F\u6210 ${map.generation.readiness.counts.ready} / \u963B\u585E ${map.generation.readiness.counts.blocked} / \u5DF2\u751F\u6210 ${map.generation.readiness.counts.rendered}`,
+      `\u6765\u6E90\uFF1A${map.origin.annotated ? `${map.origin.author} \u6807\u6CE8` : "dycli \u63A8\u5BFC"}${map.origin.stale ? "\uFF08stale\uFF09" : ""}`,
+      ...map.warnings.slice(0, 5).map((warning) => `  ! [${warning.code}] ${warning.message}`)
+    ]);
+    return 0;
+  }
+  if (action === "build") {
+    const parsed = parseFlags(rest, { "--episode": "string", "--force": "boolean" });
+    if (parsed.positionals.length > 0) usageError(`\u672A\u77E5\u53C2\u6570 ${parsed.positionals.join(" ")}`);
+    const context = resolveEpisodeContext(root, strFlag(parsed, "--episode"));
+    if (context.legacy || context.episode_id === null) {
+      throw new DaoyanCliError({ code: "story_not_found", message: "story \u6A21\u5F0F\u672A\u542F\u7528" });
+    }
+    const result = materializeStoryMap(root, context.episode_id, { force: boolFlag(parsed, "--force") });
+    saveStoryMap(root, context.episode_id, result.doc);
+    output(
+      ctx2,
+      {
+        episode_id: context.episode_id,
+        path: `${context.rel_dir}/${STORY_MAP_FILE}`,
+        events: result.doc.events.length,
+        preserved_annotations: result.preserved,
+        dropped_events: result.dropped,
+        relations: result.doc.relations.length,
+        warnings: result.warnings
+      },
+      [
+        `\u56FE\u8C31\u9AA8\u67B6\u5DF2\u5199\u5165 ${context.episode_id}\uFF1A${result.doc.events.length} \u4E8B\u4EF6\uFF08\u4FDD\u7559 ${result.preserved} \u6761\u6807\u6CE8\uFF0C\u4E22\u5F03 ${result.dropped.length} \u6761\uFF09`,
+        ...result.warnings.map((warning) => `  ! [${warning.code}] ${warning.message}`)
+      ]
+    );
+    return 0;
+  }
+  if (action === "set") {
+    const parsed = parseFlags(rest, {
+      "--episode": "string",
+      "--file": "string",
+      "--source": "string",
+      "--base-sha256": "string"
+    });
+    if (parsed.positionals.length > 0) usageError(`\u672A\u77E5\u53C2\u6570 ${parsed.positionals.join(" ")}`);
+    const sourceText = strFlag(parsed, "--source") ?? "ai";
+    if (sourceText !== "ai" && sourceText !== "user" && sourceText !== "import") {
+      usageError("--source \u5FC5\u987B\u662F ai|user|import");
+    }
+    const context = resolveEpisodeContext(root, strFlag(parsed, "--episode"));
+    if (context.legacy || context.episode_id === null) {
+      throw new DaoyanCliError({ code: "story_not_found", message: "story \u6A21\u5F0F\u672A\u542F\u7528" });
+    }
+    const baseSha = strFlag(parsed, "--base-sha256");
+    const file = storyMapPath(root, context.episode_id);
+    if (baseSha !== void 0 && existsSync38(file) && sha256File(file) !== baseSha) {
+      throw new DaoyanCliError({ code: "story_conflict", message: "story-map.json \u5DF2\u88AB\u5176\u5B83\u4FEE\u6539" });
+    }
+    const shots = loadEpisodeShots(root, context.episode_id);
+    if (shots === null) {
+      throw new DaoyanCliError({
+        code: "story_invalid",
+        message: `\u5267\u96C6 ${context.episode_id} \u6CA1\u6709 shots.json`,
+        hint: `\u5148\u6267\u884C story shots set --episode ${context.episode_id} --file <shots.json>\u3002`
+      });
+    }
+    const characters = loadCharacters(root);
+    const raw = requireRecord(readJsonInput(strFlag(parsed, "--file"), "--file <story-map.json|->"), "story-map");
+    const script = loadScriptMeta(root, context.episode_id);
+    const doc = normalizeStoryMapDoc(
+      raw,
+      context.episode_id,
+      sourceText,
+      storyMapSource(root, context.episode_id, script),
+      shots,
+      characters
+    );
+    saveStoryMap(root, context.episode_id, doc);
+    output(
+      ctx2,
+      {
+        episode_id: context.episode_id,
+        path: `${context.rel_dir}/${STORY_MAP_FILE}`,
+        events: doc.events.length,
+        annotated_events: doc.events.filter((event) => Object.keys(event).length > 1).length,
+        relations: doc.relations.length
+      },
+      [
+        `\u56FE\u8C31\u6807\u6CE8\u5DF2\u5199\u5165 ${context.episode_id}\uFF1A${doc.events.length} \u4E8B\u4EF6 / ${doc.relations.length} \u5173\u7CFB`,
+        `\u4E0B\u4E00\u6B65\uFF1Astory map show --episode ${context.episode_id} --json`
+      ]
+    );
+    return 0;
+  }
+  if (action === "clear") {
+    const parsed = parseFlags(rest, { "--episode": "string" });
+    if (parsed.positionals.length > 0) usageError(`\u672A\u77E5\u53C2\u6570 ${parsed.positionals.join(" ")}`);
+    const context = resolveEpisodeContext(root, strFlag(parsed, "--episode"));
+    if (context.legacy || context.episode_id === null) {
+      throw new DaoyanCliError({ code: "story_not_found", message: "story \u6A21\u5F0F\u672A\u542F\u7528" });
+    }
+    const removed = removeStoryMap(root, context.episode_id);
+    output(ctx2, { episode_id: context.episode_id, removed }, [
+      removed ? `\u5DF2\u5220\u9664 ${context.rel_dir}/${STORY_MAP_FILE}` : `\u6CA1\u6709\u53EF\u5220\u9664\u7684 story-map.json`
+    ]);
+    return 0;
+  }
+  usageError("\u7528\u6CD5\uFF1Adaoyan story map build|show|set|clear --episode <id>");
 }
 async function storyStatus(ctx2, args) {
   const parsed = parseFlags(args, { "--episode": "string" });
@@ -18657,10 +20570,11 @@ async function runStory(ctx2, args) {
   if (sub === "voices") return storyGlobal(ctx2, "voices", rest);
   if (sub === "asset") return storyAsset(ctx2, rest);
   if (sub === "shots") return storyShots(ctx2, rest);
+  if (sub === "map") return storyMap(ctx2, rest);
   if (sub === "status") return storyStatus(ctx2, rest);
   if (sub === "validate") return storyValidate(ctx2, rest);
   usageError(
-    "\u7528\u6CD5\uFF1Adaoyan story init|series|episode|script|breakdown|characters|scenes|voices|asset|shots|status|validate"
+    "\u7528\u6CD5\uFF1Adaoyan story init|series|episode|script|breakdown|characters|scenes|voices|asset|shots|map|status|validate"
   );
 }
 var init_story = __esm({
@@ -18672,10 +20586,12 @@ var init_story = __esm({
     init_args();
     init_fs();
     init_config();
+    init_types();
     init_paths();
     init_store2();
     init_validate();
     init_assets();
+    init_map();
   }
 });
 
@@ -18904,10 +20820,50 @@ var init_registry = __esm({
       {
         name: "story shots",
         group: "story",
-        summary: "\u6821\u9A8C\u5E76\u5199\u5165\u67D0\u4E00\u96C6 shots.json\uFF08\u8BB0\u5F55\u5267\u672C revision\uFF09",
-        usage: "daoyan story shots set --episode <id> --file <shots.json|-> [--json]",
+        summary: "\u8BFB\u53D6 / \u6821\u9A8C\u5E76\u5199\u5165\u67D0\u4E00\u96C6 shots.json\uFF08\u8BB0\u5F55\u5267\u672C revision\uFF09",
+        usage: "daoyan story shots show --episode <id> [--json]\ndaoyan story shots set --episode <id> --file <shots.json|-> [--json]",
+        flags: [
+          { name: "--episode", type: "string", description: "\u5267\u96C6 id\uFF1B\u591A\u96C6\u9879\u76EE\u5FC5\u586B" },
+          { name: "--file", type: "path|-", description: "set\uFF1Ashots JSON \u6587\u4EF6\uFF1B- \u8868\u793A stdin" },
+          { name: "--source-revision", type: "integer", description: "set\uFF1A\u8986\u76D6 source revision" },
+          { name: "--base-sha256", type: "string", description: "set\uFF1A\u5E76\u53D1\u6821\u9A8C\u7684\u5F53\u524D\u6587\u4EF6 sha256" }
+        ],
         implemented: true,
+        jsonShape: { episode_id: "string", path: "string", shots: "object" },
         run: (ctx2, args) => runStory(ctx2, ["shots", ...args])
+      },
+      {
+        name: "story map",
+        group: "story",
+        summary: "\u67E5\u770B\u751F\u6210\u4E0A\u4E0B\u6587 / \u5199\u5165\u5267\u60C5\u56FE\u8C31\u53D9\u4E8B\u6807\u6CE8 / \u751F\u6210\u6807\u6CE8\u9AA8\u67B6",
+        usage: "daoyan story map show --episode <id> [--raw] [--json]\ndaoyan story map build --episode <id> [--force] [--json]\ndaoyan story map set --episode <id> --file <story-map.json|-> [--source ai|user|import] [--base-sha256 <hash>] [--json]\ndaoyan story map clear --episode <id> [--json]",
+        flags: [
+          { name: "--episode", type: "string", description: "\u5267\u96C6 id\uFF1B\u591A\u96C6\u9879\u76EE\u5FC5\u586B" },
+          { name: "--raw", type: "boolean", description: "show\uFF1A\u53EA\u8F93\u51FA story-map.json \u6807\u6CE8\u6587\u4EF6" },
+          { name: "--force", type: "boolean", description: "build\uFF1A\u4E22\u5F03\u65E7\u6807\u6CE8\uFF0C\u91CD\u5EFA\u9AA8\u67B6" },
+          { name: "--file", type: "path|-", description: "set\uFF1Astory-map JSON \u6587\u4EF6\uFF1B- \u8868\u793A stdin" },
+          {
+            name: "--source",
+            type: "ai|user|import",
+            enum: ["ai", "user", "import"],
+            default: "ai",
+            description: "set\uFF1A\u6807\u6CE8\u6765\u6E90"
+          },
+          { name: "--base-sha256", type: "string", description: "set\uFF1A\u5E76\u53D1\u6821\u9A8C\u7684\u5F53\u524D\u6587\u4EF6 sha256" }
+        ],
+        implemented: true,
+        jsonShape: {
+          episode_id: "string",
+          map: {
+            events: "object[]",
+            catalog: "object",
+            graph: "object",
+            generation: "object",
+            relations: "object[]",
+            warnings: "object[]"
+          }
+        },
+        run: (ctx2, args) => runStory(ctx2, ["map", ...args])
       },
       {
         name: "story status",
@@ -19243,6 +21199,7 @@ var init_registry = __esm({
         implemented: true,
         jsonShape: {
           url: "string",
+          urls: { local: "string[]", network: "string[]" },
           host: "string",
           port: "number",
           project: "string",

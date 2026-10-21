@@ -41,6 +41,7 @@ episodes/<id>/episode.json        剧集元数据（id / number / title）
 episodes/<id>/script.md|json      单集剧本与 revision / 审批
 episodes/<id>/breakdown.json      单集拆解（制作范围与允许清单）
 episodes/<id>/shots.json          单集分镜
+episodes/<id>/story-map.json      可选：剧情图谱叙事标注（标题 / 重要度 / 故事时间 / 关系）
 final/<episode-id>/cut-*          单集成片
 ```
 
@@ -52,6 +53,45 @@ final/<episode-id>/cut-*          单集成片
 - task/run 增加 `episode_id`（legacy / 系列级为 null）；多集 label 为 `ep:<id>:shot:<shot-id>`；
 - `run` 可选 `--episode` 归属；`shot` / `batch` / `retake` / `wrap` 多集必须显式；
 - 完整需求和契约见 [REQUIREMENTS.md](REQUIREMENTS.md)。
+
+#### story-map.json（可选叙事标注）
+
+`episodes/<id>/story-map.json` 只保存叙事信息；时间、场景、角色、形态、资产、workflow 槽位与 run 状态都由 dycli 实时推导，**不写入该文件**。
+
+```json
+{
+  "version": 1,
+  "episode_id": "ep01",
+  "author": "ai",
+  "updated_at": "2026-10-21T12:00:00.000Z",
+  "source": {
+    "script_revision": 3,
+    "script_sha256": "<sha256>",
+    "breakdown_sha256": "<sha256>",
+    "shots_sha256": "<sha256>"
+  },
+  "events": [
+    {
+      "shot_id": "03",
+      "title": "徽章上的编号",
+      "summary": "林默在积水里捡到徽章。",
+      "importance": "major",
+      "story_time": "第一夜 21:40",
+      "note": ""
+    }
+  ],
+  "relations": [
+    { "from": "lin-mo", "to": "a-lan", "kind": "ally", "label": "旧识" }
+  ],
+  "notes": ""
+}
+```
+
+- `events[].shot_id` 必须存在于本集 `shots.json`；允许只标注部分镜头；
+- `importance` 取 `major` / `normal` / `minor`；未标注时由 dycli 推导（场景切换为 major、空镜为 minor）；
+- `relations[].from` / `to` 必须是全局角色 id，不能自引用；
+- 结构字段（`at_seconds` / `scene_id` / `characters` 等）不写入该文件；需要修改结构时改 `shots.json`；
+- 写入统一走 `daoyan story map set`，读取合并走 `daoyan story map show`；Web 只读。
 
 ## 2. project.json（共享）
 

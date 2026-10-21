@@ -209,6 +209,9 @@ test("web：静态页、只读 API、媒体 Range 与关闭", async () => {
         port: 0,
     });
     try {
+        // 本机地址与 handle.url 一致
+        assert.deepEqual(handle.urls.local, [handle.url]);
+        assert.deepEqual(handle.urls.network, []);
         // 静态页
         const page = await fetch(`${handle.url}/`);
         assert.equal(page.status, 200);

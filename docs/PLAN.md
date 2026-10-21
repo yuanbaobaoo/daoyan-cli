@@ -55,7 +55,7 @@ workflows/*.bindings.json    共享（逻辑输入 -> nodeId.input，shot recipe
 workflows/*.assets.json      共享（剧情资产槽位，可选）
 shots.json                   共享（legacy recipe）
 story/                       共享（多集：系列设定集 / 角色 / 场景 / 音色 / 资产）
-episodes/<id>/               共享（单集剧本 / 拆解 / 分镜）
+episodes/<id>/               共享（单集剧本 / 拆解 / 分镜 / 可选 story-map.json 叙事标注）
 tasks/<task_id>/             共享（task.json + events.jsonl）
 runs/<run_id>/               共享（run.json/workflow.json/inputs.json/inputs/outputs）
 final/                       共享（legacy cut-*.mp4 + manifest）
@@ -70,7 +70,7 @@ engine/ logs/                本机
 
 ```text
 init / validate / skill update
-story init|series|episode|script|breakdown|characters|scenes|voices|asset|shots|status|validate
+story init|series|episode|script|breakdown|characters|scenes|voices|asset|shots|map|status|validate
 workflow new|import|list|show|nodes|node|apply|set|validate
 run / run cancel / shot / retake / batch / wrap（story 模式支持 --episode）
 status / logs

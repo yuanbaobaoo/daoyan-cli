@@ -109,7 +109,14 @@ daoyan story asset set-reference --owner <owner> [--form <form>] --id <asset>
 daoyan story asset remove --owner <owner> [--form <form>] --id <asset> [--force]
 daoyan story asset list
 
+daoyan story shots show --episode <id>
 daoyan story shots set --episode <id> --file <shots.json|->
+
+daoyan story map show --episode <id> [--raw]
+daoyan story map build --episode <id> [--force]
+daoyan story map set --episode <id> --file <story-map.json|-> [--source ai|user|import] [--base-sha256 <hash>]
+daoyan story map clear --episode <id>
+
 daoyan story status [--episode <id>]
 daoyan story validate [--episode <id>] [--verify-hashes]
 ```
@@ -123,6 +130,23 @@ daoyan story validate [--episode <id>] [--verify-hashes]
 - `story status` 输出 stage / blockers / next_actions；`shot` / `batch` / `retake` 在 strict 模式按 blockers 阻断；
 - `run` 不受剧情门禁限制，可用 `--episode` 只做归属标记；
 - 工作流资产槽位见 `workflows/<name>.assets.json`，slot 的 `asset` 取 `reference` 或具体 asset id。
+- `story map show --json` 是 AI 生成决策的主契约：返回每镜的角色 / 形态 / 场景 / 参考资产、workflow 候选、槽位解析、连续性、渲染状态与缺口；`story shots show --json` 用于读取完整分镜后修改。
+- `story-map.json` 只保存叙事标注（标题 / 重要度 / 故事时间 / 关系）；结构事实始终以 `shots.json` 为准，不写入标注文件。
+
+### story map
+
+```bash
+daoyan story map show --episode <id> [--raw] [--json]
+daoyan story map build --episode <id> [--force] [--json]
+daoyan story map set --episode <id> --file <story-map.json|-> [--source ai|user|import] [--base-sha256 <hash>] [--json]
+daoyan story map clear --episode <id> [--json]
+```
+
+- `show`：输出合并后的剧情图谱与生成上下文；`--raw` 只输出标注文件；
+- `build`：按当前 `shots.json` 生成标注骨架，保留已有叙事字段；
+- `set`：校验并写入叙事标注；未知 `shot_id` / 未知关系端点会报 `story_invalid`；
+- `clear`：删除标注文件，回到纯自动推导；
+- 标注事件字段：`shot_id`、`title`、`summary`、`importance`（`major|normal|minor`）、`story_time`、`note`；关系字段：`from`、`to`、`kind`、`label`、`note`。
 
 ## 工作流
 

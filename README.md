@@ -89,7 +89,10 @@ dycli --version
 - `daoyan story voices set|show [--file <voices.json|->] [--id <id>] [--json]` — 写入 / 查看全局音色。
 - `daoyan story asset add --owner <character:id|scene:id|voice:id> [--form <form>] --id <asset> (--from <file>|--from-run <run> --output <name>) [--set-reference] [--json]` — 参考图 / 参考音频入库并记录来源。
 - `daoyan story asset set-reference|remove|list ...` — 指定主参考、删除与列出参考资产。
+- `daoyan story shots show --episode <id> [--json]` — 读取某一集完整 `shots.json`（供 AI 修改后写回）。
 - `daoyan story shots set --episode <id> --file <shots.json|-> [--json]` — 校验并写入某一集 `shots.json`，记录剧本 revision。
+- `daoyan story map show --episode <id> [--raw] [--json]` — 查看生成上下文（角色 / 形态 / 场景 / 资产 / workflow 候选 / 槽位 / 连续性 / 缺口）与拓扑 / 时序数据。
+- `daoyan story map build|set|clear --episode <id> ...` — 生成标注骨架、写入叙事标注或清除标注。
 - `daoyan story status [--episode <id>] [--json]` — 系列概览；指定剧集时查看阶段、stale、blockers 与 next_actions。
 - `daoyan story validate [--episode <id>] [--verify-hashes] [--json]` — 完整校验剧本、设定集、拆解、分镜、资产与引用。
 

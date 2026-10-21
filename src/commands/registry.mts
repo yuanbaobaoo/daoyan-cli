@@ -337,10 +337,56 @@ export const COMMANDS: CommandMeta[] = [
     {
         name: "story shots",
         group: "story",
-        summary: "校验并写入某一集 shots.json（记录剧本 revision）",
-        usage: "daoyan story shots set --episode <id> --file <shots.json|-> [--json]",
+        summary: "读取 / 校验并写入某一集 shots.json（记录剧本 revision）",
+        usage:
+            "daoyan story shots show --episode <id> [--json]\n" +
+            "daoyan story shots set --episode <id> --file <shots.json|-> [--json]",
+        flags: [
+            { name: "--episode", type: "string", description: "剧集 id；多集项目必填" },
+            { name: "--file", type: "path|-", description: "set：shots JSON 文件；- 表示 stdin" },
+            { name: "--source-revision", type: "integer", description: "set：覆盖 source revision" },
+            { name: "--base-sha256", type: "string", description: "set：并发校验的当前文件 sha256" },
+        ],
         implemented: true,
+        jsonShape: { episode_id: "string", path: "string", shots: "object" },
         run: (ctx, args) => runStory(ctx, ["shots", ...args]),
+    },
+    {
+        name: "story map",
+        group: "story",
+        summary: "查看生成上下文 / 写入剧情图谱叙事标注 / 生成标注骨架",
+        usage:
+            "daoyan story map show --episode <id> [--raw] [--json]\n" +
+            "daoyan story map build --episode <id> [--force] [--json]\n" +
+            "daoyan story map set --episode <id> --file <story-map.json|-> [--source ai|user|import] [--base-sha256 <hash>] [--json]\n" +
+            "daoyan story map clear --episode <id> [--json]",
+        flags: [
+            { name: "--episode", type: "string", description: "剧集 id；多集项目必填" },
+            { name: "--raw", type: "boolean", description: "show：只输出 story-map.json 标注文件" },
+            { name: "--force", type: "boolean", description: "build：丢弃旧标注，重建骨架" },
+            { name: "--file", type: "path|-", description: "set：story-map JSON 文件；- 表示 stdin" },
+            {
+                name: "--source",
+                type: "ai|user|import",
+                enum: ["ai", "user", "import"],
+                default: "ai",
+                description: "set：标注来源",
+            },
+            { name: "--base-sha256", type: "string", description: "set：并发校验的当前文件 sha256" },
+        ],
+        implemented: true,
+        jsonShape: {
+            episode_id: "string",
+            map: {
+                events: "object[]",
+                catalog: "object",
+                graph: "object",
+                generation: "object",
+                relations: "object[]",
+                warnings: "object[]",
+            },
+        },
+        run: (ctx, args) => runStory(ctx, ["map", ...args]),
     },
     {
         name: "story status",
@@ -693,6 +739,7 @@ export const COMMANDS: CommandMeta[] = [
         implemented: true,
         jsonShape: {
             url: "string",
+            urls: { local: "string[]", network: "string[]" },
             host: "string",
             port: "number",
             project: "string",

@@ -351,17 +351,25 @@ try {
         Fail "npm 安装失败。若为权限错误，建议用 nvm-windows；或设置 npm config set prefix $env:APPDATA\npm 后重试"
     }
 
+    # npm 全局目录
+    $prefixOutput = & $npmExe prefix -g
+    if ($LASTEXITCODE -ne 0) {
+        Fail "无法读取 npm 全局目录（npm prefix -g 退出码 $LASTEXITCODE）"
+    }
+    $prefix = (($prefixOutput | Select-Object -Last 1) -join "").Trim()
     # 全局 shim（Windows 下为 dycli.cmd）
+    $dycliShim = Join-Path $prefix "dycli.cmd"
+    if (-not (Test-Path -LiteralPath $dycliShim)) {
+        Fail "安装完成，但未找到 $dycliShim（npm 全局目录：$prefix）"
+    }
+    # PATH 检查（新终端可用性）
     $dycliCommand = Get-Command dycli.cmd -ErrorAction SilentlyContinue
     if ($null -eq $dycliCommand) {
-        # npm 全局目录（PATH 提示用）
-        $prefixOutput = & $npmExe prefix -g
-        $prefix = (($prefixOutput | Select-Object -Last 1) -join "").Trim()
         Fail "安装完成，但 npm 全局 bin 目录不在 PATH。查看：npm prefix -g（当前 $prefix），把该目录加入 PATH 后重开终端"
     }
 
-    # 安装后版本
-    $versionText = ((& $dycliCommand.Source --version) -join "").Trim()
+    # 安装后版本（直接调用 shim，避免 PATH 中的旧版本）
+    $versionText = ((& $dycliShim --version) -join "").Trim()
     if ($LASTEXITCODE -ne 0) {
         Fail "安装完成，但 dycli --version 失败（退出码 $LASTEXITCODE）"
     }

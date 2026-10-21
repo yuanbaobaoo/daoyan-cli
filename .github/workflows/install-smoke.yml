@@ -76,7 +76,9 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
-          $tgzName = (npm.cmd pack --silent | Select-Object -Last 1).Trim()
+          $pack = npm.cmd pack --json --silent | ConvertFrom-Json
+          $tgzName = [string]$pack[0].filename
+          if ([string]::IsNullOrEmpty($tgzName)) { throw "npm pack 未返回文件名" }
           $tgz = (Resolve-Path $tgzName).Path
           $sha = (Get-FileHash $tgz -Algorithm SHA256).Hash.ToLowerInvariant()
           $prefix = Join-Path $env:RUNNER_TEMP "npm-global"
@@ -85,5 +87,12 @@ jobs:
           $env:PATH = "$prefix;$env:PATH"
           $env:DAYOAN_TGZ_URL = $tgz
           $env:DAYOAN_SHA256 = $sha
-          powershell -NoProfile -ExecutionPolicy Bypass -File ./install.ps1
+          $output = & powershell -NoProfile -ExecutionPolicy Bypass -File ./install.ps1 2>&1
+          $code = $LASTEXITCODE
+          $output | ForEach-Object { Write-Host $_ }
+          if ($code -ne 0) {
+            $tail = (($output | Select-Object -Last 15) -join " | ")
+            Write-Host "::error::install.ps1 失败（exit $code）：$tail"
+            exit $code
+          }
           dycli.cmd --version

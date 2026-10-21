@@ -49,11 +49,13 @@ daoyan run cancel <task_id> --json
 
 ```bash
 daoyan init --mode=local [--modelpath <路径>] [--version <tag>] [--mirror <镜像>] \
-    [--fallback-mirror <镜像|none>] [--torch-index <url>] [--torch-cuda <cuXXX>] [--torch-cpu] [--no-cache] [--no-skill]
-daoyan init --mode=remote --url <url> [--no-skill]
+    [--fallback-mirror <镜像|none>] [--torch-index <url>] [--torch-cuda <cuXXX>] [--torch-cpu] [--no-cache] [--no-skill] [--no-git]
+daoyan init --mode=remote --url <url> [--no-skill] [--no-git]
 ```
 
 - `--mode` 必填；在当前目录工作，不接收项目名；
+- 默认维护 `.gitignore` 受管块并初始化 Git 仓库；位于父级仓库内时跳过嵌套初始化，不自动 commit；`--no-git` 只跳过仓库初始化；
+- local 在创建骨架前检查 git / python3 >= 3.10 / ensurepip，缺失时明确报错，不留下半成品；
 - local 部署 `engine/`（venv + ComfyUI + custom nodes）并生成 `extra_model_paths.yaml`；只部署不启动；
 - init 自动探测 NVIDIA 驱动 / CUDA 上限 / compute capability，安装匹配的 torch（如 cu130），再装 requirements；不要手工安装 torch；
 - pip 依赖默认使用阿里云 PyPI（`https://mirrors.aliyun.com/pypi/simple/`），失败自动回退官方 PyPI；`--mirror` / `--fallback-mirror` 可覆盖（`none` 关闭 fallback）；

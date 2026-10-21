@@ -444,11 +444,12 @@ var init_fs = __esm({
 function isTerminalStatus(status) {
   return status === "succeeded" || status === "failed" || status === "cancelled" || status === "interrupted";
 }
-var PROJECT_FILE, SHOTS_FILE, STORY_DIR, STORY_SERIES_FILE, STORY_CHARACTERS_FILE, STORY_SCENES_FILE, STORY_VOICES_FILE, STORY_ASSETS_DIR, EPISODES_DIR, EPISODE_META_FILE, SCRIPT_TEXT_FILE, SCRIPT_FILE, BREAKDOWN_FILE, WORKFLOWS_DIR, BINDINGS_SUFFIX, INPUTS_DIR, TASKS_DIR, RUNS_DIR, FINAL_DIR, SKILL_DIR, AGENTS_FILE, MACHINE_FILE, CATALOG_FILE, EXTRA_MODELS_FILE, LOG_DIR, ENGINE_PID_FILE, TASK_FILE, EVENTS_FILE, RUN_FILE, RUN_WORKFLOW_FILE, RUN_INPUTS_FILE, CANCEL_FILE, CONCAT_LIST_FILE, RELAY_DIR;
+var PROJECT_FILE, GITIGNORE_FILE, SHOTS_FILE, STORY_DIR, STORY_SERIES_FILE, STORY_CHARACTERS_FILE, STORY_SCENES_FILE, STORY_VOICES_FILE, STORY_ASSETS_DIR, EPISODES_DIR, EPISODE_META_FILE, SCRIPT_TEXT_FILE, SCRIPT_FILE, BREAKDOWN_FILE, WORKFLOWS_DIR, BINDINGS_SUFFIX, INPUTS_DIR, TASKS_DIR, RUNS_DIR, FINAL_DIR, SKILL_DIR, AGENTS_FILE, MACHINE_FILE, CATALOG_FILE, EXTRA_MODELS_FILE, LOG_DIR, ENGINE_PID_FILE, TASK_FILE, EVENTS_FILE, RUN_FILE, RUN_WORKFLOW_FILE, RUN_INPUTS_FILE, CANCEL_FILE, CONCAT_LIST_FILE, RELAY_DIR;
 var init_types = __esm({
   "src/core/project/types.mts"() {
     "use strict";
     PROJECT_FILE = "project.json";
+    GITIGNORE_FILE = ".gitignore";
     SHOTS_FILE = "shots.json";
     STORY_DIR = "story";
     STORY_SERIES_FILE = "story/series.json";
@@ -4328,14 +4329,6 @@ function scaffoldProject(root, name) {
     writeFileAtomically(wf, "{}\n");
     created.push(`${WORKFLOWS_DIR}/t2v.json`);
   }
-  const ignore = join5(root, ".gitignore");
-  if (!existsSync7(ignore)) {
-    writeFileAtomically(
-      ignore,
-      ["engine/", "logs/", ".dycli/", "relay_frames/", "concat_list.txt", "*.log", ".DS_Store", ""].join("\n")
-    );
-    created.push(".gitignore");
-  }
   const attrs = join5(root, ".gitattributes");
   if (!existsSync7(attrs)) {
     writeFileAtomically(
@@ -4401,6 +4394,54 @@ async function detectPython(log) {
   }
   log(`python3 \u5C31\u7EEA\uFF1A${r.stdout.trim()}`);
   return info;
+}
+async function assertLocalPrereqs(log) {
+  const git = await tryExecCapture("git", ["--version"], { timeoutMs: 15e3 });
+  const python = await tryExecCapture("python3", ["--version"], { timeoutMs: 15e3 });
+  const pythonInfo = python !== null && python.code === 0 ? parsePythonVersion(python.stdout) : null;
+  const ensurepip = python !== null && python.code === 0 ? await tryExecCapture("python3", ["-c", "import ensurepip"], { timeoutMs: 2e4 }) : null;
+  const missing = [];
+  if (git === null || git.code !== 0) {
+    missing.push({ tool: "git", reason: "\u672A\u627E\u5230\u6216\u4E0D\u53EF\u7528" });
+  }
+  if (python === null || python.code !== 0) {
+    missing.push({ tool: "python3", reason: "\u672A\u627E\u5230\u6216\u4E0D\u53EF\u7528" });
+  } else if (pythonInfo === null) {
+    missing.push({ tool: "python3", reason: `\u65E0\u6CD5\u89E3\u6790\u7248\u672C\uFF1A${python.stdout.trim()}` });
+  } else if (pythonInfo.major < 3 || pythonInfo.major === 3 && pythonInfo.minor < 10) {
+    missing.push({ tool: "python3", reason: `\u7248\u672C ${pythonInfo.version} \u8FC7\u4F4E\uFF08\u8981\u6C42 >= ${MIN_PYTHON}\uFF09` });
+  } else if (ensurepip === null || ensurepip.code !== 0) {
+    missing.push({ tool: "ensurepip", reason: "python3 \u7F3A\u5C11 ensurepip\uFF0C\u65E0\u6CD5\u521B\u5EFA\u5E26 pip \u7684 venv" });
+  }
+  if (missing.length > 0) {
+    throw new DaoyanCliError({
+      code: "external_tool_missing",
+      message: `local \u6A21\u5F0F\u4F9D\u8D56\u68C0\u67E5\u672A\u901A\u8FC7\uFF1A${missing.map((m) => `${m.tool}\uFF08${m.reason}\uFF09`).join("\uFF1B")}`,
+      hint: "\u6309 next_actions \u5B89\u88C5\u7F3A\u5931\u4F9D\u8D56\u540E\u91CD\u8BD5\uFF1B\u53EA\u8FDE\u63A5\u8FDC\u7AEF\u8BF7\u4F7F\u7528 init --mode=remote",
+      details: {
+        stage: "preflight",
+        missing,
+        git: git !== null && git.code === 0 ? git.stdout.trim() : null,
+        python: pythonInfo?.version ?? null
+      },
+      nextActions: localPrereqActions()
+    });
+  }
+  log(`\u524D\u7F6E\u68C0\u67E5\u901A\u8FC7\uFF1A${git !== null ? git.stdout.trim() : "git"}\uFF0CPython ${pythonInfo?.version ?? "unknown"}`);
+}
+function localPrereqActions() {
+  switch (process.platform) {
+    case "darwin":
+      return ["brew install git python", "\u91CD\u8DD1 daoyan init --mode=local"];
+    case "win32":
+      return [
+        "winget install --id Git.Git -e",
+        "winget install --id Python.Python.3.12 -e",
+        "\u91CD\u8DD1 daoyan init --mode=local"
+      ];
+    default:
+      return ["sudo apt-get install -y git python3 python3-venv", "\u91CD\u8DD1 daoyan init --mode=local"];
+  }
 }
 async function latestComfyTag() {
   const res = await fetch(COMFY_TAGS_API, {
@@ -5072,6 +5113,173 @@ var init_init_flow = __esm({
   }
 });
 
+// src/core/project/git.mts
+import { existsSync as existsSync8, readFileSync as readFileSync8 } from "fs";
+import { homedir as homedir2 } from "os";
+import { dirname as dirname5, join as join6, resolve as resolve3 } from "path";
+function gitignoreBlock() {
+  return [GITIGNORE_BLOCK_START, GITIGNORE_BLOCK_NOTE, "", ...GITIGNORE_DEFAULTS, "", GITIGNORE_BLOCK_END].join("\n");
+}
+function upsertGitignoreContent(current) {
+  const block = gitignoreBlock();
+  const start = current.indexOf(GITIGNORE_BLOCK_START);
+  const end = current.indexOf(GITIGNORE_BLOCK_END);
+  if (start >= 0) {
+    const tail = end > start ? current.slice(end + GITIGNORE_BLOCK_END.length) : "";
+    return current.slice(0, start) + block + tail;
+  }
+  if (current.trim() === "") return block + "\n";
+  return `${current.replace(/\s*$/, "")}
+
+${block}
+`;
+}
+function ensureGitignore(root) {
+  const file = join6(root, GITIGNORE_FILE);
+  const existed = existsSync8(file);
+  const current = existed ? readFileSync8(file, "utf8") : "";
+  const next = upsertGitignoreContent(current);
+  if (existed && next === current) {
+    return { path: file, status: "unchanged" };
+  }
+  try {
+    writeFileAtomic(file, next);
+  } catch (e) {
+    throw new DaoyanCliError({
+      code: "provision_failed",
+      message: `\u5199\u5165 ${GITIGNORE_FILE} \u5931\u8D25\uFF1A${e instanceof Error ? e.message : String(e)}`,
+      hint: "\u68C0\u67E5\u9879\u76EE\u76EE\u5F55\u5199\u6743\u9650\u540E\u91CD\u8BD5",
+      details: { stage: "gitignore" }
+    });
+  }
+  return { path: file, status: existed ? "updated" : "created" };
+}
+async function ensureGitRepo(root) {
+  const absRoot = resolve3(root);
+  const gitVersion = await tryExecCapture("git", ["--version"], { timeoutMs: 15e3 });
+  if (gitVersion === null || gitVersion.code !== 0) {
+    throw new DaoyanCliError({
+      code: "external_tool_missing",
+      message: "\u672A\u627E\u5230\u53EF\u7528\u7684 git\uFF08init \u9700\u8981\u5B83\u521D\u59CB\u5316\u4ED3\u5E93\uFF1Blocal \u6A21\u5F0F\u8FD8\u7528\u4E8E clone ComfyUI\uFF09",
+      hint: gitInstallHint(),
+      nextActions: ["\u5B89\u88C5 Git \u540E\u91CD\u8BD5", "\u6216\u4F7F\u7528 --no-git \u8DF3\u8FC7\u4ED3\u5E93\u521D\u59CB\u5316"]
+    });
+  }
+  const top = findGitRoot(absRoot);
+  if (top === absRoot) {
+    return { status: "existing", branch: await gitBranch(absRoot), top_level: top, reason: null };
+  }
+  if (top !== null) {
+    return {
+      status: "inside_parent",
+      branch: await gitBranch(absRoot),
+      top_level: top,
+      reason: "\u5F53\u524D\u76EE\u5F55\u4F4D\u4E8E\u5DF2\u6709 Git \u4ED3\u5E93\u5185\uFF0C\u8DF3\u8FC7\u5D4C\u5957\u521D\u59CB\u5316"
+    };
+  }
+  if (isProtectedRoot(absRoot)) {
+    return {
+      status: "skipped",
+      branch: null,
+      top_level: null,
+      reason: "\u62D2\u7EDD\u5728\u7528\u6237\u4E3B\u76EE\u5F55\u6216\u6587\u4EF6\u7CFB\u7EDF\u6839\u76EE\u5F55\u81EA\u52A8\u521D\u59CB\u5316 Git \u4ED3\u5E93"
+    };
+  }
+  const init = await execCapture("git", ["init"], { cwd: absRoot, timeoutMs: 6e4 });
+  if (init.code !== 0) {
+    throw new DaoyanCliError({
+      code: "provision_failed",
+      message: `git init \u5931\u8D25\uFF08\u9000\u51FA\u7801 ${init.code}\uFF09`,
+      hint: "\u68C0\u67E5\u76EE\u5F55\u6743\u9650\u4E0E Git \u5B89\u88C5",
+      details: {
+        stage: "git_init",
+        exit_code: init.code,
+        last_error: (init.stderr || init.stdout).trim().slice(-2e3)
+      }
+    });
+  }
+  return { status: "initialized", branch: await gitBranch(absRoot), top_level: absRoot, reason: null };
+}
+function findGitRoot(start) {
+  let dir = start;
+  for (; ; ) {
+    if (existsSync8(join6(dir, ".git"))) return dir;
+    const parent = dirname5(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+async function gitBranch(root) {
+  const r = await tryExecCapture("git", ["-C", root, "symbolic-ref", "--short", "HEAD"], {
+    timeoutMs: 15e3
+  });
+  if (r === null || r.code !== 0) return null;
+  const branch = r.stdout.trim();
+  return branch === "" ? null : branch;
+}
+function isProtectedRoot(root) {
+  if (dirname5(root) === root) return true;
+  try {
+    return root === resolve3(homedir2());
+  } catch {
+    return false;
+  }
+}
+function gitInstallHint() {
+  switch (process.platform) {
+    case "darwin":
+      return "\u5B89\u88C5 Git\uFF1Abrew install git\uFF08\u6216 https://git-scm.com/downloads\uFF09";
+    case "win32":
+      return "\u5B89\u88C5 Git\uFF1Awinget install --id Git.Git -e\uFF08\u6216 https://git-scm.com/download/win\uFF09";
+    default:
+      return "\u5B89\u88C5 Git\uFF1Asudo apt-get install -y git\uFF08\u6216 https://git-scm.com/downloads\uFF09";
+  }
+}
+var GITIGNORE_BLOCK_START, GITIGNORE_BLOCK_END, GITIGNORE_BLOCK_NOTE, GITIGNORE_DEFAULTS;
+var init_git = __esm({
+  "src/core/project/git.mts"() {
+    "use strict";
+    init_errors();
+    init_exec();
+    init_fs();
+    init_types();
+    GITIGNORE_BLOCK_START = "# daoyan:gitignore:start";
+    GITIGNORE_BLOCK_END = "# daoyan:gitignore:end";
+    GITIGNORE_BLOCK_NOTE = "# \u672C\u5757\u7531 daoyan \u7EF4\u62A4\uFF0C\u4E0B\u6B21 init \u4F1A\u91CD\u5199\uFF1B\u81EA\u5B9A\u4E49\u89C4\u5219\u8BF7\u5199\u5728\u5757\u5916";
+    GITIGNORE_DEFAULTS = [
+      "# Python / \u7F13\u5B58",
+      ".venv/",
+      "venv/",
+      "__pycache__/",
+      "*.py[cod]",
+      "*.egg-info/",
+      ".pytest_cache/",
+      ".mypy_cache/",
+      ".ruff_cache/",
+      "",
+      "# ComfyUI \u5F15\u64CE\uFF08engine/ \u8986\u76D6\u9ED8\u8BA4\u672C\u4F53\u3001venv\u3001custom nodes\uFF09",
+      "engine/",
+      "ComfyUI/",
+      "",
+      "# daoyan \u672C\u673A\u72B6\u6001 / \u8FD0\u884C\u7F13\u5B58",
+      ".dycli/",
+      "logs/",
+      "relay_frames/",
+      "concat_list.txt",
+      "*.log",
+      "",
+      "# \u4E34\u65F6 / \u7CFB\u7EDF\u6587\u4EF6",
+      "*.tmp",
+      "*.temp",
+      "*.swp",
+      "*~",
+      ".DS_Store",
+      "Thumbs.db",
+      "desktop.ini"
+    ];
+  }
+});
+
 // src/core/task/store.mts
 var store_exports = {};
 __export(store_exports, {
@@ -5094,27 +5302,27 @@ __export(store_exports, {
   taskSummary: () => taskSummary,
   updateTask: () => updateTask
 });
-import { existsSync as existsSync8, readdirSync as readdirSync3, rmSync as rmSync5 } from "fs";
-import { join as join6 } from "path";
+import { existsSync as existsSync9, readdirSync as readdirSync3, rmSync as rmSync5 } from "fs";
+import { join as join7 } from "path";
 function newTaskId(machineId) {
   return `t_${makeId(machineId)}`;
 }
 function taskDir(root, taskId) {
-  return join6(root, TASKS_DIR, taskId);
+  return join7(root, TASKS_DIR, taskId);
 }
 function taskFile(root, taskId) {
-  return join6(taskDir(root, taskId), TASK_FILE);
+  return join7(taskDir(root, taskId), TASK_FILE);
 }
 function createTask(root, record) {
   const dir = taskDir(root, record.task_id);
-  if (existsSync8(join6(dir, TASK_FILE))) {
+  if (existsSync9(join7(dir, TASK_FILE))) {
     throw new DaoyanCliError({
       code: "config_invalid",
       message: `task ${record.task_id} \u5DF2\u5B58\u5728\uFF08id \u51B2\u7A81\uFF0C\u8BF7\u91CD\u8BD5\uFF09`
     });
   }
   ensureDir(dir);
-  writeJsonAtomic(join6(dir, TASK_FILE), record);
+  writeJsonAtomic(join7(dir, TASK_FILE), record);
   return record;
 }
 function readTask(root, taskId) {
@@ -5151,8 +5359,8 @@ function nextActionsFor(taskId, status) {
   return [`logs --task ${taskId} --json`, `status --json`];
 }
 function listTasks(root) {
-  const dir = join6(root, TASKS_DIR);
-  if (!existsSync8(dir)) return [];
+  const dir = join7(root, TASKS_DIR);
+  if (!existsSync9(dir)) return [];
   const out = [];
   for (const ent of readdirSync3(dir, { withFileTypes: true })) {
     if (!ent.isDirectory()) continue;
@@ -5170,17 +5378,17 @@ function activeTasks(root) {
 }
 function requestCancel(root, taskId) {
   ensureDir(taskDir(root, taskId));
-  writeJsonAtomic(join6(taskDir(root, taskId), CANCEL_FILE), {
+  writeJsonAtomic(join7(taskDir(root, taskId), CANCEL_FILE), {
     requested_at: nowIso(),
     by_pid: process.pid
   });
 }
 function isCancelRequested(root, taskId) {
-  return existsSync8(join6(taskDir(root, taskId), CANCEL_FILE));
+  return existsSync9(join7(taskDir(root, taskId), CANCEL_FILE));
 }
 function clearCancelRequest(root, taskId) {
-  const file = join6(taskDir(root, taskId), CANCEL_FILE);
-  if (existsSync8(file)) {
+  const file = join7(taskDir(root, taskId), CANCEL_FILE);
+  if (existsSync9(file)) {
     rmSync5(file, { force: true });
   }
 }
@@ -5402,8 +5610,8 @@ var init_client = __esm({
 });
 
 // src/core/workflow/catalog.mts
-import { existsSync as existsSync9, rmSync as rmSync6 } from "fs";
-import { join as join7 } from "path";
+import { existsSync as existsSync10, rmSync as rmSync6 } from "fs";
+import { join as join8 } from "path";
 function extractNodeDef(raw, classType) {
   const nodeRaw = raw[classType];
   if (typeof nodeRaw !== "object" || nodeRaw === null || Array.isArray(nodeRaw)) return null;
@@ -5485,8 +5693,8 @@ function comfyVersionOf(stats) {
   return null;
 }
 function readCatalog(root) {
-  const file = join7(root, CATALOG_FILE);
-  if (!existsSync9(file)) return null;
+  const file = join8(root, CATALOG_FILE);
+  if (!existsSync10(file)) return null;
   const cat = readJsonIfExists(file);
   if (cat === null || typeof cat !== "object" || typeof cat.raw !== "object" || cat.raw === null) {
     throw new DaoyanCliError({
@@ -5497,7 +5705,7 @@ function readCatalog(root) {
   return cat;
 }
 function writeCatalog(root, catalog) {
-  writeJsonAtomic(join7(root, CATALOG_FILE), catalog);
+  writeJsonAtomic(join8(root, CATALOG_FILE), catalog);
 }
 function catalogSize(catalog) {
   return Object.keys(catalog.raw).length;
@@ -5654,11 +5862,11 @@ var init_detect = __esm({
 });
 
 // src/core/gpu/lease.mts
-import { chmodSync as chmodSync2, existsSync as existsSync10, rmSync as rmSync7 } from "fs";
-import { homedir as homedir2 } from "os";
-import { dirname as dirname5, join as join8 } from "path";
+import { chmodSync as chmodSync2, existsSync as existsSync11, rmSync as rmSync7 } from "fs";
+import { homedir as homedir3 } from "os";
+import { dirname as dirname6, join as join9 } from "path";
 function leasePath() {
-  return join8(homedir2(), ".dycli", "gpu", "lease.json");
+  return join9(homedir3(), ".dycli", "gpu", "lease.json");
 }
 function isLease(v) {
   if (typeof v !== "object" || v === null) return false;
@@ -5666,7 +5874,7 @@ function isLease(v) {
   return o.version === 1 && typeof o.task_id === "string" && typeof o.project === "string" && typeof o.created_at === "string" && Array.isArray(o.entries);
 }
 function inspectLease(path = leasePath()) {
-  if (!existsSync10(path)) return { status: "absent", path };
+  if (!existsSync11(path)) return { status: "absent", path };
   try {
     const raw = readJsonIfExists(path);
     if (raw === null) return { status: "absent", path };
@@ -5677,7 +5885,7 @@ function inspectLease(path = leasePath()) {
   }
 }
 function writeLease(lease, path = leasePath()) {
-  ensureDir(dirname5(path));
+  ensureDir(dirname6(path));
   writeJsonAtomic(path, lease);
   try {
     chmodSync2(path, 384);
@@ -5688,7 +5896,7 @@ function newLease(taskId, project) {
   return { version: 1, task_id: taskId, project, created_at: nowIso(), entries: [] };
 }
 function clearLease(path = leasePath()) {
-  if (existsSync10(path)) {
+  if (existsSync11(path)) {
     rmSync7(path, { force: true });
   }
 }
@@ -5749,7 +5957,7 @@ var init_targets = __esm({
 });
 
 // src/core/gpu/cri.mts
-import { existsSync as existsSync11 } from "fs";
+import { existsSync as existsSync12 } from "fs";
 async function crictlAvailable() {
   if (crictlChecked !== null) return crictlChecked;
   const r = await tryExecCapture("crictl", ["--version"], { timeoutMs: 5e3 });
@@ -5760,7 +5968,7 @@ function crictlArgs(endpoint, args) {
   return endpoint !== void 0 ? ["--runtime-endpoint", endpoint, ...args] : args;
 }
 function availableCriEndpoints() {
-  return CRI_ENDPOINTS.filter((ep) => existsSync11(ep.replace(/^unix:\/\//, "")));
+  return CRI_ENDPOINTS.filter((ep) => existsSync12(ep.replace(/^unix:\/\//, "")));
 }
 function crictlEndpointCandidates(recorded) {
   const out = recorded !== void 0 ? [recorded, void 0] : [void 0];
@@ -5770,7 +5978,7 @@ function crictlEndpointCandidates(recorded) {
   return out;
 }
 function availableContainerdSockets() {
-  return CONTAINERD_SOCKETS.filter((p) => existsSync11(p));
+  return CONTAINERD_SOCKETS.filter((p) => existsSync12(p));
 }
 function isEndpointError(stderr) {
   return /connect|connection|no such file|refused|socket|failed to connect|code = Unavailable/i.test(stderr);
@@ -5803,7 +6011,7 @@ var init_cri = __esm({
 });
 
 // src/core/gpu/containers.mts
-import { readFileSync as readFileSync8 } from "fs";
+import { readFileSync as readFileSync9 } from "fs";
 function containerIdFromCgroup(cgroup) {
   const kubernetes = /kubepods(?:[\/.]|$)/i.test(cgroup);
   const patterns = [
@@ -5833,7 +6041,7 @@ function containerIdFromCgroup(cgroup) {
 function readContainerInfo(pid) {
   if (process.platform !== "linux") return null;
   try {
-    return containerIdFromCgroup(readFileSync8(`/proc/${pid}/cgroup`, "utf8"));
+    return containerIdFromCgroup(readFileSync9(`/proc/${pid}/cgroup`, "utf8"));
   } catch {
     return null;
   }
@@ -5851,14 +6059,14 @@ function commandArray(v) {
 }
 function readProcessCmdline(pid) {
   try {
-    return readFileSync8(`/proc/${pid}/cmdline`, "utf8").split("\0").filter((x) => x !== "");
+    return readFileSync9(`/proc/${pid}/cmdline`, "utf8").split("\0").filter((x) => x !== "");
   } catch {
     return [];
   }
 }
 function readParentPid(pid) {
   try {
-    const stat = readFileSync8(`/proc/${pid}/stat`, "utf8");
+    const stat = readFileSync9(`/proc/${pid}/stat`, "utf8");
     const close = stat.lastIndexOf(")");
     if (close < 0) return null;
     const rest = stat.slice(close + 2).split(/\s+/);
@@ -6811,7 +7019,7 @@ var init_vllm = __esm({
 });
 
 // src/core/gpu/providers/process.mts
-import { readFileSync as readFileSync9, readlinkSync } from "fs";
+import { readFileSync as readFileSync10, readlinkSync } from "fs";
 import { spawn as spawn3 } from "child_process";
 async function listProcesses() {
   const r = await tryExecCapture("ps", ["-eo", "pid=,uid=,comm=,args="], { timeoutMs: 1e4 });
@@ -6845,7 +7053,7 @@ async function ancestorPids() {
 function cmdlineOf(info) {
   if (process.platform === "linux") {
     try {
-      const parts = readFileSync9(`/proc/${info.pid}/cmdline`, "utf8").split("\0").filter((x) => x !== "");
+      const parts = readFileSync10(`/proc/${info.pid}/cmdline`, "utf8").split("\0").filter((x) => x !== "");
       if (parts.length > 0) return parts;
     } catch {
     }
@@ -7219,9 +7427,9 @@ __export(local_session_exports, {
 });
 import {
   closeSync,
-  existsSync as existsSync12,
+  existsSync as existsSync13,
   openSync,
-  readFileSync as readFileSync10,
+  readFileSync as readFileSync11,
   readSync,
   rmSync as rmSync8,
   statSync as statSync2,
@@ -7229,15 +7437,15 @@ import {
   writeFileSync as writeFileSync4
 } from "fs";
 import { spawn as spawn4 } from "child_process";
-import { join as join9 } from "path";
+import { join as join10 } from "path";
 function enginePidFile(root) {
-  return join9(root, LOG_DIR, ENGINE_PID_FILE);
+  return join10(root, LOG_DIR, ENGINE_PID_FILE);
 }
 function readEnginePid(root) {
   const file = enginePidFile(root);
-  if (!existsSync12(file)) return null;
+  if (!existsSync13(file)) return null;
   try {
-    const text = readFileSync10(file, "utf8").trim();
+    const text = readFileSync11(file, "utf8").trim();
     if (/^\d+$/.test(text)) {
       return { pid: Number(text), port: 0, comfyui_dir: "", task_id: "", started_at: "" };
     }
@@ -7248,7 +7456,7 @@ function readEnginePid(root) {
   }
 }
 function writeEnginePid(root, rec) {
-  ensureDir(join9(root, LOG_DIR));
+  ensureDir(join10(root, LOG_DIR));
   writeFileSync4(enginePidFile(root), JSON.stringify(rec, null, 2) + "\n", { mode: 384 });
 }
 function pidAlive(pid) {
@@ -7322,7 +7530,7 @@ async function stopResidualEngine(root, log) {
   rmSync8(enginePidFile(root), { force: true });
 }
 function tailFile(file, lines) {
-  if (!existsSync12(file)) return "(\u6587\u4EF6\u4E0D\u5B58\u5728)";
+  if (!existsSync13(file)) return "(\u6587\u4EF6\u4E0D\u5B58\u5728)";
   let size = 0;
   try {
     size = statSync2(file).size;
@@ -7433,14 +7641,14 @@ var init_local_session = __esm({
         }
         const started = Date.now();
         const comfyDir = this.comfyDir();
-        const venvPython = join9(this.venvDir(), "bin", "python");
-        if (!existsSync12(venvPython)) {
+        const venvPython = join10(this.venvDir(), "bin", "python");
+        if (!existsSync13(venvPython)) {
           throw new DaoyanCliError({
             code: "engine_start_failed",
             message: `venv \u4E0D\u5B58\u5728\uFF1A${venvPython}\u3002\u8FD0\u884C daoyan init --mode=local \u90E8\u7F72\u5F15\u64CE`
           });
         }
-        if (!existsSync12(join9(comfyDir, "main.py"))) {
+        if (!existsSync13(join10(comfyDir, "main.py"))) {
           throw new DaoyanCliError({
             code: "engine_start_failed",
             message: `ComfyUI \u76EE\u5F55\u65E0\u6548\uFF1A${comfyDir}\uFF08\u7F3A\u5C11 main.py\uFF09\u3002\u8FD0\u884C daoyan init --mode=local`
@@ -7452,9 +7660,9 @@ var init_local_session = __esm({
             message: `\u7AEF\u53E3 ${eng.port} \u5DF2\u88AB\u5176\u4ED6\u8FDB\u7A0B\u5360\u7528\uFF08\u4E0D\u662F\u672C\u9879\u76EE\u521A\u56DE\u6536\u7684\u5F15\u64CE\uFF09\uFF1B\u8BF7\u91CA\u653E\u7AEF\u53E3\u6216\u4FEE\u6539 machine.json`
           });
         }
-        const logDir = join9(this.opts.root, LOG_DIR);
+        const logDir = join10(this.opts.root, LOG_DIR);
         ensureDir(logDir);
-        const logFile = join9(logDir, `engine-${this.opts.taskId}.log`);
+        const logFile = join10(logDir, `engine-${this.opts.taskId}.log`);
         const fd = openSync(logFile, "a");
         const modelsConfig = this.modelsConfigPath();
         const args = ["-u", "main.py", "--port", String(eng.port)];
@@ -7608,9 +7816,9 @@ ${tailFile(logFile, 8)}`
       comfyDir() {
         const configured = this.opts.machine.engine.mode === "local" ? this.opts.machine.engine.comfyui_dir : void 0;
         if (configured !== void 0 && configured !== "") {
-          return configured.startsWith("/") ? configured : join9(this.opts.root, configured);
+          return configured.startsWith("/") ? configured : join10(this.opts.root, configured);
         }
-        return join9(this.opts.root, "engine", "ComfyUI");
+        return join10(this.opts.root, "engine", "ComfyUI");
       }
       /**
        * venv 目录：machine.json 显式路径优先，否则约定 engine/.venv。
@@ -7618,9 +7826,9 @@ ${tailFile(logFile, 8)}`
       venvDir() {
         const configured = this.opts.machine.engine.mode === "local" ? this.opts.machine.engine.venv_dir : void 0;
         if (configured !== void 0 && configured !== "") {
-          return configured.startsWith("/") ? configured : join9(this.opts.root, configured);
+          return configured.startsWith("/") ? configured : join10(this.opts.root, configured);
         }
-        return join9(this.opts.root, "engine", ".venv");
+        return join10(this.opts.root, "engine", ".venv");
       }
       /**
        * extra_model_paths 配置路径（machine.models_config 优先）。
@@ -7629,8 +7837,8 @@ ${tailFile(logFile, 8)}`
         if (this.opts.machine.engine.mode !== "local") return null;
         const explicit = this.opts.machine.engine.models_config;
         if (explicit !== void 0 && explicit !== null && explicit !== "") return explicit;
-        const auto = join9(this.opts.root, EXTRA_MODELS_FILE);
-        return existsSync12(auto) ? auto : null;
+        const auto = join10(this.opts.root, EXTRA_MODELS_FILE);
+        return existsSync13(auto) ? auto : null;
       }
       /**
        * 清理本次 run 的 scratch 文件（local 拥有引擎文件系统）。
@@ -7640,10 +7848,10 @@ ${tailFile(logFile, 8)}`
         try {
           const comfyDir = this.comfyDir();
           for (const name of inputs.uploaded) {
-            rmSync8(join9(comfyDir, "input", name), { force: true });
+            rmSync8(join10(comfyDir, "input", name), { force: true });
           }
           for (const out of inputs.scratch_outputs) {
-            rmSync8(join9(comfyDir, "output", out.subfolder, out.filename), { force: true });
+            rmSync8(join10(comfyDir, "output", out.subfolder, out.filename), { force: true });
           }
           return "ok";
         } catch {
@@ -7655,11 +7863,11 @@ ${tailFile(logFile, 8)}`
 });
 
 // src/core/machine/lock.mts
-import { closeSync as closeSync2, existsSync as existsSync13, openSync as openSync2, readFileSync as readFileSync11, rmSync as rmSync9, unlinkSync as unlinkSync2, writeFileSync as writeFileSync5 } from "fs";
-import { homedir as homedir3 } from "os";
-import { dirname as dirname6, join as join10 } from "path";
+import { closeSync as closeSync2, existsSync as existsSync14, openSync as openSync2, readFileSync as readFileSync12, rmSync as rmSync9, unlinkSync as unlinkSync2, writeFileSync as writeFileSync5 } from "fs";
+import { homedir as homedir4 } from "os";
+import { dirname as dirname7, join as join11 } from "path";
 function machineLockPath() {
-  return join10(homedir3(), ".dycli", "machine.lock");
+  return join11(homedir4(), ".dycli", "machine.lock");
 }
 function pidAlive2(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
@@ -7671,10 +7879,10 @@ function pidAlive2(pid) {
   }
 }
 function inspectMachineLock(path = machineLockPath()) {
-  if (!existsSync13(path)) return { status: "absent", path };
+  if (!existsSync14(path)) return { status: "absent", path };
   let raw;
   try {
-    raw = JSON.parse(readFileSync11(path, "utf8"));
+    raw = JSON.parse(readFileSync12(path, "utf8"));
   } catch (e) {
     return {
       status: "corrupt",
@@ -7693,7 +7901,7 @@ function isLockRecord(v) {
   return typeof o.token === "string" && (o.kind === "generation" || o.kind === "metadata") && typeof o.task_id === "string" && typeof o.project === "string" && (o.mode === "local" || o.mode === "remote") && typeof o.command === "string" && typeof o.pid === "number" && typeof o.started_at === "string";
 }
 function writeLock(path, record) {
-  ensureDir(dirname6(path));
+  ensureDir(dirname7(path));
   writeFileSync5(path, JSON.stringify(record, null, 2) + "\n", { mode: 384 });
 }
 function machineBusyError(owner) {
@@ -7732,7 +7940,7 @@ async function acquireMachineLock(opts) {
   };
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      ensureDir(dirname6(path));
+      ensureDir(dirname7(path));
       const fd = openSync2(path, "wx", 384);
       try {
         writeFileSync5(fd, JSON.stringify(record, null, 2) + "\n");
@@ -7790,7 +7998,7 @@ function attachMachineLock(opts) {
 }
 async function recoverStaleLock(record, path = machineLockPath()) {
   try {
-    if (record.kind === "generation" && existsSync13(join10(record.project, "project.json"))) {
+    if (record.kind === "generation" && existsSync14(join11(record.project, "project.json"))) {
       const store = await Promise.resolve().then(() => (init_store(), store_exports));
       const task = store.readTask(record.project, record.task_id);
       if (task !== null && (task.status === "queued" || task.status === "running")) {
@@ -7808,7 +8016,7 @@ async function recoverStaleLock(record, path = machineLockPath()) {
   } catch {
   }
   try {
-    if (record.mode === "local" && existsSync13(join10(record.project, "project.json"))) {
+    if (record.mode === "local" && existsSync14(join11(record.project, "project.json"))) {
       const local = await Promise.resolve().then(() => (init_local_session(), local_session_exports));
       await local.stopResidualEngine(record.project, () => {
       });
@@ -7862,16 +8070,20 @@ var init_lock = __esm({
 });
 
 // src/commands/init.mts
-import { basename as basename2, isAbsolute as isAbsolute3, join as join11, resolve as resolve3 } from "path";
-import { existsSync as existsSync14, statSync as statSync3 } from "fs";
+import { basename as basename2, isAbsolute as isAbsolute3, join as join12, resolve as resolve4 } from "path";
+import { existsSync as existsSync15, statSync as statSync3 } from "fs";
 function parseArgs(args) {
-  const flags = { noSkill: false, toolchain: {} };
+  const flags = { noSkill: false, noGit: false, toolchain: {} };
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a === void 0) break;
     const { name, inline } = splitInlineFlag(a);
     if (name === "--no-skill") {
       flags.noSkill = true;
+      continue;
+    }
+    if (name === "--no-git") {
+      flags.noGit = true;
       continue;
     }
     if (name === "--mode") {
@@ -7926,8 +8138,8 @@ function parseArgs(args) {
   return flags;
 }
 function resolveModelPath(raw) {
-  const abs = isAbsolute3(raw) ? raw : resolve3(process.cwd(), raw);
-  if (!existsSync14(abs) || !statSync3(abs).isDirectory()) {
+  const abs = isAbsolute3(raw) ? raw : resolve4(process.cwd(), raw);
+  if (!existsSync15(abs) || !statSync3(abs).isDirectory()) {
     throw new DaoyanCliError({
       code: "config_invalid",
       message: `--modelpath \u5FC5\u987B\u662F\u5DF2\u5B58\u5728\u7684\u76EE\u5F55\uFF08\u6536\u5230 ${raw}\uFF09`
@@ -7935,16 +8147,34 @@ function resolveModelPath(raw) {
   }
   return abs;
 }
+function gitLogLine(git, ignore) {
+  const ignoreText = ignore === "created" ? "\u5DF2\u751F\u6210" : ignore === "updated" ? "\u5DF2\u66F4\u65B0" : "\u65E0\u53D8\u5316";
+  switch (git.status) {
+    case "initialized":
+      return `Git \u4ED3\u5E93\u5DF2\u521D\u59CB\u5316\uFF08${git.branch ?? "unknown"}\uFF09\uFF0C.gitignore ${ignoreText}`;
+    case "existing":
+      return `\u5DF2\u5728 Git \u4ED3\u5E93\u5185\uFF08${git.branch ?? "detached HEAD"}\uFF09\uFF0C.gitignore ${ignoreText}`;
+    case "inside_parent":
+      return `\u4F4D\u4E8E\u7236\u7EA7 Git \u4ED3\u5E93\uFF08${git.top_level ?? "unknown"}\uFF09\uFF0C\u8DF3\u8FC7\u5D4C\u5957\u521D\u59CB\u5316\uFF1B.gitignore ${ignoreText}`;
+    case "skipped":
+      return `${git.reason ?? "\u8DF3\u8FC7 Git \u521D\u59CB\u5316"}\uFF1B.gitignore ${ignoreText}`;
+    case "disabled":
+      return `--no-git\uFF1A\u8DF3\u8FC7 Git \u4ED3\u5E93\u521D\u59CB\u5316\uFF1B.gitignore ${ignoreText}`;
+  }
+}
 async function runInit(ctx2, args) {
   const flags = parseArgs(args);
   const root = process.cwd();
   const parent = findProject(root);
-  if (parent !== null && resolve3(parent.root) !== resolve3(root)) {
+  if (parent !== null && resolve4(parent.root) !== resolve4(root)) {
     throw new DaoyanCliError({
       code: "usage",
       message: `\u5F53\u524D\u76EE\u5F55\u4F4D\u4E8E\u5DF2\u6709\u9879\u76EE\u5185\uFF1A${parent.root}\u3002\u8BF7\u5728\u9879\u76EE\u6839\u8FD0\u884C init\uFF0C\u6216\u6362\u4E00\u4E2A\u7A7A\u76EE\u5F55`,
       exit: 2
     });
+  }
+  if (flags.mode === "local") {
+    await assertLocalPrereqs(say);
   }
   const existingProject = readProjectAt(root);
   let project;
@@ -7958,6 +8188,14 @@ async function runInit(ctx2, args) {
     project = existingProject;
     say(`\u590D\u7528\u5DF2\u6709 project.json\uFF08\u4E0D\u8986\u76D6\u5171\u4EAB\u6587\u4EF6\uFF09\uFF1A${root}`);
   }
+  const gitignore = ensureGitignore(root);
+  let git;
+  if (flags.noGit) {
+    git = { status: "disabled", branch: null, top_level: null, reason: "--no-git" };
+  } else {
+    git = await ensureGitRepo(root);
+  }
+  say(gitLogLine(git, gitignore.status));
   const previous = loadMachineIfExists(root);
   const machineId = previous?.machine_id ?? defaultMachineId();
   let lock = null;
@@ -7983,10 +8221,10 @@ async function runInit(ctx2, args) {
           comfyui: { ...project.comfyui ?? {}, version }
         };
         const { writeJsonAtomic: writeJsonAtomic2 } = await Promise.resolve().then(() => (init_fs(), fs_exports));
-        writeJsonAtomic2(resolve3(root, "project.json"), project);
+        writeJsonAtomic2(resolve4(root, "project.json"), project);
       }
-      const prevComfyAbs = prevLocal?.comfyui_dir !== void 0 ? isAbsolute3(prevLocal.comfyui_dir) ? prevLocal.comfyui_dir : resolve3(root, prevLocal.comfyui_dir) : null;
-      const reuseCustomEngine = flags.version === void 0 && prevLocal?.comfyui_dir !== void 0 && prevLocal.comfyui_dir !== "engine/ComfyUI" && prevComfyAbs !== null && existsSync14(join11(prevComfyAbs, "main.py"));
+      const prevComfyAbs = prevLocal?.comfyui_dir !== void 0 ? isAbsolute3(prevLocal.comfyui_dir) ? prevLocal.comfyui_dir : resolve4(root, prevLocal.comfyui_dir) : null;
+      const reuseCustomEngine = flags.version === void 0 && prevLocal?.comfyui_dir !== void 0 && prevLocal.comfyui_dir !== "engine/ComfyUI" && prevComfyAbs !== null && existsSync15(join12(prevComfyAbs, "main.py"));
       if (reuseCustomEngine) {
         say(`\u590D\u7528 engine use \u9009\u5B9A\u7684\u5F15\u64CE\u76EE\u5F55\uFF1A${prevLocal?.comfyui_dir}`);
         comfyVersion = prevLocal?.comfyui_version ?? version;
@@ -8051,6 +8289,12 @@ async function runInit(ctx2, args) {
     root,
     mode: flags.mode,
     project_created: projectCreated,
+    git: {
+      repo: git.status,
+      branch: git.branch,
+      top_level: git.top_level,
+      gitignore: gitignore.status
+    },
     engine_installed: installed,
     comfyui_version: comfyVersion,
     toolchain,
@@ -8085,6 +8329,7 @@ var init_init = __esm({
     init_fs();
     init_config();
     init_init_flow();
+    init_git();
     init_options();
     init_lock();
     init_version();
@@ -8225,18 +8470,18 @@ var init_graph = __esm({
 });
 
 // src/core/workflow/load.mts
-import { existsSync as existsSync15, readFileSync as readFileSync12 } from "fs";
-import { dirname as dirname7, join as join12 } from "path";
+import { existsSync as existsSync16, readFileSync as readFileSync13 } from "fs";
+import { dirname as dirname8, join as join13 } from "path";
 function workflowError(message, details) {
   throw new DaoyanCliError({ code: "workflow_invalid", message, details });
 }
 function loadGraphFile(abs, rel) {
-  if (!existsSync15(abs)) {
+  if (!existsSync16(abs)) {
     workflowError(`workflow \u6587\u4EF6\u4E0D\u5B58\u5728\uFF1A${rel}`, { path: rel });
   }
   let raw;
   try {
-    raw = JSON.parse(readFileSync12(abs, "utf8"));
+    raw = JSON.parse(readFileSync13(abs, "utf8"));
   } catch (e) {
     workflowError(`${rel} \u4E0D\u662F\u5408\u6CD5 JSON\uFF1A${e instanceof Error ? e.message : String(e)}`, { path: rel });
   }
@@ -8258,10 +8503,10 @@ function bindingsPathOf(workflowAbs) {
 }
 function loadBindings(workflowAbs) {
   const file = bindingsPathOf(workflowAbs);
-  if (!existsSync15(file)) return null;
+  if (!existsSync16(file)) return null;
   let raw;
   try {
-    raw = JSON.parse(readFileSync12(file, "utf8"));
+    raw = JSON.parse(readFileSync13(file, "utf8"));
   } catch (e) {
     throw new DaoyanCliError({
       code: "workflow_invalid",
@@ -8455,43 +8700,43 @@ var init_load = __esm({
 });
 
 // src/core/story/paths.mts
-import { existsSync as existsSync16, readdirSync as readdirSync4 } from "fs";
-import { join as join13 } from "path";
+import { existsSync as existsSync17, readdirSync as readdirSync4 } from "fs";
+import { join as join14 } from "path";
 function seriesPath(root) {
-  return join13(root, STORY_SERIES_FILE);
+  return join14(root, STORY_SERIES_FILE);
 }
 function charactersPath(root) {
-  return join13(root, STORY_CHARACTERS_FILE);
+  return join14(root, STORY_CHARACTERS_FILE);
 }
 function scenesPath(root) {
-  return join13(root, STORY_SCENES_FILE);
+  return join14(root, STORY_SCENES_FILE);
 }
 function voicesPath(root) {
-  return join13(root, STORY_VOICES_FILE);
+  return join14(root, STORY_VOICES_FILE);
 }
 function episodesRoot(root) {
-  return join13(root, EPISODES_DIR);
+  return join14(root, EPISODES_DIR);
 }
 function episodeDir(root, episodeId) {
-  return join13(root, EPISODES_DIR, episodeId);
+  return join14(root, EPISODES_DIR, episodeId);
 }
 function storyEnabled(root) {
-  return existsSync16(seriesPath(root));
+  return existsSync17(seriesPath(root));
 }
 function readSeries(root) {
   const file = seriesPath(root);
-  if (!existsSync16(file)) return null;
+  if (!existsSync17(file)) return null;
   return readJson(file);
 }
 function readEpisodeMeta(root, episodeId) {
   if (!STORY_ID_RE.test(episodeId)) return null;
-  const file = join13(episodeDir(root, episodeId), EPISODE_META_FILE);
-  if (!existsSync16(file)) return null;
+  const file = join14(episodeDir(root, episodeId), EPISODE_META_FILE);
+  if (!existsSync17(file)) return null;
   return readJson(file);
 }
 function listEpisodeMetas(root) {
   const dir = episodesRoot(root);
-  if (!existsSync16(dir)) return [];
+  if (!existsSync17(dir)) return [];
   const out = [];
   for (const entry of readdirSync4(dir, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
@@ -8510,8 +8755,8 @@ function legacyContext(root) {
     legacy: true,
     dir: root,
     rel_dir: "",
-    shots_path: join13(root, SHOTS_FILE),
-    final_dir: join13(root, FINAL_DIR),
+    shots_path: join14(root, SHOTS_FILE),
+    final_dir: join14(root, FINAL_DIR),
     final_rel: FINAL_DIR,
     label_prefix: "shot:",
     script_meta_path: null,
@@ -8529,14 +8774,14 @@ function storyContext(root, meta) {
     legacy: false,
     dir,
     rel_dir: relDir,
-    shots_path: join13(dir, SHOTS_FILE),
-    final_dir: join13(root, finalRel),
+    shots_path: join14(dir, SHOTS_FILE),
+    final_dir: join14(root, finalRel),
     final_rel: finalRel,
     label_prefix: `ep:${meta.id}:shot:`,
-    script_meta_path: join13(dir, SCRIPT_FILE),
-    script_text_path: join13(dir, SCRIPT_TEXT_FILE),
-    breakdown_path: join13(dir, BREAKDOWN_FILE),
-    episode_meta_path: join13(dir, EPISODE_META_FILE)
+    script_meta_path: join14(dir, SCRIPT_FILE),
+    script_text_path: join14(dir, SCRIPT_TEXT_FILE),
+    breakdown_path: join14(dir, BREAKDOWN_FILE),
+    episode_meta_path: join14(dir, EPISODE_META_FILE)
   };
 }
 function resolveEpisodeContext(root, episodeId) {
@@ -8592,8 +8837,8 @@ var init_paths = __esm({
 });
 
 // src/core/story/store.mts
-import { existsSync as existsSync17, readFileSync as readFileSync13 } from "fs";
-import { join as join14 } from "path";
+import { existsSync as existsSync18, readFileSync as readFileSync14 } from "fs";
+import { join as join15 } from "path";
 function emptyCharactersFile() {
   return { version: 1, updated_at: nowIso(), characters: [] };
 }
@@ -8663,20 +8908,20 @@ function loadVoices(root) {
   return readJsonIfExists(voicesPath(root)) ?? emptyVoicesFile();
 }
 function loadScriptMeta(root, episodeId) {
-  const file = join14(episodeDir(root, episodeId), SCRIPT_FILE);
+  const file = join15(episodeDir(root, episodeId), SCRIPT_FILE);
   const raw = readJsonIfExists(file);
   return raw ?? emptyScriptMeta();
 }
 function loadScriptText(root, episodeId) {
-  const file = join14(episodeDir(root, episodeId), SCRIPT_TEXT_FILE);
-  if (!existsSync17(file)) return "";
-  return readFileSync13(file, "utf8");
+  const file = join15(episodeDir(root, episodeId), SCRIPT_TEXT_FILE);
+  if (!existsSync18(file)) return "";
+  return readFileSync14(file, "utf8");
 }
 function loadBreakdown(root, episodeId) {
-  return readJsonIfExists(join14(episodeDir(root, episodeId), BREAKDOWN_FILE));
+  return readJsonIfExists(join15(episodeDir(root, episodeId), BREAKDOWN_FILE));
 }
 function loadEpisodeShots(root, episodeId) {
-  return readJsonIfExists(join14(episodeDir(root, episodeId), SHOTS_FILE));
+  return readJsonIfExists(join15(episodeDir(root, episodeId), SHOTS_FILE));
 }
 function saveCharacters(root, doc) {
   writeJsonAtomic(charactersPath(root), { ...doc, version: 1, updated_at: nowIso() });
@@ -8688,20 +8933,20 @@ function saveVoices(root, doc) {
   writeJsonAtomic(voicesPath(root), { ...doc, version: 1, updated_at: nowIso() });
 }
 function saveScriptMeta(root, episodeId, meta) {
-  writeJsonAtomic(join14(episodeDir(root, episodeId), SCRIPT_FILE), meta);
+  writeJsonAtomic(join15(episodeDir(root, episodeId), SCRIPT_FILE), meta);
 }
 function saveBreakdown(root, episodeId, doc) {
-  writeJsonAtomic(join14(episodeDir(root, episodeId), BREAKDOWN_FILE), doc);
+  writeJsonAtomic(join15(episodeDir(root, episodeId), BREAKDOWN_FILE), doc);
 }
 function saveEpisodeShots(root, episodeId, shots) {
-  writeJsonAtomic(join14(episodeDir(root, episodeId), SHOTS_FILE), shots);
+  writeJsonAtomic(join15(episodeDir(root, episodeId), SHOTS_FILE), shots);
 }
 function normalizeScriptText(text) {
   return text.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 }
 function appendStoryLfsRules(root) {
-  const file = join14(root, ".gitattributes");
-  const current = existsSync17(file) ? readFileSync13(file, "utf8") : "";
+  const file = join15(root, ".gitattributes");
+  const current = existsSync18(file) ? readFileSync14(file, "utf8") : "";
   const required = [
     "story/assets/**        filter=lfs diff=lfs merge=lfs -text",
     "episodes/**/anchors/** filter=lfs diff=lfs merge=lfs -text"
@@ -8718,16 +8963,16 @@ function initStory(root, projectName) {
   for (const dir of [
     STORY_DIR,
     STORY_ASSETS_DIR,
-    join14(STORY_ASSETS_DIR, "characters"),
-    join14(STORY_ASSETS_DIR, "scenes"),
-    join14(STORY_ASSETS_DIR, "voices"),
+    join15(STORY_ASSETS_DIR, "characters"),
+    join15(STORY_ASSETS_DIR, "scenes"),
+    join15(STORY_ASSETS_DIR, "voices"),
     EPISODES_DIR,
     LOG_DIR,
     WORKFLOWS_DIR
   ]) {
-    ensureDir(join14(root, dir));
+    ensureDir(join15(root, dir));
   }
-  if (!existsSync17(seriesPath(root))) {
+  if (!existsSync18(seriesPath(root))) {
     const now = nowIso();
     const series = {
       version: 1,
@@ -8738,15 +8983,15 @@ function initStory(root, projectName) {
     writeJsonAtomic(seriesPath(root), series);
     created.push("story/series.json");
   }
-  if (!existsSync17(charactersPath(root))) {
+  if (!existsSync18(charactersPath(root))) {
     writeJsonAtomic(charactersPath(root), emptyCharactersFile());
     created.push("story/characters.json");
   }
-  if (!existsSync17(scenesPath(root))) {
+  if (!existsSync18(scenesPath(root))) {
     writeJsonAtomic(scenesPath(root), emptyScenesFile());
     created.push("story/scenes.json");
   }
-  if (!existsSync17(voicesPath(root))) {
+  if (!existsSync18(voicesPath(root))) {
     writeJsonAtomic(voicesPath(root), emptyVoicesFile());
     created.push("story/voices.json");
   }
@@ -8759,16 +9004,16 @@ function initStory(root, projectName) {
   }
   for (const meta of listEpisodeMetas(root)) {
     const dir = episodeDir(root, meta.id);
-    if (!existsSync17(join14(dir, SCRIPT_FILE))) {
-      writeJsonAtomic(join14(dir, SCRIPT_FILE), emptyScriptMeta());
+    if (!existsSync18(join15(dir, SCRIPT_FILE))) {
+      writeJsonAtomic(join15(dir, SCRIPT_FILE), emptyScriptMeta());
       created.push(`episodes/${meta.id}/script.json`);
     }
-    if (!existsSync17(join14(dir, BREAKDOWN_FILE))) {
-      writeJsonAtomic(join14(dir, BREAKDOWN_FILE), emptyBreakdown(meta.id));
+    if (!existsSync18(join15(dir, BREAKDOWN_FILE))) {
+      writeJsonAtomic(join15(dir, BREAKDOWN_FILE), emptyBreakdown(meta.id));
       created.push(`episodes/${meta.id}/breakdown.json`);
     }
-    if (!existsSync17(join14(dir, SHOTS_FILE))) {
-      writeJsonAtomic(join14(dir, SHOTS_FILE), emptyShots(meta.id));
+    if (!existsSync18(join15(dir, SHOTS_FILE))) {
+      writeJsonAtomic(join15(dir, SHOTS_FILE), emptyShots(meta.id));
       created.push(`episodes/${meta.id}/shots.json`);
     }
   }
@@ -8807,11 +9052,11 @@ function addEpisode(root, init) {
     created_at: now,
     updated_at: now
   };
-  if (!existsSync17(join14(dir, EPISODE_META_FILE))) writeJsonAtomic(join14(dir, EPISODE_META_FILE), meta);
-  if (!existsSync17(join14(dir, SCRIPT_FILE))) writeJsonAtomic(join14(dir, SCRIPT_FILE), emptyScriptMeta());
-  if (!existsSync17(join14(dir, BREAKDOWN_FILE))) writeJsonAtomic(join14(dir, BREAKDOWN_FILE), emptyBreakdown(init.id));
-  if (!existsSync17(join14(dir, SHOTS_FILE))) writeJsonAtomic(join14(dir, SHOTS_FILE), emptyShots(init.id));
-  ensureDir(join14(root, LOG_DIR));
+  if (!existsSync18(join15(dir, EPISODE_META_FILE))) writeJsonAtomic(join15(dir, EPISODE_META_FILE), meta);
+  if (!existsSync18(join15(dir, SCRIPT_FILE))) writeJsonAtomic(join15(dir, SCRIPT_FILE), emptyScriptMeta());
+  if (!existsSync18(join15(dir, BREAKDOWN_FILE))) writeJsonAtomic(join15(dir, BREAKDOWN_FILE), emptyBreakdown(init.id));
+  if (!existsSync18(join15(dir, SHOTS_FILE))) writeJsonAtomic(join15(dir, SHOTS_FILE), emptyShots(init.id));
+  ensureDir(join15(root, LOG_DIR));
   return meta;
 }
 function updateEpisode(root, episodeId, patch) {
@@ -8838,7 +9083,7 @@ function updateEpisode(root, episodeId, patch) {
     ...patch.summary !== void 0 ? { summary: patch.summary } : {},
     updated_at: nowIso()
   };
-  writeJsonAtomic(join14(episodeDir(root, episodeId), EPISODE_META_FILE), next);
+  writeJsonAtomic(join15(episodeDir(root, episodeId), EPISODE_META_FILE), next);
   return next;
 }
 function syncScript(opts) {
@@ -8887,7 +9132,7 @@ function syncScript(opts) {
     approved_at: null,
     changelog: [...cur.changelog, entry].slice(-SCRIPT_CHANGELOG_LIMIT)
   };
-  writeFileAtomic(join14(episodeDir(opts.root, opts.episodeId), SCRIPT_TEXT_FILE), text);
+  writeFileAtomic(join15(episodeDir(opts.root, opts.episodeId), SCRIPT_TEXT_FILE), text);
   saveScriptMeta(opts.root, opts.episodeId, meta);
   return { meta, changed: true };
 }
@@ -8896,8 +9141,8 @@ function approveScript(root, episodeId) {
   if (cur.revision <= 0) {
     throw new DaoyanCliError({ code: "story_invalid", message: "\u5267\u672C\u5C1A\u672A\u540C\u6B65\uFF0C\u4E0D\u80FD\u786E\u8BA4" });
   }
-  const textFile = join14(episodeDir(root, episodeId), SCRIPT_TEXT_FILE);
-  if (!existsSync17(textFile)) {
+  const textFile = join15(episodeDir(root, episodeId), SCRIPT_TEXT_FILE);
+  if (!existsSync18(textFile)) {
     throw new DaoyanCliError({ code: "story_invalid", message: "\u5267\u672C\u6B63\u6587\u4E0D\u5B58\u5728\uFF0C\u4E0D\u80FD\u786E\u8BA4" });
   }
   if (cur.status === "approved") return cur;
@@ -8920,48 +9165,48 @@ var init_store2 = __esm({
 });
 
 // src/core/run/store.mts
-import { copyFileSync, existsSync as existsSync18, readdirSync as readdirSync5, readFileSync as readFileSync14, renameSync as renameSync3, writeFileSync as writeFileSync6 } from "fs";
-import { basename as basename3, join as join15 } from "path";
+import { copyFileSync, existsSync as existsSync19, readdirSync as readdirSync5, readFileSync as readFileSync15, renameSync as renameSync3, writeFileSync as writeFileSync6 } from "fs";
+import { basename as basename3, join as join16 } from "path";
 function newRunId(machineId) {
   return makeId(machineId);
 }
 function runDir(root, runId) {
-  return join15(root, RUNS_DIR, runId);
+  return join16(root, RUNS_DIR, runId);
 }
 function createRunDir(root, runId) {
   const dir = runDir(root, runId);
-  ensureDir(join15(dir, INPUTS_DIR));
-  ensureDir(join15(dir, "outputs"));
+  ensureDir(join16(dir, INPUTS_DIR));
+  ensureDir(join16(dir, "outputs"));
   return dir;
 }
 function writeWorkflowSnapshot(root, runId, graph) {
-  writeJsonAtomic(join15(runDir(root, runId), RUN_WORKFLOW_FILE), graph);
+  writeJsonAtomic(join16(runDir(root, runId), RUN_WORKFLOW_FILE), graph);
 }
 function writeInputsSnapshot(root, runId, inputs, files) {
-  writeJsonAtomic(join15(runDir(root, runId), RUN_INPUTS_FILE), { inputs, files });
+  writeJsonAtomic(join16(runDir(root, runId), RUN_INPUTS_FILE), { inputs, files });
 }
 function copyRunInput(root, runId, source, desiredName) {
-  if (!existsSync18(source)) {
+  if (!existsSync19(source)) {
     throw new DaoyanCliError({ code: "config_invalid", message: `\u8F93\u5165\u6587\u4EF6\u4E0D\u5B58\u5728\uFF1A${source}` });
   }
   const name = basename3(desiredName ?? source).replace(/[^A-Za-z0-9._-]/g, "_");
-  const dir = join15(runDir(root, runId), INPUTS_DIR);
+  const dir = join16(runDir(root, runId), INPUTS_DIR);
   ensureDir(dir);
-  const dest = join15(dir, name);
+  const dest = join16(dir, name);
   copyFileSync(source, dest);
-  const bytes = new Uint8Array(readFileSync14(dest));
+  const bytes = new Uint8Array(readFileSync15(dest));
   return { name, sha256: sha256(bytes), bytes: bytes.byteLength };
 }
 function writeRunOutput(root, runId, filename, bytes) {
   const safe = basename3(filename).replace(/[^A-Za-z0-9._-]/g, "_") || "output.bin";
-  const dir = join15(runDir(root, runId), "outputs");
+  const dir = join16(runDir(root, runId), "outputs");
   ensureDir(dir);
   let name = safe;
-  for (let i = 1; existsSync18(join15(dir, name)); i++) {
+  for (let i = 1; existsSync19(join16(dir, name)); i++) {
     const dot = safe.lastIndexOf(".");
     name = dot > 0 ? `${safe.slice(0, dot)}_${i}${safe.slice(dot)}` : `${safe}_${i}`;
   }
-  writeFileAtomicBytes(join15(dir, name), bytes);
+  writeFileAtomicBytes(join16(dir, name), bytes);
   return { name, path: `outputs/${name}`, sha256: sha256(bytes), bytes: bytes.byteLength };
 }
 function writeFileAtomicBytes(file, bytes) {
@@ -8970,10 +9215,10 @@ function writeFileAtomicBytes(file, bytes) {
   renameSync3(tmp, file);
 }
 function writeRun(root, record) {
-  writeJsonAtomic(join15(runDir(root, record.run_id), RUN_FILE), record);
+  writeJsonAtomic(join16(runDir(root, record.run_id), RUN_FILE), record);
 }
 function readRun(root, runId) {
-  return readJsonIfExists(join15(root, RUNS_DIR, runId, RUN_FILE));
+  return readJsonIfExists(join16(root, RUNS_DIR, runId, RUN_FILE));
 }
 function requireRun(root, runId) {
   const rec = readRun(root, runId);
@@ -8983,8 +9228,8 @@ function requireRun(root, runId) {
   return rec;
 }
 function listRuns(root) {
-  const dir = join15(root, RUNS_DIR);
-  if (!existsSync18(dir)) return [];
+  const dir = join16(root, RUNS_DIR);
+  if (!existsSync19(dir)) return [];
   const out = [];
   for (const ent of readdirSync5(dir, { withFileTypes: true })) {
     if (!ent.isDirectory()) continue;
@@ -9001,7 +9246,7 @@ function latestRunByLabel(root, label) {
   return listRuns(root).filter((r) => r.label === label)[0] ?? null;
 }
 function runOutputAbs(root, record, output2) {
-  return join15(runDir(root, record.run_id), output2.path);
+  return join16(runDir(root, record.run_id), output2.path);
 }
 var init_store3 = __esm({
   "src/core/run/store.mts"() {
@@ -9013,8 +9258,8 @@ var init_store3 = __esm({
 });
 
 // src/core/story/assets.mts
-import { existsSync as existsSync19, readFileSync as readFileSync15, renameSync as renameSync4, rmSync as rmSync10, statSync as statSync4, writeFileSync as writeFileSync7 } from "fs";
-import { dirname as dirname8, isAbsolute as isAbsolute4, join as join16 } from "path";
+import { existsSync as existsSync20, readFileSync as readFileSync16, renameSync as renameSync4, rmSync as rmSync10, statSync as statSync4, writeFileSync as writeFileSync7 } from "fs";
+import { dirname as dirname9, isAbsolute as isAbsolute4, join as join17 } from "path";
 function parseAssetOwner(owner, form) {
   const colon = owner.indexOf(":");
   if (colon <= 0 || colon === owner.length - 1) {
@@ -9080,19 +9325,19 @@ function detectAssetType(bytes) {
 function isLfsPointerFile(file) {
   try {
     if (statSync4(file).size > 1024) return false;
-    return readFileSync15(file, "utf8").startsWith(LFS_POINTER_PREFIX);
+    return readFileSync16(file, "utf8").startsWith(LFS_POINTER_PREFIX);
   } catch {
     return false;
   }
 }
 function writeBytesAtomic(file, bytes) {
-  ensureDir(dirname8(file));
+  ensureDir(dirname9(file));
   const tmp = `${file}.tmp-${process.pid}`;
   writeFileSync7(tmp, bytes);
   renameSync4(tmp, file);
 }
 function readSource(path) {
-  if (!existsSync19(path)) {
+  if (!existsSync20(path)) {
     throw new DaoyanCliError({ code: "asset_not_found", message: `\u6E90\u6587\u4EF6\u4E0D\u5B58\u5728\uFF1A${path}` });
   }
   if (isLfsPointerFile(path)) {
@@ -9110,7 +9355,7 @@ function readSource(path) {
       details: { bytes: size, limit: MAX_ASSET_BYTES }
     });
   }
-  return new Uint8Array(readFileSync15(path));
+  return new Uint8Array(readFileSync16(path));
 }
 function assetRelPath(owner, assetId, ext) {
   if (owner.kind === "character" && owner.form !== null) {
@@ -9158,7 +9403,7 @@ function sourceFromRun(root, runId, outputName) {
     });
   }
   const source = runOutputAbs(root, run2, output2);
-  if (!existsSync19(source)) {
+  if (!existsSync20(source)) {
     throw new DaoyanCliError({
       code: "asset_not_found",
       message: `run \u4EA7\u7269\u4E0D\u5728\u5DE5\u4F5C\u533A\uFF08\u53EF\u80FD\u672A git lfs pull\uFF09\uFF1A${runId}/${output2.path}`
@@ -9195,7 +9440,7 @@ function addAsset(opts) {
     sourceOutput = runSource.sourceOutput;
     sourceEpisodeId = runSource.sourceEpisodeId;
   } else if (opts.from !== void 0 && opts.from !== "") {
-    source = isAbsolute4(opts.from) ? opts.from : join16(opts.root, opts.from);
+    source = isAbsolute4(opts.from) ? opts.from : join17(opts.root, opts.from);
   } else {
     throw new DaoyanCliError({
       code: "usage",
@@ -9213,7 +9458,7 @@ function addAsset(opts) {
     });
   }
   const rel = assetRelPath(opts.owner, opts.assetId, type.ext);
-  const abs = join16(opts.root, rel);
+  const abs = join17(opts.root, rel);
   const asset = {
     id: opts.assetId,
     ...opts.role !== void 0 && opts.role !== "" ? { role: opts.role } : {},
@@ -9226,7 +9471,7 @@ function addAsset(opts) {
     source_episode_id: sourceEpisodeId,
     created_at: nowIso()
   };
-  if (existsSync19(abs) && !opts.replace) {
+  if (existsSync20(abs) && !opts.replace) {
     throw new DaoyanCliError({
       code: "asset_invalid",
       message: `\u8D44\u4EA7\u5DF2\u5B58\u5728\uFF1A${rel}`,
@@ -9347,8 +9592,8 @@ function removeFromList(root, list, holder, assetId, force) {
       hint: "\u5148\u7528 story asset set-reference \u6307\u5411\u53E6\u4E00\u8D44\u4EA7\uFF0C\u6216 --force \u5220\u9664\u5E76\u63A5\u53D7 missing_reference\u3002"
     });
   }
-  const abs = join16(root, asset.path);
-  if (existsSync19(abs)) rmSync10(abs, { force: true });
+  const abs = join17(root, asset.path);
+  if (existsSync20(abs)) rmSync10(abs, { force: true });
   const index = list.findIndex((a) => a.id === assetId);
   if (index >= 0) list.splice(index, 1);
   if (holder.reference_asset === assetId) holder.reference_asset = null;
@@ -9416,17 +9661,17 @@ var init_assets = __esm({
 });
 
 // src/core/story/workflow-assets.mts
-import { existsSync as existsSync20, readFileSync as readFileSync16 } from "fs";
-import { basename as basename5, join as join17 } from "path";
+import { existsSync as existsSync21, readFileSync as readFileSync17 } from "fs";
+import { basename as basename5, join as join18 } from "path";
 function workflowAssetsPath(workflowAbs) {
   return workflowAbs.replace(/\.json$/i, ".assets.json");
 }
 function loadWorkflowAssets(workflowAbs) {
   const file = workflowAssetsPath(workflowAbs);
-  if (!existsSync20(file)) return null;
+  if (!existsSync21(file)) return null;
   let raw;
   try {
-    raw = JSON.parse(readFileSync16(file, "utf8"));
+    raw = JSON.parse(readFileSync17(file, "utf8"));
   } catch (e) {
     throw new DaoyanCliError({
       code: "story_invalid",
@@ -9553,8 +9798,8 @@ function selectAsset(assets, referenceAsset, selector, label) {
   return asset;
 }
 function ensureAssetFile(root, asset, label) {
-  const abs = join17(root, asset.path);
-  if (!existsSync20(abs)) {
+  const abs = join18(root, asset.path);
+  if (!existsSync21(abs)) {
     throw new DaoyanCliError({
       code: "asset_not_found",
       message: `${label} \u7684\u8D44\u4EA7\u6587\u4EF6\u4E0D\u5B58\u5728\uFF1A${asset.path}`,
@@ -9750,8 +9995,8 @@ var init_workflow_assets = __esm({
 });
 
 // src/core/story/validate.mts
-import { existsSync as existsSync21, readFileSync as readFileSync17, readdirSync as readdirSync6 } from "fs";
-import { join as join18 } from "path";
+import { existsSync as existsSync22, readFileSync as readFileSync18, readdirSync as readdirSync6 } from "fs";
+import { join as join19 } from "path";
 function issue(episodeId, path, code, severity, message, hint) {
   return { episode_id: episodeId, path, code, severity, message, hint };
 }
@@ -9797,8 +10042,8 @@ function checkAssetFile(root, asset, episodeId, label, verifyHashes, issues) {
     );
     return false;
   }
-  const abs = join18(root, asset.path);
-  if (!existsSync21(abs)) {
+  const abs = join19(root, asset.path);
+  if (!existsSync22(abs)) {
     issues.push(
       issue(
         episodeId,
@@ -9826,7 +10071,7 @@ function checkAssetFile(root, asset, episodeId, label, verifyHashes, issues) {
   }
   if (verifyHashes) {
     try {
-      const content = readFileSync17(abs);
+      const content = readFileSync18(abs);
       if (sha256(content) !== asset.sha256) {
         issues.push(
           issue(
@@ -10830,7 +11075,7 @@ function checkEpisodeShotsDoc(root, episodeId, project, shots, breakdown, charac
     } else {
       try {
         const wf = resolveWorkflowRef(root, wfRef);
-        if (!existsSync21(wf.abs)) {
+        if (!existsSync22(wf.abs)) {
           issues.push(
             issue(
               episodeId,
@@ -10842,7 +11087,7 @@ function checkEpisodeShotsDoc(root, episodeId, project, shots, breakdown, charac
             )
           );
         } else {
-          if (!existsSync21(bindingsPathOf(wf.abs))) {
+          if (!existsSync22(bindingsPathOf(wf.abs))) {
             issues.push(
               issue(
                 episodeId,
@@ -10959,8 +11204,8 @@ function coverageBlockers(root, breakdown, characters, scenes, voices, shots) {
   return out;
 }
 function usableAsset(root, asset) {
-  const abs = join18(root, asset.path);
-  return existsSync21(abs) && !isLfsPointerFile(abs);
+  const abs = join19(root, asset.path);
+  return existsSync22(abs) && !isLfsPointerFile(abs);
 }
 function breakdownAssetCount(breakdown, characters, scenes, voices) {
   if (breakdown === null) return 0;
@@ -10981,8 +11226,8 @@ function breakdownAssetCount(breakdown, characters, scenes, voices) {
   return count;
 }
 function validateEpisodeFinals(root, episodeId, issues) {
-  const dir = join18(root, FINAL_DIR, episodeId);
-  if (!existsSync21(dir)) return;
+  const dir = join19(root, FINAL_DIR, episodeId);
+  if (!existsSync22(dir)) return;
   let entries = [];
   try {
     entries = readdirSync6(dir).filter((name) => name.endsWith(".json"));
@@ -10990,7 +11235,7 @@ function validateEpisodeFinals(root, episodeId, issues) {
     return;
   }
   for (const name of entries) {
-    const manifest = readJsonIfExists(join18(dir, name));
+    const manifest = readJsonIfExists(join19(dir, name));
     if (manifest === null) continue;
     const label = `${FINAL_DIR}/${episodeId}/${name}`;
     if (manifest.episode_id !== episodeId) {
@@ -11007,7 +11252,7 @@ function validateEpisodeFinals(root, episodeId, issues) {
     }
     for (const clip of manifest.clips ?? []) {
       if (typeof clip.run_id !== "string" || clip.run_id === "") continue;
-      const run2 = readJsonIfExists(join18(root, "runs", clip.run_id, RUN_FILE));
+      const run2 = readJsonIfExists(join19(root, "runs", clip.run_id, RUN_FILE));
       if (run2 !== null && run2.episode_id !== episodeId) {
         issues.push(
           issue(
@@ -11024,8 +11269,8 @@ function validateEpisodeFinals(root, episodeId, issues) {
   }
 }
 function hasFinal(root, episodeId) {
-  const dir = join18(root, FINAL_DIR, episodeId);
-  if (!existsSync21(dir)) return false;
+  const dir = join19(root, FINAL_DIR, episodeId);
+  if (!existsSync22(dir)) return false;
   try {
     return readdirSync6(dir).some((name) => /^cut-.*\.(mp4|webm|mov|mkv)$/i.test(name));
   } catch {
@@ -11049,7 +11294,7 @@ function computeEpisodeStoryStatus(root, episodeId, project) {
   const shotsRevision = shots?.meta.script_revision;
   const shotsStale = typeof shotsRevision === "number" && shotsRevision < script.revision;
   const blockers = [];
-  if (script.revision <= 0 || !existsSync21(join18(episodeDir(root, episodeId), "script.md"))) {
+  if (script.revision <= 0 || !existsSync22(join19(episodeDir(root, episodeId), "script.md"))) {
     blockers.push(blocker("script_missing", "\u672C\u96C6\u5267\u672C\u5C1A\u672A\u540C\u6B65"));
   } else if (script.status !== "approved") {
     blockers.push(blocker("script_draft", "\u672C\u96C6\u5267\u672C\u672A\u786E\u8BA4"));
@@ -11083,11 +11328,11 @@ function computeEpisodeStoryStatus(root, episodeId, project) {
       }
       try {
         const wf = resolveWorkflowRef(root, wfRef);
-        if (!existsSync21(wf.abs)) {
+        if (!existsSync22(wf.abs)) {
           blockers.push(blocker("workflow_unresolved", `\u955C\u5934 ${shot.id} \u7684 workflow \u4E0D\u5B58\u5728\uFF1A${wf.rel}`));
           break;
         }
-        if (!existsSync21(bindingsPathOf(wf.abs))) {
+        if (!existsSync22(bindingsPathOf(wf.abs))) {
           blockers.push(
             blocker("workflow_unresolved", `\u955C\u5934 ${shot.id} \u7684 workflow \u7F3A\u5C11 bindings\uFF1A${wf.rel}`)
           );
@@ -11264,7 +11509,7 @@ function validateStory(root, episodeId, verifyHashes = false) {
     return issues;
   }
   const series = readSeries(root);
-  if (series === null || !existsSync21(seriesPath(root))) {
+  if (series === null || !existsSync22(seriesPath(root))) {
     issues.push(
       issue(null, "story/series.json", "series_missing", "error", "\u7CFB\u5217\u5143\u6570\u636E\u4E0D\u5B58\u5728", "\u91CD\u65B0 story init\u3002")
     );
@@ -11297,7 +11542,7 @@ function validateStory(root, episodeId, verifyHashes = false) {
       );
     }
     numbers.add(meta.number);
-    if (!existsSync21(join18(episodeDir(root, meta.id), EPISODE_META_FILE))) {
+    if (!existsSync22(join19(episodeDir(root, meta.id), EPISODE_META_FILE))) {
       issues.push(
         issue(
           meta.id,
@@ -11313,15 +11558,15 @@ function validateStory(root, episodeId, verifyHashes = false) {
   const characters = loadCharacters(root);
   const scenes = loadScenes(root);
   const voices = loadVoices(root);
-  if (!existsSync21(charactersPath(root))) {
+  if (!existsSync22(charactersPath(root))) {
     issues.push(
       issue(null, "story/characters.json", "characters_missing", "error", "\u89D2\u8272\u8BBE\u5B9A\u4E0D\u5B58\u5728", "\u91CD\u65B0 story init\u3002")
     );
   }
-  if (!existsSync21(scenesPath(root))) {
+  if (!existsSync22(scenesPath(root))) {
     issues.push(issue(null, "story/scenes.json", "scenes_missing", "error", "\u573A\u666F\u8BBE\u5B9A\u4E0D\u5B58\u5728", "\u91CD\u65B0 story init\u3002"));
   }
-  if (!existsSync21(voicesPath(root))) {
+  if (!existsSync22(voicesPath(root))) {
     issues.push(issue(null, "story/voices.json", "voices_missing", "error", "\u97F3\u8272\u8BBE\u5B9A\u4E0D\u5B58\u5728", "\u91CD\u65B0 story init\u3002"));
   }
   validateCharacters(root, characters, voices, episodeIds, verifyHashes, issues);
@@ -11488,8 +11733,8 @@ var init_validate = __esm({
 });
 
 // src/commands/validate.mts
-import { existsSync as existsSync22, readFileSync as readFileSync18, readdirSync as readdirSync7 } from "fs";
-import { isAbsolute as isAbsolute5, join as join19 } from "path";
+import { existsSync as existsSync23, readFileSync as readFileSync19, readdirSync as readdirSync7 } from "fs";
+import { isAbsolute as isAbsolute5, join as join20 } from "path";
 function fromGraphIssue(prefix, i) {
   return {
     path: `${prefix}:${i.path}`,
@@ -11500,8 +11745,8 @@ function fromGraphIssue(prefix, i) {
   };
 }
 function validateWorkflows(root, machine, issues) {
-  const dir = join19(root, WORKFLOWS_DIR);
-  if (!existsSync22(dir)) {
+  const dir = join20(root, WORKFLOWS_DIR);
+  if (!existsSync23(dir)) {
     issues.push({
       path: WORKFLOWS_DIR,
       code: "workflows_dir_missing",
@@ -11524,10 +11769,10 @@ function validateWorkflows(root, machine, issues) {
   const catalog = readCatalog(root);
   for (const f of files) {
     const rel = `${WORKFLOWS_DIR}/${f}`;
-    const abs = join19(dir, f);
+    const abs = join20(dir, f);
     let raw;
     try {
-      raw = JSON.parse(readFileSync18(abs, "utf8"));
+      raw = JSON.parse(readFileSync19(abs, "utf8"));
     } catch (e) {
       issues.push({
         path: rel,
@@ -11691,7 +11936,7 @@ function validateShots(root, shots, issues) {
     const ref = s.workflow ?? shots.workflow ?? null;
     if (ref !== null) {
       const wf = resolveWorkflowRef(root, ref);
-      if (!existsSync22(wf.abs)) {
+      if (!existsSync23(wf.abs)) {
         issues.push({
           path: tag,
           code: "shot_workflow_missing",
@@ -11699,7 +11944,7 @@ function validateShots(root, shots, issues) {
           message: `workflow \u6587\u4EF6\u4E0D\u5B58\u5728\uFF1A${wf.rel}`,
           hint: "\u5148\u521B\u5EFA/\u5BFC\u5165\u8BE5 workflow\u3002"
         });
-      } else if (!existsSync22(bindingsPathOf(wf.abs))) {
+      } else if (!existsSync23(bindingsPathOf(wf.abs))) {
         issues.push({
           path: tag,
           code: "shot_bindings_missing",
@@ -11724,7 +11969,7 @@ function validateShots(root, shots, issues) {
           message: `\u951A\u70B9 key "${ff}" \u4E0D\u5728 meta.anchors`,
           hint: "\u5728 meta.anchors \u767B\u8BB0\u6216\u6539\u7528\u5B58\u5728\u7684 key\u3002"
         });
-      } else if (!existsSync22(join19(root, rel))) {
+      } else if (!existsSync23(join20(root, rel))) {
         issues.push({
           path: tag,
           code: "anchor_file_missing",
@@ -11788,8 +12033,8 @@ function validateMachine(root, machine, issues) {
     return;
   }
   if (machine.engine.mode !== "local") return;
-  const comfyDir = machine.engine.comfyui_dir !== void 0 ? isAbsolute5(machine.engine.comfyui_dir) ? machine.engine.comfyui_dir : join19(root, machine.engine.comfyui_dir) : join19(root, "engine", "ComfyUI");
-  if (!existsSync22(join19(comfyDir, "main.py"))) {
+  const comfyDir = machine.engine.comfyui_dir !== void 0 ? isAbsolute5(machine.engine.comfyui_dir) ? machine.engine.comfyui_dir : join20(root, machine.engine.comfyui_dir) : join20(root, "engine", "ComfyUI");
+  if (!existsSync23(join20(comfyDir, "main.py"))) {
     issues.push({
       path: ".dycli/machine.json",
       code: "engine_not_installed",
@@ -11798,7 +12043,7 @@ function validateMachine(root, machine, issues) {
       hint: "\u8FD0\u884C daoyan init --mode=local \u90E8\u7F72\u5F15\u64CE\u3002"
     });
   }
-  if (machine.engine.modelpath !== void 0 && !existsSync22(machine.engine.modelpath)) {
+  if (machine.engine.modelpath !== void 0 && !existsSync23(machine.engine.modelpath)) {
     issues.push({
       path: ".dycli/machine.json",
       code: "modelpath_missing",
@@ -11807,7 +12052,7 @@ function validateMachine(root, machine, issues) {
       hint: "\u91CD\u65B0 init --modelpath\uFF0C\u6216\u6302\u8F7D\u8BE5\u76EE\u5F55\u3002"
     });
   }
-  if (machine.engine.models_config !== null && machine.engine.models_config !== void 0 && !existsSync22(machine.engine.models_config)) {
+  if (machine.engine.models_config !== null && machine.engine.models_config !== void 0 && !existsSync23(machine.engine.models_config)) {
     issues.push({
       path: ".dycli/machine.json",
       code: "models_config_missing",
@@ -11824,7 +12069,7 @@ async function runValidate(ctx2) {
   const issues = [];
   if (project.default_workflow !== void 0) {
     const wf = resolveWorkflowRef(root, project.default_workflow);
-    if (!existsSync22(wf.abs)) {
+    if (!existsSync23(wf.abs)) {
       issues.push({
         path: "project.default_workflow",
         code: "default_workflow_missing",
@@ -12030,8 +12275,8 @@ var init_ffmpeg = __esm({
 });
 
 // src/core/task/plans.mts
-import { existsSync as existsSync23, mkdirSync as mkdirSync4, statSync as statSync6 } from "fs";
-import { basename as basename6, join as join20 } from "path";
+import { existsSync as existsSync24, mkdirSync as mkdirSync4, statSync as statSync6 } from "fs";
+import { basename as basename6, join as join21 } from "path";
 function splitTarget2(target) {
   const dot = target.indexOf(".");
   return { node: target.slice(0, dot), input: target.slice(dot + 1) };
@@ -12155,7 +12400,7 @@ function pickRelaySource(root, upstreamId, labelPrefix) {
     });
   }
   const abs = runOutputAbs(root, rec, chosen);
-  if (!existsSync23(abs)) {
+  if (!existsSync24(abs)) {
     throw new DaoyanCliError({
       code: "relay_upstream_missing",
       message: `\u63A5\u529B\u4E0A\u6E38\u4EA7\u7269\u4E0D\u5728\u5DE5\u4F5C\u533A\uFF08\u53EF\u80FD\u672A git lfs pull\uFF09\uFF1A${rec.run_id}/${chosen.path}`,
@@ -12183,8 +12428,8 @@ function firstFrameUpload(opts) {
         message: `\u955C ${opts.shot.id} \u7684\u951A\u70B9 key "${ff}" \u4E0D\u5728 shots.json meta.anchors`
       });
     }
-    const src = join20(opts.root, rel);
-    if (!existsSync23(src)) {
+    const src = join21(opts.root, rel);
+    if (!existsSync24(src)) {
       throw new DaoyanCliError({
         code: "anchor_not_found",
         message: `\u951A\u70B9\u56FE\u7247\u4E0D\u5B58\u5728\uFF1A${rel}`,
@@ -12210,11 +12455,11 @@ function firstFrameUpload(opts) {
     });
   }
   const sourceClip = pickRelaySource(opts.root, upstream.id, opts.labelPrefix);
-  const relayDir = join20(opts.root, RELAY_DIR);
+  const relayDir = join21(opts.root, RELAY_DIR);
   mkdirSync4(relayDir, { recursive: true });
-  const cache = join20(relayDir, `relay_${upstream.id}_to_${opts.shot.id}.png`);
+  const cache = join21(relayDir, `relay_${upstream.id}_to_${opts.shot.id}.png`);
   let needExtract = true;
-  if (existsSync23(cache)) {
+  if (existsSync24(cache)) {
     try {
       needExtract = statSync6(cache).mtimeMs < statSync6(sourceClip).mtimeMs;
     } catch {
@@ -12392,17 +12637,17 @@ var init_signals = __esm({
 });
 
 // src/core/task/events.mts
-import { existsSync as existsSync24, readFileSync as readFileSync19 } from "fs";
-import { join as join21 } from "path";
+import { existsSync as existsSync25, readFileSync as readFileSync20 } from "fs";
+import { join as join22 } from "path";
 import { appendFileSync as appendFileSync2 } from "fs";
 function eventsPath(taskDir2) {
-  return join21(taskDir2, EVENTS_FILE);
+  return join22(taskDir2, EVENTS_FILE);
 }
 function readEvents(taskDir2, fromSeq = 0) {
   const file = eventsPath(taskDir2);
-  if (!existsSync24(file)) return [];
+  if (!existsSync25(file)) return [];
   const out = [];
-  for (const line of readFileSync19(file, "utf8").split("\n")) {
+  for (const line of readFileSync20(file, "utf8").split("\n")) {
     if (line.trim() === "") continue;
     try {
       const ev = JSON.parse(line);
@@ -12629,8 +12874,8 @@ var init_preflight = __esm({
 });
 
 // src/core/run/executor.mts
-import { existsSync as existsSync25, readFileSync as readFileSync20, statSync as statSync7, openSync as openSync3, readSync as readSync2, closeSync as closeSync3 } from "fs";
-import { basename as basename7, join as join22 } from "path";
+import { existsSync as existsSync26, readFileSync as readFileSync21, statSync as statSync7, openSync as openSync3, readSync as readSync2, closeSync as closeSync3 } from "fs";
+import { basename as basename7, join as join23 } from "path";
 function collectOutputItems(outputs) {
   const out = [];
   for (const nodeOutputs of Object.values(outputs)) {
@@ -12652,7 +12897,7 @@ function collectOutputItems(outputs) {
   return out;
 }
 function readTailText(file, lines) {
-  if (!existsSync25(file)) return "";
+  if (!existsSync26(file)) return "";
   let size = 0;
   try {
     size = statSync7(file).size;
@@ -12673,7 +12918,7 @@ function readTailText(file, lines) {
 function detectOom(entry, root, taskId) {
   const statusText = JSON.stringify(entry.status?.messages ?? []);
   if (/out of memory|OutOfMemory|CUDA error|allocation on device|\bOOM\b/i.test(statusText)) return true;
-  const logText = readTailText(join22(root, LOG_DIR, `engine-${taskId}.log`), 30);
+  const logText = readTailText(join23(root, LOG_DIR, `engine-${taskId}.log`), 30);
   return /out of memory|OutOfMemory|CUDA error: out of memory|allocation on device|\bOOM\b/i.test(logText);
 }
 function sanitizeMessage(message, root) {
@@ -12742,7 +12987,7 @@ async function executeRun(opts) {
     }
     for (const up of opts.plan.uploads) {
       opts.event("upload_started", { run_id: opts.runId, logical: up.logical });
-      const bytes = new Uint8Array(readFileSync20(up.source));
+      const bytes = new Uint8Array(readFileSync21(up.source));
       files.push(copyRunInput(opts.root, opts.runId, up.source, up.desiredName));
       const engineName = `dycli_${opts.runId}_${basename7(up.desiredName).replace(/[^A-Za-z0-9._-]/g, "_")}`;
       const name = await opts.session.client.uploadImage(engineName, bytes, true);
@@ -12953,10 +13198,10 @@ async function executeRun(opts) {
 function patchRunCleanup(opts) {
   let first = true;
   for (const runId of opts.runIds) {
-    const file = join22(opts.root, "runs", runId, "run.json");
-    if (!existsSync25(file)) continue;
+    const file = join23(opts.root, "runs", runId, "run.json");
+    if (!existsSync26(file)) continue;
     try {
-      const rec = JSON.parse(readFileSync20(file, "utf8"));
+      const rec = JSON.parse(readFileSync21(file, "utf8"));
       rec.engine.cleanup = opts.cleanup;
       if (opts.gpu !== void 0) {
         const gpu = { ...opts.gpu, restored: opts.restored };
@@ -12996,8 +13241,8 @@ var init_executor = __esm({
 });
 
 // src/core/task/worker.mts
-import { existsSync as existsSync26, readdirSync as readdirSync8 } from "fs";
-import { basename as basename8, dirname as dirname9, join as join23, resolve as resolve4 } from "path";
+import { existsSync as existsSync27, readdirSync as readdirSync8 } from "fs";
+import { basename as basename8, dirname as dirname10, join as join24, resolve as resolve5 } from "path";
 function isFatalRunError(code) {
   return code === "engine_oom" || code === "engine_crashed" || code === "engine_unreachable" || code === "engine_busy" || code === "engine_start_failed" || code === "engine_stop_failed" || code === "gpu_lease_corrupt" || code === "machine_busy" || code === "machine_lock_corrupt" || code === "worker_start_failed";
 }
@@ -13041,8 +13286,8 @@ function aggregateFailure(kind, failures, completed) {
   };
 }
 async function runWorker(opts) {
-  const taskDir2 = resolve4(opts.taskDir);
-  const root = dirname9(dirname9(taskDir2));
+  const taskDir2 = resolve5(opts.taskDir);
+  const root = dirname10(dirname10(taskDir2));
   const taskId = basename8(taskDir2);
   let task = requireTask(root, taskId);
   if (isTerminalStatus(task.status)) return 0;
@@ -13397,7 +13642,7 @@ async function runWorker(opts) {
   }
 }
 function workerLogPath(root, taskId) {
-  return join23(root, LOG_DIR, `worker-${taskId}.log`);
+  return join24(root, LOG_DIR, `worker-${taskId}.log`);
 }
 var DEFAULT_TIMEOUT_MS;
 var init_worker = __esm({
@@ -13424,9 +13669,9 @@ var init_worker = __esm({
 });
 
 // src/core/task/create.mts
-import { closeSync as closeSync4, openSync as openSync4, readFileSync as readFileSync21 } from "fs";
+import { closeSync as closeSync4, openSync as openSync4, readFileSync as readFileSync22 } from "fs";
 import { spawn as spawn6 } from "child_process";
-import { join as join24 } from "path";
+import { join as join25 } from "path";
 function sleepMs(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
@@ -13478,7 +13723,7 @@ async function createAndStartTask(opts) {
       });
     }
     const logFile = workerLogPath(opts.root, taskId);
-    ensureDir(join24(opts.root, LOG_DIR));
+    ensureDir(join25(opts.root, LOG_DIR));
     const fd = openSync4(logFile, "a");
     const child = spawn6(process.execPath, [entry, "__worker"], {
       cwd: opts.root,
@@ -13534,7 +13779,7 @@ function taskRuns(root, task) {
   const out = [];
   for (const id of task.runs) {
     try {
-      const raw = JSON.parse(readFileSync21(join24(root, "runs", id, RUN_FILE), "utf8"));
+      const raw = JSON.parse(readFileSync22(join25(root, "runs", id, RUN_FILE), "utf8"));
       out.push(raw);
     } catch {
     }
@@ -13665,18 +13910,18 @@ var init_create = __esm({
 });
 
 // src/core/run/summary.mts
-import { existsSync as existsSync27 } from "fs";
-import { join as join25 } from "path";
+import { existsSync as existsSync28 } from "fs";
+import { join as join26 } from "path";
 function outputSummaries(root, rec) {
   return rec.outputs.map((o) => {
-    const abs = join25(runDir(root, rec.run_id), o.path);
+    const abs = join26(runDir(root, rec.run_id), o.path);
     return {
       name: o.name,
       path: `runs/${rec.run_id}/${o.path}`,
       abs_path: abs,
       sha256: o.sha256,
       bytes: o.bytes,
-      present: existsSync27(abs)
+      present: existsSync28(abs)
     };
   });
 }
@@ -14165,8 +14410,8 @@ var init_shot = __esm({
 });
 
 // src/commands/wrap.mts
-import { existsSync as existsSync28, mkdirSync as mkdirSync5, writeFileSync as writeFileSync8 } from "fs";
-import { join as join26 } from "path";
+import { existsSync as existsSync29, mkdirSync as mkdirSync5, writeFileSync as writeFileSync8 } from "fs";
+import { join as join27 } from "path";
 function pickVideoAt(root, rec) {
   const chosen = rec.outputs.find((o) => /\.(mp4|webm|mkv|mov|gif)$/i.test(o.name)) ?? rec.outputs[0];
   if (chosen === void 0) return null;
@@ -14223,7 +14468,7 @@ async function runWrap(ctx2, args) {
       continue;
     }
     const pick = pickVideoAt(root, rec);
-    if (pick === null || !existsSync28(pick.abs)) {
+    if (pick === null || !existsSync29(pick.abs)) {
       missing.push(shot.id);
       continue;
     }
@@ -14240,10 +14485,10 @@ async function runWrap(ctx2, args) {
   mkdirSync5(finalDir, { recursive: true });
   const ts2 = (/* @__PURE__ */ new Date()).toISOString().replace(/[-:]/g, "").replace(/\.(\d{3})Z$/, "$1");
   const outName = `cut-${ts2}.mp4`;
-  const outPath = join26(finalDir, outName);
+  const outPath = join27(finalDir, outName);
   const manifestName = `cut-${ts2}.json`;
-  const manifestPath = join26(finalDir, manifestName);
-  const listFile = join26(root, CONCAT_LIST_FILE);
+  const manifestPath = join27(finalDir, manifestName);
+  const listFile = join27(root, CONCAT_LIST_FILE);
   writeFileSync8(listFile, clips.map((c) => `file '${c.abs.replace(/'/g, "'\\''")}'`).join("\n") + "\n");
   say(`\u5408\u7247 ${clips.length} \u6BB5 \u2192 ${context.final_rel}/${outName}\uFF08libx264 / crf18 / faststart\uFF09...`);
   const r = await execCapture("ffmpeg", [
@@ -14320,8 +14565,8 @@ var init_wrap = __esm({
 });
 
 // src/commands/logs.mts
-import { closeSync as closeSync5, existsSync as existsSync29, openSync as openSync5, readSync as readSync3, readdirSync as readdirSync9, statSync as statSync8 } from "fs";
-import { join as join27 } from "path";
+import { closeSync as closeSync5, existsSync as existsSync30, openSync as openSync5, readSync as readSync3, readdirSync as readdirSync9, statSync as statSync8 } from "fs";
+import { join as join28 } from "path";
 function parseArgs2(args) {
   const out = { follow: false, n: 100, src: "all" };
   for (let i = 0; i < args.length; i++) {
@@ -14385,7 +14630,7 @@ function cleanLines(raw) {
   return out;
 }
 function readTail(file, n) {
-  if (!existsSync29(file)) return [];
+  if (!existsSync30(file)) return [];
   let size = 0;
   try {
     size = statSync8(file).size;
@@ -14404,13 +14649,13 @@ function readTail(file, n) {
   return cleanLines(buf.toString("utf8").replace(/\ufffd/g, "")).slice(-n);
 }
 function fileSources(root, src) {
-  const dir = join27(root, LOG_DIR);
-  const engines = existsSync29(dir) ? readdirSync9(dir).filter((f) => /^engine-.*\.log$/.test(f)).sort().reverse() : [];
-  const workers = existsSync29(dir) ? readdirSync9(dir).filter((f) => /^worker-.*\.log$/.test(f)).sort().reverse() : [];
+  const dir = join28(root, LOG_DIR);
+  const engines = existsSync30(dir) ? readdirSync9(dir).filter((f) => /^engine-.*\.log$/.test(f)).sort().reverse() : [];
+  const workers = existsSync30(dir) ? readdirSync9(dir).filter((f) => /^worker-.*\.log$/.test(f)).sort().reverse() : [];
   const all = [
-    ...workers[0] !== void 0 ? [{ name: "worker", file: join27(dir, workers[0]) }] : [],
-    ...engines[0] !== void 0 ? [{ name: "engine", file: join27(dir, engines[0]) }] : [],
-    { name: "daoyan-cli", file: join27(dir, "daoyan-cli.log") }
+    ...workers[0] !== void 0 ? [{ name: "worker", file: join28(dir, workers[0]) }] : [],
+    ...engines[0] !== void 0 ? [{ name: "engine", file: join28(dir, engines[0]) }] : [],
+    { name: "daoyan-cli", file: join28(dir, "daoyan-cli.log") }
   ];
   if (src === "all") return all;
   return all.filter((s) => s.name === src);
@@ -14502,7 +14747,7 @@ async function runLogs(ctx2, args) {
     return taskEvents(ctx2, root, taskId, flags);
   }
   const sources = fileSources(root, flags.src);
-  const existing = sources.filter((s) => existsSync29(s.file));
+  const existing = sources.filter((s) => existsSync30(s.file));
   if (existing.length === 0) {
     if (ctx2.json) {
       emitData({ sources: {}, note: "\u6682\u65E0\u65E5\u5FD7\u6587\u4EF6\uFF1B\u8FD0\u884C\u4EFB\u52A1\u540E\u53EF\u7528 logs --task <id>" });
@@ -14536,7 +14781,7 @@ async function runLogs(ctx2, args) {
     while (!stop) {
       await new Promise((r) => setTimeout(r, 500));
       for (const s of existing) {
-        if (!existsSync29(s.file)) continue;
+        if (!existsSync30(s.file)) continue;
         let size = 0;
         try {
           size = statSync8(s.file).size;
@@ -14590,8 +14835,8 @@ var init_logs = __esm({
 });
 
 // src/core/status/snapshot.mts
-import { existsSync as existsSync30 } from "fs";
-import { join as join28 } from "path";
+import { existsSync as existsSync31 } from "fs";
+import { join as join29 } from "path";
 async function probeEngine(root, machine, engineTimeoutMs = 3e3) {
   if (machine.engine.mode === "remote") {
     const url2 = machine.engine.url;
@@ -14625,7 +14870,7 @@ function shotProgress(root, shots, labelPrefix = "shot:") {
   if (shots === null) return [];
   return shots.shots.map((s) => {
     const rec = latestSucceededRun(root, `${labelPrefix}${s.id}`);
-    const present = rec !== null && rec.outputs.some((o) => existsSync30(join28(root, RUNS_DIR, rec.run_id, o.path)));
+    const present = rec !== null && rec.outputs.some((o) => existsSync31(join29(root, RUNS_DIR, rec.run_id, o.path)));
     return {
       id: s.id,
       slug: s.slug ?? null,
@@ -14968,8 +15213,8 @@ var init_status = __esm({
 });
 
 // src/commands/engine.mts
-import { existsSync as existsSync31, readdirSync as readdirSync10 } from "fs";
-import { isAbsolute as isAbsolute6, join as join29, relative, resolve as resolve5 } from "path";
+import { existsSync as existsSync32, readdirSync as readdirSync10 } from "fs";
+import { isAbsolute as isAbsolute6, join as join30, relative, resolve as resolve6 } from "path";
 async function comfyTags(limit) {
   try {
     const res = await fetch(COMFY_TAGS_API, {
@@ -14984,7 +15229,7 @@ async function comfyTags(limit) {
   }
 }
 function localVersions(root) {
-  const dir = join29(root, "engine", "versions");
+  const dir = join30(root, "engine", "versions");
   try {
     return readdirSync10(dir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort();
   } catch {
@@ -14993,12 +15238,12 @@ function localVersions(root) {
 }
 function currentDirs(root, engine) {
   const anchor = (p, fallback) => {
-    if (p === void 0 || p === "") return join29(root, fallback);
-    return isAbsolute6(p) ? p : join29(root, p);
+    if (p === void 0 || p === "") return join30(root, fallback);
+    return isAbsolute6(p) ? p : join30(root, p);
   };
   return {
-    comfyDir: anchor(engine.comfyui_dir, join29("engine", "ComfyUI")),
-    venvDir: anchor(engine.venv_dir, join29("engine", ".venv"))
+    comfyDir: anchor(engine.comfyui_dir, join30("engine", "ComfyUI")),
+    venvDir: anchor(engine.venv_dir, join30("engine", ".venv"))
   };
 }
 function portablePath(root, abs) {
@@ -15029,7 +15274,7 @@ async function runEngine(ctx2, args) {
           mode: "local",
           comfyui_dir: portablePath(found.root, dirs.comfyDir),
           venv_dir: portablePath(found.root, dirs.venvDir),
-          installed: existsSync31(join29(dirs.comfyDir, "main.py")),
+          installed: existsSync32(join30(dirs.comfyDir, "main.py")),
           version: machine2.engine.comfyui_version ?? found.config.comfyui?.version ?? null
         };
       } else if (machine2 !== null && machine2.engine.mode === "remote") {
@@ -15087,6 +15332,7 @@ async function runEngine(ctx2, args) {
       );
     }
     resolveToolchainOptions(toolchain);
+    await assertLocalPrereqs(say);
     const lock = await acquireMachineLock({
       taskId: `metadata-engine-install-${process.pid}`,
       project: root,
@@ -15095,7 +15341,7 @@ async function runEngine(ctx2, args) {
       kind: "metadata"
     });
     try {
-      const base = join29(root, "engine", "versions", tag);
+      const base = join30(root, "engine", "versions", tag);
       say(`\u5B89\u88C5/\u6821\u9A8C ComfyUI ${tag} \u2192 engine/versions/${tag} ...`);
       const result = await installEngineAt({
         root,
@@ -15131,13 +15377,13 @@ async function runEngine(ctx2, args) {
       kind: "metadata"
     });
     try {
-      const asPath = resolve5(root, target);
+      const asPath = resolve6(root, target);
       let comfyDir;
       let venvDir;
       let version;
-      if (existsSync31(join29(asPath, "main.py"))) {
+      if (existsSync32(join30(asPath, "main.py"))) {
         comfyDir = asPath;
-        venvDir = join29(asPath, ".venv");
+        venvDir = join30(asPath, ".venv");
         if (!await venvReady(venvDir)) {
           throw new DaoyanCliError({
             code: "config_invalid",
@@ -15145,10 +15391,10 @@ async function runEngine(ctx2, args) {
           });
         }
       } else {
-        const base = join29(root, "engine", "versions", target);
-        comfyDir = join29(base, "ComfyUI");
-        venvDir = join29(base, ".venv");
-        if (!existsSync31(join29(comfyDir, "main.py"))) {
+        const base = join30(root, "engine", "versions", target);
+        comfyDir = join30(base, "ComfyUI");
+        venvDir = join30(base, ".venv");
+        if (!existsSync32(join30(comfyDir, "main.py"))) {
           throw new DaoyanCliError({
             code: "provision_failed",
             message: `\u672A\u627E\u5230\u7248\u672C ${target}\uFF08${portablePath(root, comfyDir)}\uFF09\u3002\u5148\u5B89\u88C5\uFF1Adaoyan engine install ${target}`
@@ -15463,11 +15709,11 @@ var init_ops = __esm({
 });
 
 // src/commands/workflow.mts
-import { existsSync as existsSync32, readFileSync as readFileSync22, readdirSync as readdirSync11 } from "fs";
-import { basename as basename9, join as join30, resolve as resolve6 } from "path";
+import { existsSync as existsSync33, readFileSync as readFileSync23, readdirSync as readdirSync11 } from "fs";
+import { basename as basename9, join as join31, resolve as resolve7 } from "path";
 function readStdin() {
   try {
-    return readFileSync22(0, "utf8");
+    return readFileSync23(0, "utf8");
   } catch (e) {
     throw new DaoyanCliError({
       code: "usage",
@@ -15535,7 +15781,7 @@ async function ensureCatalog(opts) {
   }
 }
 function readOpsFile(path) {
-  const text = path === "-" ? readStdin() : readFileSync22(path, "utf8");
+  const text = path === "-" ? readStdin() : readFileSync23(path, "utf8");
   try {
     return parseOpsPayload(JSON.parse(text));
   } catch (e) {
@@ -15548,9 +15794,9 @@ function readOpsFile(path) {
   }
 }
 function isEmptyPlaceholder(abs) {
-  if (!existsSync32(abs)) return false;
+  if (!existsSync33(abs)) return false;
   try {
-    const parsed = parseGraph(JSON.parse(readFileSync22(abs, "utf8")));
+    const parsed = parseGraph(JSON.parse(readFileSync23(abs, "utf8")));
     return !hasGraphErrors(parsed.issues) && Object.keys(parsed.graph).length === 0;
   } catch {
     return false;
@@ -15572,10 +15818,10 @@ async function runWorkflow(ctx2, args) {
     const { root } = requireProject(ctx2);
     const target = resolveWorkflowRef(root, name);
     const replaced = isEmptyPlaceholder(target.abs);
-    if (existsSync32(target.abs) && !replaced) {
+    if (existsSync33(target.abs) && !replaced) {
       throw new DaoyanCliError({ code: "usage", message: `workflow ${name} \u5DF2\u5B58\u5728\uFF1A${target.rel}`, exit: 2 });
     }
-    ensureDir(join30(root, WORKFLOWS_DIR));
+    ensureDir(join31(root, WORKFLOWS_DIR));
     saveGraphFile(target.abs, {});
     if (ctx2.json)
       emitData({ name, path: target.rel, replaced_placeholder: replaced, graph_sha256: graphSha256({}) });
@@ -15598,10 +15844,10 @@ async function runWorkflow(ctx2, args) {
     const { root } = requireProject(ctx2);
     const target = resolveWorkflowRef(root, name);
     const replaced = isEmptyPlaceholder(target.abs);
-    if (existsSync32(target.abs) && !replaced) {
+    if (existsSync33(target.abs) && !replaced) {
       throw new DaoyanCliError({ code: "usage", message: `workflow ${name} \u5DF2\u5B58\u5728`, exit: 2 });
     }
-    const loaded = loadGraphFile(resolve6(process.cwd(), source), basename9(source));
+    const loaded = loadGraphFile(resolve7(process.cwd(), source), basename9(source));
     saveGraphFile(target.abs, loaded.graph);
     if (ctx2.json) emitData({ name, path: target.rel, replaced_placeholder: replaced, graph_sha256: loaded.sha256 });
     else say(`\u5DF2\u5BFC\u5165 ${target.rel}`);
@@ -15609,11 +15855,11 @@ async function runWorkflow(ctx2, args) {
   }
   if (sub === "list") {
     const { root } = requireProject(ctx2);
-    const dir = join30(root, WORKFLOWS_DIR);
-    const items = existsSync32(dir) ? readdirSync11(dir).filter((f) => f.endsWith(".json") && !f.endsWith(BINDINGS_SUFFIX)).sort().map((f) => {
-      const abs = join30(dir, f);
+    const dir = join31(root, WORKFLOWS_DIR);
+    const items = existsSync33(dir) ? readdirSync11(dir).filter((f) => f.endsWith(".json") && !f.endsWith(BINDINGS_SUFFIX)).sort().map((f) => {
+      const abs = join31(dir, f);
       try {
-        const parsed = parseGraph(JSON.parse(readFileSync22(abs, "utf8")));
+        const parsed = parseGraph(JSON.parse(readFileSync23(abs, "utf8")));
         const stats = graphStats(parsed.graph);
         return {
           name: f.slice(0, -".json".length),
@@ -15674,7 +15920,7 @@ async function runWorkflow(ctx2, args) {
       nodes: stats.nodes,
       links: stats.links,
       graph_sha256: loaded.sha256,
-      bindings: existsSync32(bindingsPathOf(ref.abs)) ? bindingsPathOf(ref.abs).slice(root.length + 1) : null,
+      bindings: existsSync33(bindingsPathOf(ref.abs)) ? bindingsPathOf(ref.abs).slice(root.length + 1) : null,
       ...full ? { graph: loaded.graph } : { node_list: nodeSummaries(loaded.graph) }
     };
     if (ctx2.json) {
@@ -15837,7 +16083,7 @@ async function runWorkflow(ctx2, args) {
     const ref = resolveWorkflowRef(root, name);
     let raw;
     try {
-      raw = JSON.parse(readFileSync22(ref.abs, "utf8"));
+      raw = JSON.parse(readFileSync23(ref.abs, "utf8"));
     } catch (e) {
       throw new DaoyanCliError({
         code: "workflow_invalid",
@@ -15969,8 +16215,8 @@ var init_skill2 = __esm({
 });
 
 // src/core/web/data.mts
-import { existsSync as existsSync33, readdirSync as readdirSync12, readFileSync as readFileSync23, statSync as statSync9 } from "fs";
-import { basename as basename10, join as join31, resolve as resolve7, sep as sep2 } from "path";
+import { existsSync as existsSync34, readdirSync as readdirSync12, readFileSync as readFileSync24, statSync as statSync9 } from "fs";
+import { basename as basename10, join as join32, resolve as resolve8, sep as sep2 } from "path";
 function extensionOf(name) {
   const dot = name.lastIndexOf(EXTENSION_SEPARATOR);
   return dot >= 0 ? name.slice(dot).toLowerCase() : "";
@@ -15987,7 +16233,7 @@ function classifyArtifact(name) {
 function isLfsPointer(file, size) {
   if (size > 1024) return false;
   try {
-    return readFileSync23(file, "utf8").startsWith(LFS_POINTER_PREFIX2);
+    return readFileSync24(file, "utf8").startsWith(LFS_POINTER_PREFIX2);
   } catch {
     return false;
   }
@@ -16003,9 +16249,9 @@ function finalMediaUrl(name, episodeId) {
 }
 function artifactOf(root, run2, output2) {
   const base = runDir(root, run2.run_id);
-  const abs = resolve7(base, output2.path);
+  const abs = resolve8(base, output2.path);
   const within = abs !== base && abs.startsWith(base + sep2);
-  const present = within && existsSync33(abs);
+  const present = within && existsSync34(abs);
   let bytes = output2.bytes;
   let lfsPointer = false;
   if (present) {
@@ -16035,14 +16281,14 @@ function safeReadRun(root, runId) {
     return null;
   }
   try {
-    return readJsonIfExists(join31(runDir(root, runId), RUN_FILE));
+    return readJsonIfExists(join32(runDir(root, runId), RUN_FILE));
   } catch {
     return null;
   }
 }
 function safeListRuns(root) {
-  const dir = join31(root, RUNS_DIR);
-  if (!existsSync33(dir)) return [];
+  const dir = join32(root, RUNS_DIR);
+  if (!existsSync34(dir)) return [];
   const out = [];
   for (const ent of readdirSync12(dir, { withFileTypes: true })) {
     if (!ent.isDirectory()) continue;
@@ -16056,14 +16302,14 @@ function safeReadTask(root, taskId) {
     return null;
   }
   try {
-    return readJsonIfExists(join31(taskDir(root, taskId), TASK_FILE));
+    return readJsonIfExists(join32(taskDir(root, taskId), TASK_FILE));
   } catch {
     return null;
   }
 }
 function safeListTasks(root) {
-  const dir = join31(root, TASKS_DIR);
-  if (!existsSync33(dir)) return [];
+  const dir = join32(root, TASKS_DIR);
+  if (!existsSync34(dir)) return [];
   const out = [];
   for (const ent of readdirSync12(dir, { withFileTypes: true })) {
     if (!ent.isDirectory()) continue;
@@ -16150,7 +16396,7 @@ function getRunDetail(root, runId) {
   if (run2 === null) return null;
   let inputsSnapshot = null;
   try {
-    inputsSnapshot = readJsonIfExists(join31(runDir(root, run2.run_id), RUN_INPUTS_FILE));
+    inputsSnapshot = readJsonIfExists(join32(runDir(root, run2.run_id), RUN_INPUTS_FILE));
   } catch {
     inputsSnapshot = null;
   }
@@ -16166,7 +16412,7 @@ function getRunDetail(root, runId) {
     overrides: run2.overrides,
     input_files: inputsSnapshot?.files ?? [],
     events,
-    workflow_snapshot: existsSync33(join31(runDir(root, run2.run_id), RUN_WORKFLOW_FILE))
+    workflow_snapshot: existsSync34(join32(runDir(root, run2.run_id), RUN_WORKFLOW_FILE))
   };
 }
 function listRunsView(root, episodeId) {
@@ -16449,20 +16695,20 @@ function buildShotsView(root, shots, labelPrefix = "shot:") {
   };
 }
 function listFinals(root, episodeId) {
-  const dir = episodeId !== void 0 && episodeId !== "" ? join31(root, FINAL_DIR, episodeId) : join31(root, FINAL_DIR);
-  if (!existsSync33(dir)) return [];
+  const dir = episodeId !== void 0 && episodeId !== "" ? join32(root, FINAL_DIR, episodeId) : join32(root, FINAL_DIR);
+  if (!existsSync34(dir)) return [];
   const entries = readdirSync12(dir, { withFileTypes: true }).filter((e) => e.isFile());
   const referenced = /* @__PURE__ */ new Set();
   const out = [];
   for (const entry of entries) {
     if (!entry.name.endsWith(".json")) continue;
     try {
-      const manifest = JSON.parse(readFileSync23(join31(dir, entry.name), "utf8"));
+      const manifest = JSON.parse(readFileSync24(join32(dir, entry.name), "utf8"));
       const cut = typeof manifest.cut === "string" ? manifest.cut : "";
       if (cut === "" || basename10(cut) !== cut || cut.includes("/") || cut.includes("\\")) continue;
-      if (!existsSync33(join31(dir, cut))) continue;
+      if (!existsSync34(join32(dir, cut))) continue;
       referenced.add(cut);
-      const stat = statSync9(join31(dir, cut));
+      const stat = statSync9(join32(dir, cut));
       const mediaUrl = finalMediaUrl(cut, episodeId);
       const clips = Array.isArray(manifest.clips) ? manifest.clips.filter((x) => typeof x === "object" && x !== null).map((x) => ({
         shot: String(x.shot ?? ""),
@@ -16477,7 +16723,7 @@ function listFinals(root, episodeId) {
         download_url: `${mediaUrl}?download=1`,
         bytes: stat.size,
         present: true,
-        lfs_pointer: isLfsPointer(join31(dir, cut), stat.size),
+        lfs_pointer: isLfsPointer(join32(dir, cut), stat.size),
         created_at: typeof manifest.created_at === "string" ? manifest.created_at : null,
         clips,
         missing: Array.isArray(manifest.missing) ? manifest.missing.map((x) => String(x)) : []
@@ -16489,7 +16735,7 @@ function listFinals(root, episodeId) {
     if (referenced.has(entry.name)) continue;
     if (!/^cut-.*\.(mp4|webm|mov|mkv)$/i.test(entry.name)) continue;
     try {
-      const stat = statSync9(join31(dir, entry.name));
+      const stat = statSync9(join32(dir, entry.name));
       const mediaUrl = finalMediaUrl(entry.name, episodeId);
       out.push({
         episode_id: episodeId !== void 0 && episodeId !== "" ? episodeId : null,
@@ -16499,7 +16745,7 @@ function listFinals(root, episodeId) {
         download_url: `${mediaUrl}?download=1`,
         bytes: stat.size,
         present: true,
-        lfs_pointer: isLfsPointer(join31(dir, entry.name), stat.size),
+        lfs_pointer: isLfsPointer(join32(dir, entry.name), stat.size),
         created_at: null,
         clips: [],
         missing: []
@@ -16510,8 +16756,8 @@ function listFinals(root, episodeId) {
   return out.sort((a, b) => b.name.localeCompare(a.name));
 }
 function listWorkflows(root, project) {
-  const dir = join31(root, WORKFLOWS_DIR);
-  if (!existsSync33(dir)) return [];
+  const dir = join32(root, WORKFLOWS_DIR);
+  if (!existsSync34(dir)) return [];
   const defaultRef = (project.default_workflow ?? "").trim();
   const out = [];
   for (const entry of readdirSync12(dir, { withFileTypes: true })) {
@@ -16519,7 +16765,7 @@ function listWorkflows(root, project) {
     const name = entry.name.slice(0, -".json".length);
     let graph = null;
     try {
-      graph = JSON.parse(readFileSync23(join31(dir, entry.name), "utf8"));
+      graph = JSON.parse(readFileSync24(join32(dir, entry.name), "utf8"));
     } catch {
       graph = null;
     }
@@ -16528,7 +16774,7 @@ function listWorkflows(root, project) {
       name,
       path: `${WORKFLOWS_DIR}/${entry.name}`,
       nodes,
-      bindings: existsSync33(join31(dir, `${name}.bindings.json`)),
+      bindings: existsSync34(join32(dir, `${name}.bindings.json`)),
       default: defaultRef === name || defaultRef === `workflows/${name}` || defaultRef === `workflows/${name}.json`,
       valid: graph !== null && typeof graph === "object"
     });
@@ -16675,8 +16921,8 @@ var init_data = __esm({
 });
 
 // src/core/web/media.mts
-import { createReadStream, existsSync as existsSync34, realpathSync, statSync as statSync10 } from "fs";
-import { basename as basename11, extname, join as join32, sep as sep3 } from "path";
+import { createReadStream, existsSync as existsSync35, realpathSync, statSync as statSync10 } from "fs";
+import { basename as basename11, extname, join as join33, sep as sep3 } from "path";
 import { pipeline } from "stream/promises";
 function contentTypeOf(name) {
   return MIME_TYPES[extname(name).toLowerCase()] ?? DEFAULT_MIME;
@@ -16692,7 +16938,7 @@ function safeRealpath(file) {
   }
 }
 function makeTarget(abs, name, etag) {
-  if (!existsSync34(abs)) return null;
+  if (!existsSync35(abs)) return null;
   try {
     const stat = statSync10(abs);
     if (!stat.isFile()) return null;
@@ -16722,20 +16968,20 @@ function resolveRunMedia(root, runId, name) {
   if (projectRoot === null) return null;
   const output2 = rec.outputs.find((o) => o.name === name);
   if (output2 === void 0) return null;
-  const base = safeRealpath(join32(root, RUNS_DIR, runId));
+  const base = safeRealpath(join33(root, RUNS_DIR, runId));
   if (base === null || !isWithin(projectRoot, base)) return null;
-  const abs = safeRealpath(join32(runDir(root, runId), output2.path));
+  const abs = safeRealpath(join33(runDir(root, runId), output2.path));
   if (abs === null || !isWithin(base, abs)) return null;
   return makeTarget(abs, output2.name, `"${output2.sha256}"`);
 }
 function resolveFinalMedia(root, name) {
-  const dir = join32(root, FINAL_DIR);
+  const dir = join33(root, FINAL_DIR);
   const projectRoot = safeRealpath(root);
   if (projectRoot === null) return null;
   const base = safeRealpath(dir);
   if (base === null || !isWithin(projectRoot, base)) return null;
   if (basename11(name) !== name || name.includes("/") || name.includes("\\")) return null;
-  const abs = safeRealpath(join32(dir, name));
+  const abs = safeRealpath(join33(dir, name));
   if (abs === null || !isWithin(base, abs)) return null;
   try {
     const stat = statSync10(abs);
@@ -16749,9 +16995,9 @@ function resolveStoryMedia(root, relPath) {
   if (relPath === "" || relPath.startsWith("/") || relPath.includes("..") || relPath.includes("\\")) return null;
   const projectRoot = safeRealpath(root);
   if (projectRoot === null) return null;
-  const base = safeRealpath(join32(root, STORY_ASSETS_DIR));
+  const base = safeRealpath(join33(root, STORY_ASSETS_DIR));
   if (base === null || !isWithin(projectRoot, base)) return null;
-  const abs = safeRealpath(join32(root, STORY_ASSETS_DIR, relPath));
+  const abs = safeRealpath(join33(root, STORY_ASSETS_DIR, relPath));
   if (abs === null || !isWithin(base, abs)) return null;
   try {
     const stat = statSync10(abs);
@@ -16763,13 +17009,13 @@ function resolveStoryMedia(root, relPath) {
 }
 function resolveEpisodeFinalMedia(root, episodeId, name) {
   if (!STORY_ID_RE.test(episodeId)) return null;
-  const dir = join32(root, FINAL_DIR, episodeId);
+  const dir = join33(root, FINAL_DIR, episodeId);
   const projectRoot = safeRealpath(root);
   if (projectRoot === null) return null;
   const base = safeRealpath(dir);
   if (base === null || !isWithin(projectRoot, base)) return null;
   if (basename11(name) !== name || name.includes("/") || name.includes("\\")) return null;
-  const abs = safeRealpath(join32(dir, name));
+  const abs = safeRealpath(join33(dir, name));
   if (abs === null || !isWithin(base, abs)) return null;
   try {
     const stat = statSync10(abs);
@@ -16911,16 +17157,16 @@ var init_media = __esm({
 });
 
 // src/core/web/story-data.mts
-import { existsSync as existsSync35, statSync as statSync11 } from "fs";
-import { join as join33 } from "path";
+import { existsSync as existsSync36, statSync as statSync11 } from "fs";
+import { join as join34 } from "path";
 function storyMediaUrl(path) {
   const prefix = "story/assets/";
   const rel = path.startsWith(prefix) ? path.slice(prefix.length) : path;
   return `${STORY_MEDIA_PREFIX}/${rel.split("/").map(encodeURIComponent).join("/")}`;
 }
 function assetView(root, asset) {
-  const abs = join33(root, asset.path);
-  const present = existsSync35(abs);
+  const abs = join34(root, asset.path);
+  const present = existsSync36(abs);
   let bytes = asset.bytes;
   let lfsPointer = false;
   if (present) {
@@ -17075,10 +17321,10 @@ function buildStoryEpisodeView(root, episodeId, project) {
     artifacts: artifacts.items,
     finals,
     files: {
-      script_md: existsSync35(join33(dir, "script.md")),
-      script_json: existsSync35(join33(dir, "script.json")),
-      breakdown: existsSync35(join33(dir, "breakdown.json")),
-      shots: existsSync35(join33(dir, "shots.json"))
+      script_md: existsSync36(join34(dir, "script.md")),
+      script_json: existsSync36(join34(dir, "script.json")),
+      breakdown: existsSync36(join34(dir, "breakdown.json")),
+      shots: existsSync36(join34(dir, "shots.json"))
     },
     episodes: listEpisodeMetas(root)
   };
@@ -17494,16 +17740,16 @@ async function startWebServer(options) {
     void handleRequest(req, res, ctx2, cache);
   });
   let resolveClosed = null;
-  const closed = new Promise((resolve8) => {
-    resolveClosed = resolve8;
+  const closed = new Promise((resolve9) => {
+    resolveClosed = resolve9;
   });
   server.once("close", () => {
     resolveClosed?.();
   });
-  await new Promise((resolve8, reject) => {
+  await new Promise((resolve9, reject) => {
     const onListening = () => {
       server.off("error", onError);
-      resolve8();
+      resolve9();
     };
     const onError = (e) => {
       server.off("listening", onListening);
@@ -17515,7 +17761,7 @@ async function startWebServer(options) {
   });
   const address = server.address();
   if (address === null || typeof address === "string") {
-    await new Promise((resolve8) => server.close(() => resolve8()));
+    await new Promise((resolve9) => server.close(() => resolve9()));
     throw new Error("\u65E0\u6CD5\u83B7\u53D6 Web \u670D\u52A1\u76D1\u542C\u5730\u5740");
   }
   const actualPort = address.port;
@@ -17525,15 +17771,15 @@ async function startWebServer(options) {
   let closePromise = null;
   function close() {
     if (closePromise !== null) return closePromise;
-    closePromise = new Promise((resolve8) => {
+    closePromise = new Promise((resolve9) => {
       if (!server.listening) {
         resolveClosed?.();
-        resolve8();
+        resolve9();
         return;
       }
       server.close(() => {
         resolveClosed?.();
-        resolve8();
+        resolve9();
       });
       server.closeAllConnections();
     });
@@ -17736,8 +17982,8 @@ var init_web = __esm({
 });
 
 // src/commands/story.mts
-import { existsSync as existsSync36, readFileSync as readFileSync24 } from "fs";
-import { join as join34 } from "path";
+import { existsSync as existsSync37, readFileSync as readFileSync25 } from "fs";
+import { join as join35 } from "path";
 function parseFlags(args, spec) {
   const out = { positionals: [], values: {} };
   for (let i = 0; i < args.length; i++) {
@@ -17770,7 +18016,7 @@ function boolFlag(parsed, name) {
 function readTextInput(file, label) {
   if (file === void 0 || file === "") usageError(`\u9700\u8981 ${label}`);
   try {
-    return readFileSync24(file === "-" ? 0 : file, "utf8");
+    return readFileSync25(file === "-" ? 0 : file, "utf8");
   } catch (e) {
     throw new DaoyanCliError({
       code: "config_invalid",
@@ -17909,10 +18155,10 @@ async function storyEpisode(ctx2, args) {
       {
         episode: meta,
         files: {
-          script_md: existsSync36(join34(dir, "script.md")),
-          script_json: existsSync36(join34(dir, "script.json")),
-          breakdown: existsSync36(join34(dir, "breakdown.json")),
-          shots: existsSync36(join34(dir, "shots.json"))
+          script_md: existsSync37(join35(dir, "script.md")),
+          script_json: existsSync37(join35(dir, "script.json")),
+          breakdown: existsSync37(join35(dir, "breakdown.json")),
+          shots: existsSync37(join35(dir, "shots.json"))
         }
       },
       [`${meta.id}  \u7B2C ${meta.number} \u96C6  ${meta.title}`, meta.summary ?? ""]
@@ -17977,7 +18223,7 @@ async function storyScript(ctx2, args) {
       ...baseText !== void 0 ? { baseRevision: Number(baseText) } : {}
     });
     const stale = ["breakdown", "shots"].filter(
-      (name) => existsSync36(join34(context.dir, name === "breakdown" ? "breakdown.json" : "shots.json"))
+      (name) => existsSync37(join35(context.dir, name === "breakdown" ? "breakdown.json" : "shots.json"))
     );
     output(
       ctx2,
@@ -18060,7 +18306,7 @@ async function storyBreakdown(ctx2, args) {
       });
     }
     const baseSha = strFlag(parsed, "--base-sha256");
-    if (baseSha !== void 0 && existsSync36(context.breakdown_path ?? "")) {
+    if (baseSha !== void 0 && existsSync37(context.breakdown_path ?? "")) {
       if (sha256File(context.breakdown_path) !== baseSha) {
         throw new DaoyanCliError({ code: "story_conflict", message: "breakdown \u5DF2\u88AB\u5176\u5B83\u4FEE\u6539" });
       }
@@ -18150,9 +18396,9 @@ async function storyGlobal(ctx2, kind, args) {
   if (action === "set") {
     const parsed = parseFlags(rest, { "--file": "string", "--base-sha256": "string" });
     if (parsed.positionals.length > 0) usageError(`\u672A\u77E5\u53C2\u6570 ${parsed.positionals.join(" ")}`);
-    const target = kind === "characters" ? join34(root, "story/characters.json") : kind === "scenes" ? join34(root, "story/scenes.json") : join34(root, "story/voices.json");
+    const target = kind === "characters" ? join35(root, "story/characters.json") : kind === "scenes" ? join35(root, "story/scenes.json") : join35(root, "story/voices.json");
     const baseSha = strFlag(parsed, "--base-sha256");
-    if (baseSha !== void 0 && existsSync36(target) && sha256File(target) !== baseSha) {
+    if (baseSha !== void 0 && existsSync37(target) && sha256File(target) !== baseSha) {
       throw new DaoyanCliError({ code: "story_conflict", message: `${kind} \u5DF2\u88AB\u5176\u5B83\u4FEE\u6539` });
     }
     const raw = requireRecord(readJsonInput(strFlag(parsed, "--file"), "--file <json|->"), kind);
@@ -18315,7 +18561,7 @@ async function storyShots(ctx2, args) {
     throw new DaoyanCliError({ code: "story_invalid", message: "\u62C6\u89E3\u4E0D\u5B58\u5728\uFF0C\u4E0D\u80FD\u5199\u5206\u955C" });
   }
   const baseSha = strFlag(parsed, "--base-sha256");
-  if (baseSha !== void 0 && existsSync36(context.shots_path) && sha256File(context.shots_path) !== baseSha) {
+  if (baseSha !== void 0 && existsSync37(context.shots_path) && sha256File(context.shots_path) !== baseSha) {
     throw new DaoyanCliError({ code: "story_conflict", message: "shots.json \u5DF2\u88AB\u5176\u5B83\u4FEE\u6539" });
   }
   const raw = requireRecord(readJsonInput(strFlag(parsed, "--file"), "--file <shots.json|->"), "shots");
@@ -18487,7 +18733,7 @@ var init_registry = __esm({
         name: "init",
         group: "project",
         summary: "\u5728\u5F53\u524D\u76EE\u5F55\u7ACB\u9879\uFF1Alocal \u90E8\u7F72\u9879\u76EE\u4E13\u5C5E ComfyUI\uFF0Cremote \u7ED1\u5B9A\u5916\u90E8\u670D\u52A1",
-        usage: "daoyan init --mode=local [--modelpath <\u8DEF\u5F84>] [--version <tag>] [--mirror <\u955C\u50CF>] [--fallback-mirror <\u955C\u50CF|none>] [--torch-index <url>] [--torch-cuda <cuXXX>] [--torch-cpu] [--no-cache] [--no-skill]\ndaoyan init --mode=remote --url <url> [--no-skill]",
+        usage: "daoyan init --mode=local [--modelpath <\u8DEF\u5F84>] [--version <tag>] [--mirror <\u955C\u50CF>] [--fallback-mirror <\u955C\u50CF|none>] [--torch-index <url>] [--torch-cuda <cuXXX>] [--torch-cpu] [--no-cache] [--no-skill] [--no-git]\ndaoyan init --mode=remote --url <url> [--no-skill] [--no-git]",
         flags: [
           {
             name: "--mode",
@@ -18536,6 +18782,12 @@ var init_registry = __esm({
             type: "boolean",
             default: false,
             description: "\u4E0D\u751F\u6210 .agents/skills/daoyan \u4E0E AGENTS.md"
+          },
+          {
+            name: "--no-git",
+            type: "boolean",
+            default: false,
+            description: "\u4E0D\u521D\u59CB\u5316 Git \u4ED3\u5E93\uFF08.gitignore \u4ECD\u7EF4\u62A4\uFF09"
           }
         ],
         examples: [
@@ -18549,6 +18801,7 @@ var init_registry = __esm({
           root: "string",
           mode: "local|remote",
           project_created: "boolean",
+          git: "object",
           engine_installed: "boolean",
           toolchain: "object|null",
           port: "number|null",

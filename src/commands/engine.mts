@@ -17,7 +17,7 @@ import {
     saveMachine,
 } from "../core/project/config.mts";
 import type { MachineLocalEngine } from "../core/project/types.mts";
-import { COMFY_TAGS_API, installEngineAt, venvReady } from "../core/provision/init-flow.mts";
+import { COMFY_TAGS_API, assertLocalPrereqs, installEngineAt, venvReady } from "../core/provision/init-flow.mts";
 import { applyToolchainFlag, resolveToolchainOptions, type ToolchainOptions } from "../core/provision/options.mts";
 import { acquireMachineLock } from "../core/machine/lock.mts";
 
@@ -173,6 +173,8 @@ export async function runEngine(ctx: CliContext, args: string[]): Promise<number
         }
         // 持锁前校验依赖参数（非法 URL / tag 立即失败）
         resolveToolchainOptions(toolchain);
+        // 安装前检查 git / python / ensurepip（早于任何落盘与持锁）
+        await assertLocalPrereqs(say);
         // 持锁安装
         const lock = await acquireMachineLock({
             taskId: `metadata-engine-install-${process.pid}`,

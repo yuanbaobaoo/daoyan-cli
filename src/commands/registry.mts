@@ -157,8 +157,8 @@ export const COMMANDS: CommandMeta[] = [
         summary: "在当前目录立项：local 部署项目专属 ComfyUI，remote 绑定外部服务",
         usage:
             "daoyan init --mode=local [--modelpath <路径>] [--version <tag>] [--mirror <镜像>] " +
-            "[--fallback-mirror <镜像|none>] [--torch-index <url>] [--torch-cuda <cuXXX>] [--torch-cpu] [--no-cache] [--no-skill]\n" +
-            "daoyan init --mode=remote --url <url> [--no-skill]",
+            "[--fallback-mirror <镜像|none>] [--torch-index <url>] [--torch-cuda <cuXXX>] [--torch-cpu] [--no-cache] [--no-skill] [--no-git]\n" +
+            "daoyan init --mode=remote --url <url> [--no-skill] [--no-git]",
         flags: [
             {
                 name: "--mode",
@@ -208,6 +208,12 @@ export const COMMANDS: CommandMeta[] = [
                 default: false,
                 description: "不生成 .agents/skills/daoyan 与 AGENTS.md",
             },
+            {
+                name: "--no-git",
+                type: "boolean",
+                default: false,
+                description: "不初始化 Git 仓库（.gitignore 仍维护）",
+            },
         ],
         examples: [
             "daoyan init --mode=local --modelpath /data/models",
@@ -220,6 +226,7 @@ export const COMMANDS: CommandMeta[] = [
             root: "string",
             mode: "local|remote",
             project_created: "boolean",
+            git: "object",
             engine_installed: "boolean",
             toolchain: "object|null",
             port: "number|null",

@@ -5,6 +5,8 @@
 // —— 项目布局常量：文件名 / 目录名（全仓唯一声明处，其余位置一律引用） ——
 // 共享：项目配置（自 cwd 向上寻找的锚点）
 export const PROJECT_FILE = "project.json";
+// 共享：Git 忽略规则文件
+export const GITIGNORE_FILE = ".gitignore";
 // 共享：视频 recipe
 export const SHOTS_FILE = "shots.json";
 // 共享：系列级剧本与设定集

@@ -13,7 +13,7 @@
 #   DAYOAN_PROXY=<url>                 下载/安装代理（http/https/socks5）
 #
 # 原理：dist 产物随 npm tarball 分发，安装即用，无需在用户机上构建。
-# 要求：node >= 22、npm；git 仅在默认清单不可达、回退 git 源时需要。
+# 要求：node >= 22、npm、git（Git 用于 init / engine 部署与安装期的 git 回退）。
 set -euo pipefail
 
 REPO="${DAYOAN_REPO:-https://github.com/yuanbaobaoo/daoyan-cli.git}"
@@ -65,6 +65,11 @@ if [ "$node_major" -lt 22 ]; then
 fi
 
 command -v npm >/dev/null 2>&1 || die "未找到 npm（它随 Node 一同安装，请检查 Node 安装）"
+
+command -v git >/dev/null 2>&1 \
+  || die "未找到 git（dycli 必需）。安装：https://git-scm.com/downloads（macOS: brew install git；Ubuntu/Debian: apt-get install -y git）"
+
+say "    环境：node v${node_v} / npm $(npm --version) / git $(git --version | awk '{print $3}')"
 
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
@@ -187,7 +192,6 @@ process.stdin.on("end", () => {
   verify_sha "$tgz_path" "$sha"
 else
   say "==> 安装 daoyan-cli@${REF}（来自 git）"
-  command -v git >/dev/null 2>&1 || die "未找到 git（从 git 源安装需要它）：https://git-scm.com/downloads"
   say "    1/2 拉取并打包源码"
   tgz="$(cd "$tmpdir" && npm pack --silent "git+${REPO}#${REF}")" \
     || die "npm pack 失败：检查网络与 git 源可达性（git 必须已安装）"

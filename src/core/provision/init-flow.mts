@@ -7,7 +7,7 @@
 import { existsSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DaoyanCliError } from "../../shared/errors.mts";
-import { execCapture, execInherit, execStream, type ExecResult } from "../../shared/exec.mts";
+import { execCapture, execInherit, execStream, tryExecCapture, type ExecResult } from "../../shared/exec.mts";
 import { ensureDir, sha256, sha256File } from "../../shared/fs.mts";
 import { freePort } from "../../shared/net.mts";
 import {
@@ -173,15 +173,6 @@ export function scaffoldProject(root: string, name: string): { created: string[]
         writeFileAtomically(wf, "{}\n");
         created.push(`${WORKFLOWS_DIR}/t2v.json`);
     }
-    // .gitignore（保留用户已有内容；缺失才写）
-    const ignore = join(root, ".gitignore");
-    if (!existsSync(ignore)) {
-        writeFileAtomically(
-            ignore,
-            ["engine/", "logs/", ".dycli/", "relay_frames/", "concat_list.txt", "*.log", ".DS_Store", ""].join("\n"),
-        );
-        created.push(".gitignore");
-    }
     // .gitattributes（LFS）
     const attrs = join(root, ".gitattributes");
     if (!existsSync(attrs)) {
@@ -259,6 +250,71 @@ export async function detectPython(log: Logger): Promise<PythonInfo> {
     }
     log(`python3 就绪：${r.stdout.trim()}`);
     return info;
+}
+
+/**
+ * local 模式前置检查：git、python3 >= 3.10、ensurepip。
+ * 在创建项目骨架与部署之前调用，避免失败后留下半成品。
+ */
+export async function assertLocalPrereqs(log: Logger): Promise<void> {
+    // Git 探测结果
+    const git = await tryExecCapture("git", ["--version"], { timeoutMs: 15_000 });
+    // Python 探测结果
+    const python = await tryExecCapture("python3", ["--version"], { timeoutMs: 15_000 });
+    // Python 版本信息
+    const pythonInfo = python !== null && python.code === 0 ? parsePythonVersion(python.stdout) : null;
+    // ensurepip 探测结果（Python 不可用时不重复探测）
+    const ensurepip =
+        python !== null && python.code === 0
+            ? await tryExecCapture("python3", ["-c", "import ensurepip"], { timeoutMs: 20_000 })
+            : null;
+    // 缺失或不满足的依赖
+    const missing: Array<{ tool: string; reason: string }> = [];
+    if (git === null || git.code !== 0) {
+        missing.push({ tool: "git", reason: "未找到或不可用" });
+    }
+    if (python === null || python.code !== 0) {
+        missing.push({ tool: "python3", reason: "未找到或不可用" });
+    } else if (pythonInfo === null) {
+        missing.push({ tool: "python3", reason: `无法解析版本：${python.stdout.trim()}` });
+    } else if (pythonInfo.major < 3 || (pythonInfo.major === 3 && pythonInfo.minor < 10)) {
+        missing.push({ tool: "python3", reason: `版本 ${pythonInfo.version} 过低（要求 >= ${MIN_PYTHON}）` });
+    } else if (ensurepip === null || ensurepip.code !== 0) {
+        missing.push({ tool: "ensurepip", reason: "python3 缺少 ensurepip，无法创建带 pip 的 venv" });
+    }
+    if (missing.length > 0) {
+        throw new DaoyanCliError({
+            code: "external_tool_missing",
+            message: `local 模式依赖检查未通过：${missing.map((m) => `${m.tool}（${m.reason}）`).join("；")}`,
+            hint: "按 next_actions 安装缺失依赖后重试；只连接远端请使用 init --mode=remote",
+            details: {
+                stage: "preflight",
+                missing,
+                git: git !== null && git.code === 0 ? git.stdout.trim() : null,
+                python: pythonInfo?.version ?? null,
+            },
+            nextActions: localPrereqActions(),
+        });
+    }
+    log(`前置检查通过：${git !== null ? git.stdout.trim() : "git"}，Python ${pythonInfo?.version ?? "unknown"}`);
+}
+
+/**
+ * 平台化 local 依赖安装命令。
+ */
+function localPrereqActions(): string[] {
+    switch (process.platform) {
+        case "darwin":
+            return ["brew install git python", "重跑 daoyan init --mode=local"];
+        case "win32":
+            return [
+                "winget install --id Git.Git -e",
+                "winget install --id Python.Python.3.12 -e",
+                "重跑 daoyan init --mode=local",
+            ];
+        default:
+            return ["sudo apt-get install -y git python3 python3-venv", "重跑 daoyan init --mode=local"];
+    }
 }
 
 /**

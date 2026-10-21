@@ -336,17 +336,48 @@ story 模式额外字段：`episode_id`（legacy / 系列级为 `null`）。多�
 
 ## 9. Git 约定
 
-`.gitignore`：
+- `init` 默认执行 `git init`（幂等）：已在仓库根目录时不重复初始化；位于父级仓库内时跳过嵌套初始化；`$HOME` 与文件系统根目录不自动建仓；`--no-git` 可跳过仓库初始化。
+- 不自动 `git add` / `git commit`；提交由用户 / Agent 决定。
+- `.gitignore` 由受管块维护：块内规则随 `init` 更新，块外用户内容保留。
 
 ```text
+# daoyan:gitignore:start
+# 本块由 daoyan 维护，下次 init 会重写；自定义规则请写在块外
+
+# Python / 缓存
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ComfyUI 引擎（engine/ 覆盖默认本体、venv、custom nodes）
 engine/
-logs/
+ComfyUI/
+
+# daoyan 本机状态 / 运行缓存
 .dycli/
+logs/
 relay_frames/
 concat_list.txt
 *.log
+
+# 临时 / 系统文件
+*.tmp
+*.temp
+*.swp
+*~
 .DS_Store
+Thumbs.db
+desktop.ini
+
+# daoyan:gitignore:end
 ```
+
+`runs/`、`tasks/`、`inputs/`、`final/` 不进入 `.gitignore`；这些共享产物按下面的 `.gitattributes` 走 LFS。
 
 `.gitattributes`：
 
@@ -356,5 +387,3 @@ runs/**/inputs/**  filter=lfs diff=lfs merge=lfs -text
 inputs/**          filter=lfs diff=lfs merge=lfs -text
 final/**           filter=lfs diff=lfs merge=lfs -text
 ```
-
-dycli 不执行 `git commit`；只写确定性 JSON，提交由用户 / Agent 决定。

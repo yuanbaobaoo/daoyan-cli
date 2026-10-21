@@ -2,6 +2,7 @@
  *  规则：
  *  - 必须显式 --mode=local|remote；
  *  - 不接收项目名；无 project.json 时用目录名创建 v2 骨架，已有则只更新本机配置；
+ *  - 默认维护 .gitignore 受管块并 git init（--no-git 跳过仓库初始化）；
  *  - local 可选 --modelpath（外部模型根目录），只部署不启动；
  *  - remote 必须 --url；
  *  - 默认生成 .agents/skills/daoyan/ 与 AGENTS.md 管理块，--no-skill 跳过；
@@ -24,12 +25,20 @@ import {
 import type { MachineConfig, MachineLocalEngine, ProjectConfig } from "../core/project/types.mts";
 import {
     allocatePort,
+    assertLocalPrereqs,
     deployLocalEngine,
     latestComfyTag,
     scaffoldProject,
     writeExtraModelPaths,
     type ToolchainSummary,
 } from "../core/provision/init-flow.mts";
+import {
+    ensureGitignore,
+    ensureGitRepo,
+    type GitRepoResult,
+    type GitignoreResult,
+    type GitignoreStatus,
+} from "../core/project/git.mts";
 import {
     applyToolchainFlag,
     hasToolchainOptions,
@@ -68,6 +77,10 @@ interface InitFlags {
      * --no-skill：不生成项目内 Skill / AGENTS.md。
      */
     noSkill: boolean;
+    /**
+     * --no-git：不初始化 Git 仓库（.gitignore 仍维护）。
+     */
+    noGit: boolean;
 }
 
 /**
@@ -75,7 +88,7 @@ interface InitFlags {
  */
 function parseArgs(args: string[]): InitFlags {
     // 解析结果
-    const flags: InitFlags = { noSkill: false, toolchain: {} };
+    const flags: InitFlags = { noSkill: false, noGit: false, toolchain: {} };
     for (let i = 0; i < args.length; i++) {
         // 当前参数
         const a = args[i];
@@ -84,6 +97,10 @@ function parseArgs(args: string[]): InitFlags {
         const { name, inline } = splitInlineFlag(a);
         if (name === "--no-skill") {
             flags.noSkill = true;
+            continue;
+        }
+        if (name === "--no-git") {
+            flags.noGit = true;
             continue;
         }
         if (name === "--mode") {
@@ -159,6 +176,26 @@ function resolveModelPath(raw: string): string {
 }
 
 /**
+ * Git 层的人类可读状态。
+ */
+function gitLogLine(git: GitRepoResult, ignore: GitignoreStatus): string {
+    // .gitignore 状态文案
+    const ignoreText = ignore === "created" ? "已生成" : ignore === "updated" ? "已更新" : "无变化";
+    switch (git.status) {
+        case "initialized":
+            return `Git 仓库已初始化（${git.branch ?? "unknown"}），.gitignore ${ignoreText}`;
+        case "existing":
+            return `已在 Git 仓库内（${git.branch ?? "detached HEAD"}），.gitignore ${ignoreText}`;
+        case "inside_parent":
+            return `位于父级 Git 仓库（${git.top_level ?? "unknown"}），跳过嵌套初始化；.gitignore ${ignoreText}`;
+        case "skipped":
+            return `${git.reason ?? "跳过 Git 初始化"}；.gitignore ${ignoreText}`;
+        case "disabled":
+            return `--no-git：跳过 Git 仓库初始化；.gitignore ${ignoreText}`;
+    }
+}
+
+/**
  * init 命令入口。
  */
 export async function runInit(ctx: CliContext, args: string[]): Promise<void> {
@@ -174,6 +211,10 @@ export async function runInit(ctx: CliContext, args: string[]): Promise<void> {
             message: `当前目录位于已有项目内：${parent.root}。请在项目根运行 init，或换一个空目录`,
             exit: 2,
         });
+    }
+    // local 依赖前置检查（git/python/ensurepip，任何文件落盘前）
+    if (flags.mode === "local") {
+        await assertLocalPrereqs(say);
     }
     // 是否已有项目
     const existingProject = readProjectAt(root);
@@ -191,6 +232,17 @@ export async function runInit(ctx: CliContext, args: string[]): Promise<void> {
         project = existingProject;
         say(`复用已有 project.json（不覆盖共享文件）：${root}`);
     }
+
+    // .gitignore 受管块（--no-git 也维护）
+    const gitignore: GitignoreResult = ensureGitignore(root);
+    // Git 仓库状态
+    let git: GitRepoResult;
+    if (flags.noGit) {
+        git = { status: "disabled", branch: null, top_level: null, reason: "--no-git" };
+    } else {
+        git = await ensureGitRepo(root);
+    }
+    say(gitLogLine(git, gitignore.status));
 
     // 已有机器配置（保留 machine_id / overrides）
     const previous = loadMachineIfExists(root);
@@ -323,6 +375,12 @@ export async function runInit(ctx: CliContext, args: string[]): Promise<void> {
         root,
         mode: flags.mode,
         project_created: projectCreated,
+        git: {
+            repo: git.status,
+            branch: git.branch,
+            top_level: git.top_level,
+            gitignore: gitignore.status,
+        },
         engine_installed: installed,
         comfyui_version: comfyVersion,
         toolchain,

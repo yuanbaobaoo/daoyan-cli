@@ -1,0 +1,78 @@
+name: Install smoke
+
+# 安装脚本改动时，用本地构建的 tgz 在 Linux / Windows 上各跑一遍，
+# 避免 Git 强校验、SHA-256、npm 全局 shim 等逻辑在发布后才暴露问题。
+on:
+  push:
+    paths:
+      - "install.sh"
+      - "install.ps1"
+      - ".github/workflows/install-smoke.yml"
+      - "package.json"
+      - "package-lock.json"
+  pull_request:
+    paths:
+      - "install.sh"
+      - "install.ps1"
+      - ".github/workflows/install-smoke.yml"
+      - "package.json"
+      - "package-lock.json"
+
+permissions:
+  contents: read
+
+jobs:
+  bash:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 安装依赖并构建
+        run: npm ci && npm run build
+
+      - name: 打包并用 install.sh 安装
+        shell: bash
+        run: |
+          set -euo pipefail
+          tgz="$(npm pack --silent | tail -n1)"
+          sha="$(sha256sum "$tgz" | awk '{print $1}')"
+          mkdir -p "$HOME/.npm-global"
+          npm config set prefix "$HOME/.npm-global"
+          export PATH="$HOME/.npm-global/bin:$PATH"
+          DAYOAN_TGZ_URL="$PWD/$tgz" DAYOAN_SHA256="$sha" bash install.sh
+          dycli --version
+
+  powershell:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 安装依赖
+        run: npm.cmd ci
+
+      - name: 构建
+        run: npm.cmd run build
+
+      - name: 打包并用 install.ps1 安装（Windows PowerShell 5.1）
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $tgzName = (npm.cmd pack --silent | Select-Object -Last 1).Trim()
+          $tgz = (Resolve-Path $tgzName).Path
+          $sha = (Get-FileHash $tgz -Algorithm SHA256).Hash.ToLowerInvariant()
+          $prefix = Join-Path $env:RUNNER_TEMP "npm-global"
+          New-Item -ItemType Directory -Path $prefix -Force | Out-Null
+          npm.cmd config set prefix $prefix
+          $env:PATH = "$prefix;$env:PATH"
+          $env:DAYOAN_TGZ_URL = $tgz
+          $env:DAYOAN_SHA256 = $sha
+          powershell -NoProfile -ExecutionPolicy Bypass -File ./install.ps1
+          dycli.cmd --version

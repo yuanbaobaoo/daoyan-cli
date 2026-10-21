@@ -67,4 +67,5 @@ jobs:
             latest.json
             SHA256SUMS
             install.sh
+            install.ps1
           generate_release_notes: true

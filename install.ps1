@@ -210,8 +210,10 @@ if ($null -eq $gitCommand) {
 }
 # git 版本
 $gitVersion = ((& git --version) -join "").Trim()
+# npm 版本
+$npmVersion = ((& $npmExe --version) -join "").Trim()
 
-Say "    环境：node v$nodeVersion / npm $((& $npmExe --version) -join "") / $gitVersion"
+Say "    环境：node v$nodeVersion / npm $npmVersion / $gitVersion"
 
 # 临时目录
 $TempRoot = $env:TEMP

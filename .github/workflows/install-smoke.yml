@@ -75,24 +75,33 @@ jobs:
       - name: 打包并用 install.ps1 安装（Windows PowerShell 5.1）
         shell: powershell
         run: |
-          $ErrorActionPreference = "Stop"
-          $pack = npm.cmd pack --json --silent | ConvertFrom-Json
-          $tgzName = [string]$pack[0].filename
-          if ([string]::IsNullOrEmpty($tgzName)) { throw "npm pack 未返回文件名" }
-          $tgz = (Resolve-Path $tgzName).Path
-          $sha = (Get-FileHash $tgz -Algorithm SHA256).Hash.ToLowerInvariant()
-          $prefix = Join-Path $env:RUNNER_TEMP "npm-global"
-          New-Item -ItemType Directory -Path $prefix -Force | Out-Null
-          npm.cmd config set prefix $prefix
-          $env:PATH = "$prefix;$env:PATH"
-          $env:DAYOAN_TGZ_URL = $tgz
-          $env:DAYOAN_SHA256 = $sha
-          $output = & powershell -NoProfile -ExecutionPolicy Bypass -File ./install.ps1 2>&1
-          $code = $LASTEXITCODE
-          $output | ForEach-Object { Write-Host $_ }
-          if ($code -ne 0) {
-            $tail = (($output | Select-Object -Last 15) -join " | ")
-            Write-Host "::error::install.ps1 失败（exit $code）：$tail"
-            exit $code
+          try {
+            $ErrorActionPreference = "Stop"
+            $packJson = npm.cmd pack --json --silent
+            if ($LASTEXITCODE -ne 0) { throw "npm pack 失败（exit $LASTEXITCODE）" }
+            $pack = @($packJson | ConvertFrom-Json)
+            $tgzName = [string]$pack[0].filename
+            if ([string]::IsNullOrEmpty($tgzName)) { throw "npm pack 未返回文件名" }
+            $tgz = (Resolve-Path $tgzName).Path
+            $sha = (Get-FileHash $tgz -Algorithm SHA256).Hash.ToLowerInvariant()
+            $prefix = Join-Path $env:RUNNER_TEMP "npm-global"
+            New-Item -ItemType Directory -Path $prefix -Force | Out-Null
+            npm.cmd config set prefix $prefix
+            if ($LASTEXITCODE -ne 0) { throw "npm config set prefix 失败（exit $LASTEXITCODE）" }
+            $env:PATH = "$prefix;$env:PATH"
+            $env:DAYOAN_TGZ_URL = $tgz
+            $env:DAYOAN_SHA256 = $sha
+            $output = & powershell -NoProfile -ExecutionPolicy Bypass -File ./install.ps1 2>&1
+            $code = $LASTEXITCODE
+            $output | ForEach-Object { Write-Host $_ }
+            if ($code -ne 0) {
+              $tail = (($output | Select-Object -Last 15) -join " | ")
+              throw "install.ps1 失败（exit $code）：$tail"
+            }
+            dycli.cmd --version
+            if ($LASTEXITCODE -ne 0) { throw "dycli.cmd --version 失败（exit $LASTEXITCODE）" }
+          } catch {
+            $message = $_.Exception.Message -replace "`r?`n", " | "
+            Write-Host "::error::$message"
+            exit 1
           }
-          dycli.cmd --version

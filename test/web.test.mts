@@ -350,41 +350,12 @@ async function jsonOf(response: Response): Promise<Record<string, unknown>> {
 }
 
 /**
- * 定稿写接口只在 --allow-write 时开放。
+ * 镜头定稿写接口默认开放（唯一的写能力）。
  */
-test("web：镜头定稿写接口与只读默认", async () => {
+test("web：镜头定稿写接口与写约束", async () => {
     // 测试项目
     const root = createFixture();
-    // 只读服务
-    const readonly = await startWebServer({
-        root,
-        project: { name: "web-test", version: 2 },
-        machine: null,
-        shots: makeShots(),
-        assets: { index_html: "<!doctype html>", app_js: "", style_css: "" },
-        host: "127.0.0.1",
-        port: 0,
-    });
-    try {
-        // 健康检查声明只读
-        const health = await jsonOf(await fetch(`${readonly.url}/api/health`));
-        assert.equal((health.data as Record<string, unknown>).writable, false);
-        // 只读模式拒绝定稿写请求
-        const blocked = await fetch(`${readonly.url}/api/takes/finalize`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ shot_id: "01", run_id: "r_test" }),
-        });
-        assert.equal(blocked.status, 405);
-        assert.equal(blocked.headers.get("allow"), "GET, HEAD");
-        assert.equal((await jsonOf(blocked)).ok, false);
-        // 台账未被写
-        assert.equal(existsSync(join(root, "takes.json")), false);
-    } finally {
-        await readonly.close();
-    }
-
-    // 可写服务
+    // 服务
     const handle = await startWebServer({
         root,
         project: { name: "web-test", version: 2 },
@@ -393,9 +364,10 @@ test("web：镜头定稿写接口与只读默认", async () => {
         assets: { index_html: "<!doctype html>", app_js: "", style_css: "" },
         host: "127.0.0.1",
         port: 0,
-        writable: true,
     });
     try {
+        // 定稿前没有台账
+        assert.equal(existsSync(join(root, "takes.json")), false);
         // 非 JSON 内容类型
         const wrongType = await fetch(`${handle.url}/api/takes/finalize`, {
             method: "POST",
@@ -410,7 +382,7 @@ test("web：镜头定稿写接口与只读默认", async () => {
             body: JSON.stringify({ shot_id: "01", run_id: "r_test" }),
         });
         assert.equal(crossOrigin.status, 403);
-        // 未知写路径
+        // POST 只用于镜头定稿路径
         assert.equal(
             (
                 await fetch(`${handle.url}/api/takes/nope`, {
@@ -419,7 +391,7 @@ test("web：镜头定稿写接口与只读默认", async () => {
                     body: "{}",
                 })
             ).status,
-            404,
+            405,
         );
         // 非 GET/HEAD/POST 仍拒绝
         assert.equal((await fetch(`${handle.url}/api/overview`, { method: "PUT" })).status, 405);

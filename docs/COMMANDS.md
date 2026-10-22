@@ -259,7 +259,7 @@ daoyan logs [-f] [-n N] [--src daoyan-cli|engine|worker|all]
 ### web
 
 ```bash
-daoyan web [--port <n>] [--host <addr>] [--open] [--allow-write] [--json]
+daoyan web [--port <n>] [--host <addr>] [--open] [--json]
 ```
 
 启动 Web UI（默认 `127.0.0.1` + 系统随机端口），查看项目档案、分镜、人物/场景、任务、工作流、run 产出物与 final 成片；视频支持拖动进度。
@@ -267,7 +267,7 @@ daoyan web [--port <n>] [--host <addr>] [--open] [--allow-write] [--json]
 - story 模式：系列概览、剧集切换、单集剧本/拆解/分镜/成片、全局角色/场景/音色/资产；
 - legacy 模式：镜头/人物/场景/产出统计、剧情简介与分镜一览；
 - 分镜页展示每镜内容、人物、场景、生成参数、全部历史产物与 run 历史，并支持筛选；定稿稿件置顶并标记；
-- 默认只读：不启动引擎、不占 machine lock、不写项目文件；`--allow-write` 仅开放镜头定稿（`POST /api/takes/finalize|revoke`），页面里可点「定稿 / 撤销定稿」；
+- 不启动引擎、不占 machine lock、不触发任何生成；唯一的写能力是镜头定稿（`POST /api/takes/finalize|revoke`，只写 `takes.json`），分镜页每条视频稿件可点「定稿 / 撤销定稿」；
 - `Ctrl+C` / `SIGTERM` 优雅关闭；`--json` 输出一次启动信封后继续驻留；
 - `.dycli/machine.json` 缺失时仍可查看共享数据；
 - 媒体仅从 `run.outputs`、`final/` 与 `story/assets/` 白名单读取，支持 HTTP Range；

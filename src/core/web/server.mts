@@ -1,8 +1,8 @@
-/** Web 只读 HTTP 服务 —— 零依赖 node:http，服务内嵌 SPA 与只读 JSON API。
+/** Web 查看器 HTTP 服务 —— 零依赖 node:http，服务内嵌 SPA 与 JSON API。
  *  - 默认只监听 loopback；静态资源与 API 同源，不开放 CORS；
  *  - 业务数据通过 core/web/data.mts 组装，媒体通过 core/web/media.mts 白名单读取；
- *  - 不启动引擎、不占 machine lock、不写项目文件；
- *  - 唯一例外：显式 `web --allow-write` 时开放镜头定稿两个写接口。 */
+ *  - 不启动引擎、不占 machine lock、不改工作流与生成记录；
+ *  - 唯一的写能力：镜头定稿（POST /api/takes/*，只写 takes.json）。 */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { MachineConfig, ProjectConfig, ShotsFile } from "../project/types.mts";
@@ -94,10 +94,6 @@ export interface WebServerOptions {
      * 监听端口；0 表示系统分配。
      */
     port?: number;
-    /**
-     * 是否开放镜头定稿写接口（默认只读）。
-     */
-    writable?: boolean;
 }
 
 /**
@@ -166,10 +162,6 @@ interface RouteContext {
      * 实际监听端口。
      */
     port: number;
-    /**
-     * 是否开放定稿写接口。
-     */
-    writable: boolean;
 }
 
 /**
@@ -194,10 +186,8 @@ const OVERVIEW_CACHE_MS = 2_000;
 const ASSET_CACHE_SECONDS = 300;
 // URL 解析基准
 const URL_BASE = "http://127.0.0.1";
-// 允许的 HTTP 方法
-const ALLOWED_METHODS = "GET, HEAD";
-// 开放定稿写接口后允许的 HTTP 方法
-const ALLOWED_METHODS_WRITE = "GET, HEAD, POST";
+// 允许的 HTTP 方法（POST 仅镜头定稿两个路径）
+const ALLOWED_METHODS = "GET, HEAD, POST";
 // 定稿写接口路径
 const TAKE_WRITE_PATHS = new Set(["/api/takes/finalize", "/api/takes/revoke"]);
 // 写接口请求体上限（64 KiB）
@@ -583,16 +573,10 @@ async function handleRequest(
         const headOnly = method === "HEAD";
         // 是否为写请求
         const isWrite = method === "POST";
-        // 只读模式只接受 GET / HEAD；写请求必须显式 web --allow-write
-        if ((!isWrite && method !== "GET" && method !== "HEAD") || (isWrite && !ctx.writable)) {
-            res.setHeader("Allow", ctx.writable ? ALLOWED_METHODS_WRITE : ALLOWED_METHODS);
-            sendJsonError(
-                res,
-                405,
-                "method_not_allowed",
-                isWrite ? "定稿写接口未开启；用 daoyan web --allow-write 启动" : "只支持 GET / HEAD",
-                headOnly,
-            );
+        // 只接受 GET / HEAD / POST；POST 仅用于镜头定稿
+        if (!isWrite && method !== "GET" && method !== "HEAD") {
+            res.setHeader("Allow", ALLOWED_METHODS);
+            sendJsonError(res, 405, "method_not_allowed", "只支持 GET / HEAD / POST（镜头定稿）", headOnly);
             return;
         }
         // Host 校验
@@ -611,10 +595,11 @@ async function handleRequest(
         // 路径
         const pathname = url.pathname;
 
-        // 定稿写接口（仅 --allow-write）
+        // 镜头定稿写接口（POST 只用于此）
         if (isWrite) {
             if (!TAKE_WRITE_PATHS.has(pathname)) {
-                sendJsonError(res, 404, "not_found", "接口不存在", headOnly);
+                res.setHeader("Allow", ALLOWED_METHODS);
+                sendJsonError(res, 405, "method_not_allowed", "POST 仅用于镜头定稿", headOnly);
                 return;
             }
             await handleTakeWrite(req, res, ctx, cache, pathname);
@@ -650,7 +635,6 @@ async function handleRequest(
                     version: VERSION,
                     project: ctx.project.name,
                     mode: ctx.machine?.engine.mode ?? null,
-                    writable: ctx.writable,
                 },
                 headOnly,
             );
@@ -969,7 +953,6 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
         assets: options.assets,
         host,
         port,
-        writable: options.writable === true,
     };
     // HTTP 服务
     const server: Server = createServer((req, res) => {

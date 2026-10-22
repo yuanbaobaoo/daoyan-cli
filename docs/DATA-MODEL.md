@@ -127,7 +127,7 @@ final/<episode-id>/cut-*          单集成片
 - 一镜至多一份 `finalized`；未定稿的产出只是附加产物，不进入下游；`finalized: null` 表示已撤销；
 - `source` 取 `ai`（CLI/Agent）或 `user`（人工、Web）；`history` 每镜保留最近 10 条；
 - `sha256` 是定稿时产物内容的快照，用于审计与漂移检测；选稿不做内容重算，只做存在性校验；
-- 写入只走 `daoyan take finalize|revoke`（以及 `dycli web --allow-write` 的定稿接口），不手工编辑；
+- 写入只走 `daoyan take finalize|revoke`（以及 `dycli web` 的分镜页定稿），不手工编辑；
 - **消费点**：接力首帧抽上游定稿稿件的尾帧（`plans.mts`）、合片按定稿稿件选段（`wrap`）、状态与图谱以定稿稿件为准；
 - 回退策略按 `project.story.enforce`：`strict` = 有产出但未定稿的镜头阻断接力与合片（`take_pending`，可用 `--allow-incomplete` 绕过）；`warn` / `off` = 回退最新成功 run 并记 warning；
 - 定稿记录指向的 run 被删除、状态非 succeeded、稿件改名或产物不在工作区时判为失效（`take_stale`），按上面的回退策略处理，需重新定稿；

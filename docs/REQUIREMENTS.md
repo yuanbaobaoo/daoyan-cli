@@ -25,7 +25,7 @@ dycli 不负责写剧本、不做创作判断，而是把一部多集短剧的�
 7. **多集项目中，写入 / 生产 / 单集 show 命令必须带 `--episode`**（`script sync`、`breakdown set`、`shots set`、`shot`、`retake`、`batch`、`wrap`、`script show`、`breakdown show`）；系列概览类只读可省略；`run` 不受剧情门禁限制，`--episode` 只是可选归属标记。
 8. **`runs/`、`tasks/` 保持根目录扁平存储**，记录增加 `episode_id`；不移动现有目录，避免破坏旧项目和跨集查询。
 9. **成片按集隔离**：`final/<episode-id>/cut-*`；不合集、不混 run。
-10. **Web 是只读的系列/剧集浏览器**：系列概览、剧集切换、全局设定、单集剧本/拆解/分镜/成片。
+10. **Web 是系列/剧集浏览器**：系列概览、剧集切换、全局设定、单集剧本/拆解/分镜/成片；唯一的写能力是镜头定稿。
 
 ### 0.2 决策状态（对应第 14 节）
 
@@ -48,7 +48,7 @@ dycli 当前已经具备：
 - `run` / `shot` / `retake` / `batch` / `wrap` 生产链路；
 - `runs/<id>/outputs` 不可变产物与 Git LFS 约定；
 - `shots.json` 的分镜 recipe；
-- `daoyan web` 只读项目查看器；
+- `daoyan web` 项目查看器（可在分镜页定稿镜头）；
 - 项目内 Agent Skill 生成机制。
 
 距离「管理整个短剧生命周期」还缺少：

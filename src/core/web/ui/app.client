@@ -1,5 +1,6 @@
 /* daoyan web 客户端 —— 原生 JS 单页应用，无构建依赖。
- * 所有数据来自同源只读 API；DOM 文本统一用 textContent，避免提示词等字段注入 HTML。 */
+ * 数据来自同源 API；唯一的写操作是镜头定稿（POST /api/takes/*）。
+ * DOM 文本统一用 textContent，避免提示词等字段注入 HTML。 */
 
 // 页面视图
 const VIEWS = [
@@ -196,8 +197,6 @@ let playerIndex = 0;
 let toastTimer = null;
 // 最后更新时间
 let lastUpdatedAt = "";
-// 服务是否开放定稿写接口（web --allow-write）
-let writable = false;
 
 // 侧边导航容器
 let navRoot = null;
@@ -422,12 +421,12 @@ function renderShell() {
             <aside class="sidebar">
                 <div class="brand">
                     <div class="brand-mark"><span class="brand-dot"></span>daoyan web</div>
-                    <p class="brand-sub">临时只读项目查看器</p>
+                    <p class="brand-sub">项目查看器 · 可定稿镜头</p>
                 </div>
                 <nav id="nav" class="nav" aria-label="页面导航"></nav>
                 <div class="sidebar-foot">
                     <code>Ctrl+C</code> 停止服务<br />
-                    数据来自当前项目目录，只读。
+                    数据来自当前项目目录；仅镜头定稿会写回 takes.json。
                 </div>
             </aside>
             <main class="main">
@@ -509,7 +508,6 @@ async function loadHeader() {
         const data = await requestJson("/api/health");
         if (projectNameEl !== null && typeof data.project === "string") projectNameEl.textContent = data.project;
         if (modeEl !== null) modeEl.textContent = data.mode === null ? "未绑定本机" : data.mode;
-        writable = data.writable === true;
     } catch {
         // 顶栏失败不影响页面主体
     }
@@ -2898,8 +2896,8 @@ function renderShotArtifactRow(item, all, shot) {
     const download = createElement("a", "button ghost", "下载");
     download.href = output.download_url;
     actions.append(download);
-    // 定稿按钮（仅视频产物、可用、且服务开放写接口）
-    if (writable && shot !== undefined && output.kind === "video" && available) {
+    // 定稿按钮（仅视频产物且文件在工作区）
+    if (shot !== undefined && output.kind === "video" && available) {
         // 定稿 / 撤销按钮
         const takeButton = createElement("button", "button ghost", item.finalized === true ? "撤销定稿" : "定稿");
         takeButton.type = "button";

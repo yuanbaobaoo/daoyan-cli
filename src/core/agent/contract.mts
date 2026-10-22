@@ -42,7 +42,7 @@ export function capabilities(): Record<string, unknown> {
         git_friendly_records: true,
         project_skill: true,
         story_lifecycle: "multi-episode",
-        web_ui: "read-only, take-write with --allow-write",
+        web_ui: "view + take finalize",
         user_level_skill: false,
         http_api: [
             "/system_stats",

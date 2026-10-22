@@ -803,8 +803,8 @@ export const COMMANDS: CommandMeta[] = [
     {
         name: "web",
         group: "ops",
-        summary: "启动 Web UI 查看项目、分镜、任务与产出物；--allow-write 开放镜头定稿（Ctrl+C 停止）",
-        usage: "daoyan web [--port <n>] [--host <addr>] [--open] [--allow-write] [--json]",
+        summary: "启动 Web UI 查看项目、分镜、任务与产出物，并可定稿镜头（Ctrl+C 停止）",
+        usage: "daoyan web [--port <n>] [--host <addr>] [--open] [--json]",
         flags: [
             {
                 name: "--port",
@@ -824,18 +824,12 @@ export const COMMANDS: CommandMeta[] = [
                 default: false,
                 description: "启动后尝试用系统默认浏览器打开",
             },
-            {
-                name: "--allow-write",
-                type: "boolean",
-                default: false,
-                description: "开放 POST /api/takes/finalize 与 /revoke（镜头定稿）",
-            },
         ],
-        examples: ["daoyan web", "daoyan web --port 8080 --open", "daoyan web --allow-write --json"],
+        examples: ["daoyan web", "daoyan web --port 8080 --open", "daoyan web --json"],
         detail: [
-            "默认只读：不启动 ComfyUI、不占 machine lock、不写项目文件。",
+            "不启动 ComfyUI、不占 machine lock、不触发任何生成。",
             "支持项目概览、分镜、任务、工作流、run 产出物与 final 成片；视频支持拖动进度。",
-            "--allow-write 只增加镜头定稿两个写接口，仍不接受任意路径或 workflow 修改。",
+            "唯一的写能力是镜头定稿：分镜页每条视频稿件可「定稿 / 撤销定稿」，只写 takes.json。",
             "--json 输出一次启动信封后继续驻留；Ctrl+C / SIGTERM 优雅关闭。",
         ],
         implemented: true,

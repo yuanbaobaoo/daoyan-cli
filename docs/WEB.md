@@ -2,10 +2,10 @@
 
 `daoyan web` 在项目内启动一个临时的本地 HTTP 服务，用浏览器查看项目状态、分镜、任务、工作流、run 产出物与 final 成片。
 
-默认是**只读查看器**：
+它默认只查看，唯一的写能力是**镜头定稿**：
 
-- 不启动 ComfyUI，不占 machine lock，不写项目文件；
-- 唯一例外：显式 `--allow-write` 时开放镜头定稿写接口（只写 `takes.json`）；
+- 不启动 ComfyUI，不占 machine lock，不触发任何生成；
+- 分镜页每条视频稿件可直接「定稿 / 撤销定稿」，只写 `takes.json`；
 - 默认只监听 `127.0.0.1`，端口由系统分配；
 - `Ctrl+C` / `SIGTERM` 关闭服务；
 - 前端资源内嵌在 `dist/cli.mjs`，不依赖 CDN 或外部静态目录。
@@ -171,10 +171,10 @@ legacy 项目继续使用原有 `/api/shots`、`/api/finals`、`/media/final/<na
 | GET | `/api/workflows` | 工作流列表 |
 | GET/HEAD | `/media/run/:run_id/:name` | run 产出物流 |
 | GET/HEAD | `/media/final/:name` | 成片流 |
-| POST | `/api/takes/finalize` | 镜头定稿（仅 `--allow-write`）；body `{shot_id, run_id, output?, note?, episode_id?}` |
-| POST | `/api/takes/revoke` | 撤销定稿（仅 `--allow-write`）；body `{shot_id, episode_id?}` |
+| POST | `/api/takes/finalize` | 镜头定稿；body `{shot_id, run_id, output?, note?, episode_id?}` |
+| POST | `/api/takes/revoke` | 撤销定稿；body `{shot_id, episode_id?}` |
 
-默认只允许 `GET` / `HEAD`，其他方法返回 `405`；`--allow-write` 时 `Allow` 变为 `GET, HEAD, POST`，且 POST 仅接受上面两个定稿路径。
+接受 `GET` / `HEAD` / `POST`，`Allow: GET, HEAD, POST`；POST 只用于上面两个定稿路径，其他路径返回 `405`。
 
 定稿写接口的约束：
 
@@ -205,7 +205,7 @@ Range: bytes=-500
 - 媒体 URL 不能直接映射文件系统路径：必须先命中 `run.json` 的 `outputs[]` 或 `final/` 目录；
 - 解析后的 `realpath` 必须仍在允许目录内，阻止符号链接逃逸；
 - loopback 监听时校验 `Host` 头，降低 DNS rebinding 风险；
-- 不开放 CORS；默认无写接口；`--allow-write` 时只开放镜头定稿，并要求 JSON 内容类型 + 同源 `Origin`；
+- 不开放 CORS；写能力只有镜头定稿，且要求 JSON 内容类型 + 同源 `Origin`；
 - 响应带 `Content-Security-Policy`、`X-Content-Type-Options`、`Referrer-Policy`、`X-Frame-Options`；
 - API 不返回绝对路径；异常只写 stderr，不回传堆栈。
 
@@ -215,7 +215,7 @@ Range: bytes=-500
 - 单个损坏的 `run.json` / `task.json` / manifest 会被跳过，不会拖垮列表；
 - 文件缺失或 Git LFS pointer 会在页面标记，并提示 `git lfs pull`；
 - 前端轮询刷新（2–15 秒，按页面），页面隐藏时暂停；
-- 不提供网页触发 `run` / `retake` / `batch` / `run cancel`；这些操作仍走 CLI。`--allow-write` 也只写定稿台账，不触发任何生成。
+- 不提供网页触发 `run` / `retake` / `batch` / `run cancel`；这些操作仍走 CLI。页面定稿也只写定稿台账，不触发任何生成。
 
 ## 6. 故障排查
 

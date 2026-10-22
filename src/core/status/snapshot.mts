@@ -15,7 +15,9 @@ import {
 } from "../project/types.mts";
 import { pidAlive, readEnginePid } from "../engine/local-session.mts";
 import { inspectMachineLock } from "../machine/lock.mts";
-import { latestSucceededRun } from "../run/store.mts";
+import { listRuns } from "../run/store.mts";
+import { pickShotTake, takeCounts } from "../story/takes.mts";
+import type { EpisodeContext } from "../story/types.mts";
 import { listTasks, taskSummary } from "../task/store.mts";
 import { gpuSnapshot } from "../gpu/detect.mts";
 import { inspectLease } from "../gpu/lease.mts";
@@ -35,9 +37,9 @@ export interface StatusSnapshotOptions {
      */
     commands?: readonly SkillCommand[];
     /**
-     * 镜头 label 前缀（legacy: shot:；多集: ep:<id>:shot:）。
+     * 剧集上下文（决定 label 前缀与定稿台账位置）。
      */
-    labelPrefix?: string;
+    context?: EpisodeContext;
     /**
      * 只展示该剧集的 task（story 模式）。
      */
@@ -95,25 +97,37 @@ async function safeQueue(client: ComfyClient): Promise<Record<string, number> | 
 }
 
 /**
- * 镜头进度（从 runs 推导）。
+ * 镜头进度（从 runs 与定稿台账推导）。
  */
 export function shotProgress(
     root: string,
     shots: ShotsFile | null,
-    labelPrefix = "shot:",
+    context?: EpisodeContext,
 ): Array<Record<string, unknown>> {
     if (shots === null) return [];
+    // 候选 run 池（一次读取）
+    const pool = listRuns(root);
+    // label 前缀
+    const labelPrefix = context?.label_prefix ?? "shot:";
     return shots.shots.map((s) => {
+        // 本镜 label
+        const label = `${labelPrefix}${s.id}`;
         // 最新成功 run
-        const rec = latestSucceededRun(root, `${labelPrefix}${s.id}`);
+        const rec = pool.find((r) => r.label === label && r.status === "succeeded") ?? null;
         // 第一个产物是否存在
         const present = rec !== null && rec.outputs.some((o) => existsSync(join(root, RUNS_DIR, rec.run_id, o.path)));
+        // 定稿稿件（无剧集上下文时不推断）
+        const take = context === undefined ? null : pickShotTake(root, context, s.id, pool);
         return {
             id: s.id,
             slug: s.slug ?? null,
             done: rec !== null,
             latest_run: rec?.run_id ?? null,
             artifact_present: present,
+            finalized_run: take?.source === "finalized" ? (take.run?.run_id ?? null) : null,
+            finalized_output: take?.source === "finalized" ? (take.output?.name ?? null) : null,
+            take_source: take?.source ?? null,
+            take_stale: take?.stale?.reason ?? null,
         };
     });
 }
@@ -166,7 +180,9 @@ export async function buildStatusSnapshot(
     // Skill 状态
     const skill = skillState(root, VERSION, options.commands ?? []);
     // 镜头进度
-    const shot = shotProgress(root, shots, options.labelPrefix);
+    const shot = shotProgress(root, shots, options.context);
+    // 定稿进度（需要剧集上下文）
+    const takes = options.context !== undefined && shots !== null ? takeCounts(root, options.context, shots) : null;
     // 最近任务列表
     const recentTasks = tasks.slice(0, 10).map(taskSummary);
     return {
@@ -236,6 +252,7 @@ export async function buildStatusSnapshot(
             path: skill.path,
         },
         shots: shot,
+        takes,
         next_actions:
             active.length > 0
                 ? [`status --task ${active[0]?.task_id} --wait`, `run cancel ${active[0]?.task_id}`]

@@ -20,6 +20,9 @@ import {
     type RunRecord,
 } from "../project/types.mts";
 
+// 视频类产物扩展名（定稿稿件 / 接力尾帧 / 合片选段的唯一声明处）
+const VIDEO_OUTPUT_RE = /\.(mp4|webm|mkv|mov|gif)$/i;
+
 /**
  * 生成 run id：<timestamp>-<machine>-<suffix>。
  */
@@ -194,6 +197,29 @@ export function latestRunByLabel(root: string, label: string): RunRecord | null 
  */
 export function runOutputAbs(root: string, record: RunRecord, output: RunOutput): string {
     return join(runDir(root, record.run_id), output.path);
+}
+
+/**
+ * 判断产物名是否为视频片段。
+ */
+export function isVideoOutput(name: string): boolean {
+    return VIDEO_OUTPUT_RE.test(name);
+}
+
+/**
+ * 选出 run 的主产物：优先视频，否则第一个产物（接力尾帧 / 合片选段 / 定稿稿件共用）。
+ */
+export function pickPrimaryOutput(record: RunRecord): RunOutput | null {
+    // 视频产物
+    const video = record.outputs.find((o) => isVideoOutput(o.name));
+    return video ?? record.outputs[0] ?? null;
+}
+
+/**
+ * 按 label 列出该镜头的全部 run（时间倒序）。
+ */
+export function runsByLabel(root: string, label: string): RunRecord[] {
+    return listRuns(root).filter((r) => r.label === label);
 }
 
 /**

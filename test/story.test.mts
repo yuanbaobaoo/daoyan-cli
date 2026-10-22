@@ -336,7 +336,7 @@ test("story：工作流资产槽位解析与 label 前缀", async () => {
             shots,
             shotIds: ["01"],
             force: true,
-            labelPrefix: "ep:ep01:shot:",
+            context: resolveEpisodeContext(root, "ep01"),
             log: () => {},
         });
         assert.equal(planned.plans.length, 1);

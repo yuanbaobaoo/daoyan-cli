@@ -75,6 +75,9 @@
 | `shot_timeout` | 是 | — | 镜头超时 |
 | `anchor_not_found` | 否 | — | 锚点 key/文件不存在 |
 | `relay_upstream_missing` | 否 | — | 上游无成功 run/产物 |
+| `take_not_found` | 否 | — | 该镜头没有定稿记录 |
+| `take_invalid` | 否 | — | 定稿校验失败（非本镜/本集、非 succeeded、稿件不是视频或不在工作区） |
+| `take_pending` | 否 | — | strict 门禁下镜头有产出但未定稿，阻断接力/合片 |
 | `model_not_found` | 否 | — | loader 枚举不匹配；检查 modelpath/文件名 |
 | `node_missing` | 否 | — | 引擎缺节点类；安装 custom node |
 | `gpu_unsupported` | 否 | — | 平台不支持接管；任务继续 |

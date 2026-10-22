@@ -30,9 +30,10 @@ import { buildStatusSnapshot, shotProgress } from "../status/snapshot.mts";
 import { readEvents } from "../task/events.mts";
 import { taskDir } from "../task/store.mts";
 import { runDir } from "../run/store.mts";
-import { storyEnabled } from "../story/paths.mts";
+import { resolveEpisodeContext, storyEnabled } from "../story/paths.mts";
+import { pickShotTake } from "../story/takes.mts";
 import { computeSeriesStoryStatus } from "../story/validate.mts";
-import type { SeriesStoryStatus } from "../story/types.mts";
+import type { EpisodeContext, SeriesStoryStatus } from "../story/types.mts";
 
 /**
  * 产物类型。
@@ -207,6 +208,10 @@ export interface WebArtifactItem {
      * 单个产物。
      */
     output: WebArtifact;
+    /**
+     * 是否为该镜的定稿稿件。
+     */
+    finalized: boolean;
 }
 
 /**
@@ -433,6 +438,10 @@ export interface WebShotRun {
      * 该 run 的产物。
      */
     outputs: WebArtifact[];
+    /**
+     * 该 run 是否为定稿 run。
+     */
+    finalized: boolean;
 }
 
 /**
@@ -500,6 +509,22 @@ export interface WebShotItem {
      */
     latest_artifact: WebArtifact | null;
     /**
+     * 定稿稿件所在 run（未定稿为 null）。
+     */
+    finalized_run: string | null;
+    /**
+     * 定稿稿件名（未定稿为 null）。
+     */
+    finalized_output: string | null;
+    /**
+     * 下游选稿来源（无剧集上下文时为 null）。
+     */
+    take_source: "finalized" | "latest" | "none" | null;
+    /**
+     * 定稿记录失效原因。
+     */
+    take_stale: string | null;
+    /**
      * 全部历史产物（按 run 时间倒序）。
      */
     artifacts: WebArtifactItem[];
@@ -561,6 +586,10 @@ export interface WebShotsSummary {
      * 已有成功 run 的镜头数。
      */
     shots_done: number;
+    /**
+     * 已定稿镜头数。
+     */
+    shots_finalized: number;
     /**
      * 人物数。
      */
@@ -996,6 +1025,7 @@ function flattenArtifacts(root: string, runs: RunRecord[]): WebArtifactItem[] {
                 workflow: run.workflow.path,
                 prompt: promptOf(run),
                 output: artifactOf(root, run, output),
+                finalized: false,
             });
         }
     }
@@ -1360,7 +1390,12 @@ function latestArtifactOf(root: string, run: RunRecord | null): WebArtifact | nu
 /**
  * 分镜视图。
  */
-export function buildShotsView(root: string, shots: ShotsFile | null, labelPrefix = "shot:"): WebShotsView | null {
+export function buildShotsView(
+    root: string,
+    shots: ShotsFile | null,
+    labelPrefix = "shot:",
+    context?: EpisodeContext,
+): WebShotsView | null {
     if (shots === null) return null;
     // meta 宽松视图
     const metaRecord = shots.meta as unknown as Record<string, unknown>;
@@ -1397,6 +1432,12 @@ export function buildShotsView(root: string, shots: ShotsFile | null, labelPrefi
         const latest = shotRuns[0] ?? null;
         // 最新成功 run
         const latestSuccess = shotRuns.find((r) => r.status === "succeeded") ?? null;
+        // 本镜选稿（提供剧集上下文时定稿优先）
+        const take = context === undefined ? null : pickShotTake(root, context, shot.id, runs);
+        // 定稿 run
+        const finalizedRun = take?.source === "finalized" ? (take.run?.run_id ?? null) : null;
+        // 定稿稿件名
+        const finalizedOutput = take?.source === "finalized" ? (take.output?.name ?? null) : null;
         // 镜头宽松视图
         const record = shot as unknown as Record<string, unknown>;
         // params 宽松视图
@@ -1445,10 +1486,14 @@ export function buildShotsView(root: string, shots: ShotsFile | null, labelPrefi
                 duration_ms: durationMs(run.started_at, run.finished_at),
                 error: run.error,
                 outputs: run.outputs.map((o) => artifactOf(root, run, o)),
+                finalized: run.run_id === finalizedRun,
             };
         });
         // 全部历史产物
         const artifacts = shotRuns.flatMap((run) => flattenArtifacts(root, [run]));
+        for (const item of artifacts) {
+            item.finalized = item.run_id === finalizedRun && item.output.name === finalizedOutput;
+        }
         return {
             id: shot.id,
             slug: shot.slug ?? null,
@@ -1465,6 +1510,10 @@ export function buildShotsView(root: string, shots: ShotsFile | null, labelPrefi
             latest_run: latest?.run_id ?? null,
             latest_status: latest?.status ?? null,
             latest_artifact: latestArtifactOf(root, latestSuccess),
+            finalized_run: finalizedRun,
+            finalized_output: finalizedOutput,
+            take_source: take?.source ?? null,
+            take_stale: take?.stale?.reason ?? null,
             artifacts,
             runs: runViews,
             runs_count: shotRuns.length,
@@ -1507,6 +1556,7 @@ export function buildShotsView(root: string, shots: ShotsFile | null, labelPrefi
         summary: {
             shots_total: items.length,
             shots_done: items.filter((item) => item.done).length,
+            shots_finalized: items.filter((item) => item.finalized_run !== null).length,
             characters_total: characters.length,
             scenes_total: scenes.length,
             artifacts_total: artifactsTotal,
@@ -1721,7 +1771,7 @@ function buildSharedOverview(root: string, project: ProjectConfig, shots: ShotsF
     // story 字段
     const storyFields = storyOverviewFields(root, project);
     // 分镜视图（story 模式由剧集页展示）
-    const storyboard = storyFields === null ? buildShotsView(root, shots) : null;
+    const storyboard = storyFields === null ? buildShotsView(root, shots, "shot:", resolveEpisodeContext(root)) : null;
     // 基础统计
     const stats = buildStats(shots, runs, tasks, storyboard);
     return {
@@ -1737,7 +1787,7 @@ function buildSharedOverview(root: string, project: ProjectConfig, shots: ShotsF
         recent_tasks: tasks.slice(0, 10).map(taskItem),
         gpu: null,
         skill: null,
-        shots: storyFields === null ? shotProgress(root, shots) : [],
+        shots: storyFields === null ? shotProgress(root, shots, resolveEpisodeContext(root)) : [],
         storyboard,
         ...(storyFields !== null ? storyFields : {}),
         next_actions:
@@ -1797,7 +1847,7 @@ export async function buildOverview(
     // 全部 task
     const tasks = safeListTasks(root);
     // 分镜视图（story 模式由剧集页展示）
-    const storyboard = storyFields === null ? buildShotsView(root, shots) : null;
+    const storyboard = storyFields === null ? buildShotsView(root, shots, "shot:", resolveEpisodeContext(root)) : null;
     // 基础统计
     const stats = buildStats(shots, runs, tasks, storyboard);
     return {

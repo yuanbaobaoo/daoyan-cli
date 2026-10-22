@@ -52,6 +52,9 @@ export const ERROR_CODES = [
     "shot_timeout",
     "anchor_not_found",
     "relay_upstream_missing",
+    "take_not_found",
+    "take_invalid",
+    "take_pending",
     "model_not_found",
     "node_missing",
     // GPU
@@ -210,6 +213,21 @@ export const ERROR_META: Record<ErrCode, ErrorMeta> = {
     shot_timeout: { retryable: true, hint: "提高 --timeout 或缩小任务后重试。" },
     anchor_not_found: { retryable: false, hint: "检查 shots.json 的 meta.anchors 与文件是否存在。" },
     relay_upstream_missing: { retryable: false, hint: "先完成上游镜头的成功 run，再拍接力镜头。" },
+    take_not_found: {
+        retryable: false,
+        hint: "该镜头没有定稿记录；用 take list 查看候选稿件后 take finalize。",
+        nextActions: ["take list --shot <镜号> --json", "take finalize <镜号> --run <run_id> --json"],
+    },
+    take_invalid: {
+        retryable: false,
+        hint: "run 不属于本镜/本集、状态不是 succeeded，或稿件文件不在工作区（先 git lfs pull）；换一条 run 后重试。",
+        nextActions: ["take list --shot <镜号> --json"],
+    },
+    take_pending: {
+        retryable: false,
+        hint: "镜头尚未定稿；strict 门禁下未定稿的产出不能用于下游接力与合片。",
+        nextActions: ["take list --json", "take finalize <镜号> --run <run_id> --json"],
+    },
     model_not_found: {
         retryable: false,
         hint: "workflow 的 loader 输入值与 /object_info 枚举不匹配；检查 modelpath / 文件名。",

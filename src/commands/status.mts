@@ -218,9 +218,8 @@ export async function runStatus(ctx: CliContext, args: string[]): Promise<number
     // 默认快照
     const data = await buildStatusSnapshot(root, project, machine, shots, {
         commands: COMMANDS,
-        ...(episodeContext !== null
-            ? { labelPrefix: episodeContext.label_prefix, episodeId: episodeContext.episode_id }
-            : {}),
+        ...(shots !== null ? { context: episodeContext ?? resolveEpisodeContext(root) } : {}),
+        ...(episodeContext !== null ? { episodeId: episodeContext.episode_id } : {}),
     });
     if (seriesStatus !== null) {
         data.story = seriesStatus;

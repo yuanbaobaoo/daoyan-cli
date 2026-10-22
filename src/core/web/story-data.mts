@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { ProjectConfig, ShotsFile, StoryEntityRef } from "../project/types.mts";
 import { classifyArtifact, buildShotsView, listArtifacts, listFinals, listRunsView, listTasksView } from "./data.mts";
 import { isLfsPointerFile, listAssets, storyMediaUrl } from "../story/assets.mts";
-import { episodeDir, listEpisodeMetas, readEpisodeMeta, readSeries } from "../story/paths.mts";
+import { episodeDir, listEpisodeMetas, readEpisodeMeta, readSeries, resolveEpisodeContext } from "../story/paths.mts";
 import {
     loadBreakdown,
     loadCharacters,
@@ -201,7 +201,7 @@ function buildEpisodeShotsView(root: string, episodeId: string): ReturnType<type
             scenes: sceneDefs,
         },
     };
-    return buildShotsView(root, synthetic, `ep:${episodeId}:shot:`);
+    return buildShotsView(root, synthetic, `ep:${episodeId}:shot:`, resolveEpisodeContext(root, episodeId));
 }
 
 /**

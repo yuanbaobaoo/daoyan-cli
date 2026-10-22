@@ -16,7 +16,7 @@ dycli 的一等公民是 AI Agent。`init` 会在项目内生成一套自描述 
     ├── errors.md            # 错误码与恢复矩阵
     ├── protocol.md          # 异步协议：start/poll/wait/cancel/retry
     ├── story.md             # 多集剧本 / 拆解 / 设定资产 / 门禁
-    └── recipes.md           # shot / batch / wrap / 首帧与接力
+    └── recipes.md           # shot / batch / take 定稿 / wrap / 首帧与接力
 ```
 
 全部进 Git；`init --no-skill` 可跳过生成。
@@ -39,7 +39,8 @@ This project uses dycli/daoyan for ComfyUI workflows.
 Before creating or running workflows, read `.agents/skills/daoyan/SKILL.md`.
 Use `daoyan` commands with `--json`; do not edit `engine/`, `logs/`, or `.dycli/`.
 Only one generation task runs per machine; if you get `machine_busy`, inspect the owner and retry later.
-For multi-episode projects, use `daoyan story` commands and pass `--episode <id>` to shot/batch/wrap; check `story status` before generation.
+For multi-episode projects, use `daoyan story` commands and pass `--episode <id>` to shot/batch/take/wrap; check `story status` before generation.
+A shot is usable downstream only after `daoyan take finalize <shot> --run <run_id>`; relay and wrap read the finalized take, never the newest run.
 <!-- daoyan:skill:end -->
 ```
 

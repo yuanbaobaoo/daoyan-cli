@@ -1,10 +1,11 @@
-# Web 只读查看器（v0.1）
+# Web 查看器（v0.1）
 
 `daoyan web` 在项目内启动一个临时的本地 HTTP 服务，用浏览器查看项目状态、分镜、任务、工作流、run 产出物与 final 成片。
 
-它是**只读查看器**：
+默认是**只读查看器**：
 
 - 不启动 ComfyUI，不占 machine lock，不写项目文件；
+- 唯一例外：显式 `--allow-write` 时开放镜头定稿写接口（只写 `takes.json`）；
 - 默认只监听 `127.0.0.1`，端口由系统分配；
 - `Ctrl+C` / `SIGTERM` 关闭服务；
 - 前端资源内嵌在 `dist/cli.mjs`，不依赖 CDN 或外部静态目录。
@@ -170,8 +171,17 @@ legacy 项目继续使用原有 `/api/shots`、`/api/finals`、`/media/final/<na
 | GET | `/api/workflows` | 工作流列表 |
 | GET/HEAD | `/media/run/:run_id/:name` | run 产出物流 |
 | GET/HEAD | `/media/final/:name` | 成片流 |
+| POST | `/api/takes/finalize` | 镜头定稿（仅 `--allow-write`）；body `{shot_id, run_id, output?, note?, episode_id?}` |
+| POST | `/api/takes/revoke` | 撤销定稿（仅 `--allow-write`）；body `{shot_id, episode_id?}` |
 
-只允许 `GET` / `HEAD`，其他方法返回 `405`。
+默认只允许 `GET` / `HEAD`，其他方法返回 `405`；`--allow-write` 时 `Allow` 变为 `GET, HEAD, POST`，且 POST 仅接受上面两个定稿路径。
+
+定稿写接口的约束：
+
+- 必须 `Content-Type: application/json`（跨源预检失败即被拒），请求体上限 64 KiB；
+- 带 `Origin` / `Referer` 时必须与请求 `Host` 同源；
+- 只接受白名单字段，稿件一律从 `run.json` 的 `outputs[]` 反查，**不接受任何文件路径**；
+- 校验与 CLI `take finalize` 同源（本镜本集、`succeeded`、视频产物、在工作区），失败按 `400/404` 返回错误信封与 `hint`。
 
 ### 媒体 Range
 
@@ -195,17 +205,17 @@ Range: bytes=-500
 - 媒体 URL 不能直接映射文件系统路径：必须先命中 `run.json` 的 `outputs[]` 或 `final/` 目录；
 - 解析后的 `realpath` 必须仍在允许目录内，阻止符号链接逃逸；
 - loopback 监听时校验 `Host` 头，降低 DNS rebinding 风险；
-- 不开放 CORS；无写接口，因此没有 CSRF 写风险；
+- 不开放 CORS；默认无写接口；`--allow-write` 时只开放镜头定稿，并要求 JSON 内容类型 + 同源 `Origin`；
 - 响应带 `Content-Security-Policy`、`X-Content-Type-Options`、`Referrer-Policy`、`X-Frame-Options`；
 - API 不返回绝对路径；异常只写 stderr，不回传堆栈。
 
 ## 5. 数据与限制
 
-- 只读读取 `project.json`、`.dycli/machine.json`、`shots.json`、`workflows/`、`tasks/`、`runs/`、`final/`；
+- 只读读取 `project.json`、`.dycli/machine.json`、`shots.json`、`workflows/`、`tasks/`、`runs/`、`final/`、`takes.json`；
 - 单个损坏的 `run.json` / `task.json` / manifest 会被跳过，不会拖垮列表；
 - 文件缺失或 Git LFS pointer 会在页面标记，并提示 `git lfs pull`；
 - 前端轮询刷新（2–15 秒，按页面），页面隐藏时暂停；
-- 不提供网页触发 `run` / `retake` / `batch` / `run cancel`；这些操作仍走 CLI。
+- 不提供网页触发 `run` / `retake` / `batch` / `run cancel`；这些操作仍走 CLI。`--allow-write` 也只写定稿台账，不触发任何生成。
 
 ## 6. 故障排查
 

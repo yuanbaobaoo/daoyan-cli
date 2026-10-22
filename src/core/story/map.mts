@@ -20,7 +20,8 @@ import { resolveWorkflowRef, workflowNameOf } from "../project/config.mts";
 import { loadBindings, loadGraphFile } from "../workflow/load.mts";
 import { listRuns } from "../run/store.mts";
 import { isLfsPointerFile, storyMediaUrl } from "./assets.mts";
-import { episodeDir, readEpisodeMeta, storyMapPath } from "./paths.mts";
+import { episodeDir, readEpisodeMeta, resolveEpisodeContext, storyMapPath } from "./paths.mts";
+import { pickShotTake } from "./takes.mts";
 import {
     loadBreakdown,
     loadCharacters,
@@ -350,6 +351,14 @@ export interface StoryMapRender {
      * 最新产物。
      */
     latest_outputs: StoryMapRenderOutput[];
+    /**
+     * 定稿稿件所在 run（未定稿为 null）。
+     */
+    finalized_run_id: string | null;
+    /**
+     * 定稿稿件（未定稿为空数组）。
+     */
+    finalized_outputs: StoryMapRenderOutput[];
     /**
      * 最新完成时间。
      */
@@ -2455,9 +2464,13 @@ function candidateFit(candidate: StoryMapWorkflowCandidate, fact: EventFacts): S
 function buildRenderIndex(root: string, episodeId: string): Map<string, StoryMapRender> {
     // label 前缀
     const prefix = `ep:${episodeId}:shot:`;
+    // 剧集上下文（定稿稿件查询）
+    const context = resolveEpisodeContext(root, episodeId);
+    // 全部 run（一次读取）
+    const allRuns = listRuns(root);
     // 分组
     const groups = new Map<string, RunRecord[]>();
-    for (const run of listRuns(root)) {
+    for (const run of allRuns) {
         if (run.label === null || !run.label.startsWith(prefix)) continue;
         // 镜头 id
         const shotId = run.label.slice(prefix.length);
@@ -2471,6 +2484,12 @@ function buildRenderIndex(root: string, episodeId: string): Map<string, StoryMap
     for (const [shotId, runs] of groups) {
         // 最新 run
         const latest = runs[0] ?? null;
+        // 本镜选稿（定稿优先）
+        const take = pickShotTake(root, context, shotId, allRuns);
+        // 定稿 run
+        const finalized = take.source === "finalized" ? take.run : null;
+        // 定稿稿件
+        const finalizedOutput = take.source === "finalized" ? take.output : null;
         index.set(shotId, {
             runs_count: runs.length,
             succeeded_count: runs.filter((run) => run.status === "succeeded").length,
@@ -2482,6 +2501,18 @@ function buildRenderIndex(root: string, episodeId: string): Map<string, StoryMap
                 media_url: `${RUN_MEDIA_PREFIX}/${encodeURIComponent(latest?.run_id ?? "")}/${encodeURIComponent(output.name)}`,
                 bytes: output.bytes,
             })),
+            finalized_run_id: finalized?.run_id ?? null,
+            finalized_outputs:
+                finalized !== null && finalizedOutput !== null
+                    ? [
+                          {
+                              name: finalizedOutput.name,
+                              kind: outputKind(finalizedOutput.name),
+                              media_url: `${RUN_MEDIA_PREFIX}/${encodeURIComponent(finalized.run_id)}/${encodeURIComponent(finalizedOutput.name)}`,
+                              bytes: finalizedOutput.bytes,
+                          },
+                      ]
+                    : [],
             latest_finished_at: latest?.finished_at ?? null,
             latest_error: latest?.error?.message ?? null,
         });
@@ -2623,6 +2654,8 @@ function buildGenerationEvent(
             latest_run_id: null,
             latest_status: null,
             latest_outputs: [],
+            finalized_run_id: null,
+            finalized_outputs: [],
             latest_finished_at: null,
             latest_error: null,
         },

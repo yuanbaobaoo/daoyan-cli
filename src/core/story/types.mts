@@ -863,7 +863,36 @@ export interface EpisodeStoryStatus {
          * 资产数。
          */
         assets: number;
+        /**
+         * 已定稿镜头数。
+         */
+        finalized_shots: number;
     };
+    /**
+     * 定稿进度；无分镜时为 null。
+     */
+    takes: {
+        /**
+         * 镜头总数。
+         */
+        total: number;
+        /**
+         * 已定稿数。
+         */
+        finalized: number;
+        /**
+         * 未定稿镜号。
+         */
+        pending: string[];
+        /**
+         * 定稿记录已失效的镜号。
+         */
+        stale: string[];
+        /**
+         * 尚无任何成功产出的镜号。
+         */
+        unshot: string[];
+    } | null;
     /**
      * 阻断项。
      */
@@ -944,6 +973,10 @@ export interface SeriesStoryStatus {
          * 阻断项。
          */
         blockers: StoryBlocker[];
+        /**
+         * 定稿进度（已定稿数 / 镜头数）。
+         */
+        takes: { finalized: number; total: number } | null;
     }>;
     /**
      * 系列级计数。
@@ -977,6 +1010,10 @@ export interface SeriesStoryStatus {
          * 资产数。
          */
         assets: number;
+        /**
+         * 已定稿分镜数。
+         */
+        finalized_shots: number;
     };
     /**
      * 下一步命令。
@@ -1078,4 +1115,122 @@ export interface StoryAssetRef {
      * 资产记录。
      */
     asset: StoryAsset;
+}
+
+/**
+ * 定稿来源（Agent 写入 / 用户在 Web 或 CLI 显式指定）。
+ */
+export type TakeSourceKind = "ai" | "user";
+
+/**
+ * 一镜的定稿稿件（至多一份）。
+ */
+export interface FinalizedTake {
+    /**
+     * 定稿的 run id。
+     */
+    run_id: string;
+    /**
+     * 稿件文件名（run 的 outputs/<name>，不是绝对路径）。
+     */
+    output: string;
+    /**
+     * 定稿时记录的产物 sha256（用于检测产物漂移）。
+     */
+    sha256: string;
+    /**
+     * 定稿备注（为什么用这一条）。
+     */
+    note?: string;
+    /**
+     * 定稿者来源。
+     */
+    source: TakeSourceKind;
+    /**
+     * 定稿时间。
+     */
+    finalized_at: string;
+    /**
+     * 允许扩展字段。
+     */
+    [k: string]: unknown;
+}
+
+/**
+ * 定稿台账的一条变更历史。
+ */
+export interface TakeHistoryEntry {
+    /**
+     * 动作：定稿 / 换稿 / 撤销。
+     */
+    action: "finalize" | "replace" | "revoke";
+    /**
+     * 涉及的 run id。
+     */
+    run_id: string;
+    /**
+     * 涉及的稿件名（撤销时可为空）。
+     */
+    output?: string;
+    /**
+     * 操作者来源。
+     */
+    source: TakeSourceKind;
+    /**
+     * 时间。
+     */
+    at: string;
+    /**
+     * 备注。
+     */
+    note?: string;
+    /**
+     * 允许扩展字段。
+     */
+    [k: string]: unknown;
+}
+
+/**
+ * 单镜定稿记录。
+ */
+export interface ShotTakeRecord {
+    /**
+     * 镜号（shots.json 的 shot id）。
+     */
+    shot_id: string;
+    /**
+     * 当前定稿稿件；null 表示未定稿。
+     */
+    finalized: FinalizedTake | null;
+    /**
+     * 变更历史（尾部追加，条数有上限）。
+     */
+    history: TakeHistoryEntry[];
+    /**
+     * 允许扩展字段。
+     */
+    [k: string]: unknown;
+}
+
+/**
+ * 定稿台账文件（episodes/<id>/takes.json；legacy 为项目根 takes.json）。
+ * 只保存「决定」，候选稿件永远从 runs/ 推导。
+ */
+export interface TakesFile {
+    /**
+     * schema 版本。
+     */
+    version: 1;
+    /**
+     * 所属剧集 id；legacy 为 null。
+     */
+    episode_id: string | null;
+    /**
+     * 最后更新时间。
+     */
+    updated_at: string;
+    /**
+     * 各镜定稿记录（只保留有历史或有定稿的镜号）。
+     */
+    shots: ShotTakeRecord[];
 }

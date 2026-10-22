@@ -206,16 +206,34 @@ daoyan batch [--episode <id>] [--request-id <id>] [--allow-incomplete] [--wait] 
 - 一个 task 多个 run，共享一次引擎会话与一把机器锁；
 - 已有成功 run 的镜头跳过；`retake` 强制；
 - 需要 `workflows/<name>.bindings.json`（至少映射 `prompt`、`seed`）；
-- 首帧：锚点 key（`meta.anchors`）或 `{"relay":"01"}`（自动抽上游成功 run 的尾帧）；
+- 首帧：锚点 key（`meta.anchors`）或 `{"relay":"01"}`（自动抽上游镜头**定稿稿件**的尾帧；未定稿时按 `story.enforce` 回退或阻断）；
 - 中途 OOM / 引擎崩溃 / 不可达：中断整个 task；普通业务错误继续后续镜头，最终 task `failed`。
+
+### take（镜头定稿）
+
+```bash
+daoyan take list [镜号...] [--episode <id>]
+daoyan take finalize <镜号> --run <run_id> [--output <稿件名>] [--note <文本>] [--source ai|user] [--episode <id>]
+daoyan take revoke <镜号> [--episode <id>]
+```
+
+- 一个镜头重拍多次后，用 `take finalize` 把其中一条视频产物定为该镜头的**定稿稿件**；其余产出只是附加产物；
+- 定稿写入 `takes.json`（story 模式在 `episodes/<id>/`），run 记录保持不可变；
+- 校验：run 必须是本镜本集的 `succeeded` run，稿件必须是该 run 的视频产物且在工作区（`take_invalid`）；
+- 定稿稿件是两个下游的唯一来源：接力首帧的上游尾帧、`wrap` 的合片片段；
+- `take list` 给出每镜候选稿件、定稿标记与 `take_pending` / `take_stale` 状态。
 
 ### wrap
 
 ```bash
-daoyan wrap [--episode <id>] [--select <镜号>=<run_id> ...]
+daoyan wrap [--episode <id>] [--select <镜号>=<run_id> ...] [--allow-incomplete]
 ```
 
-按镜头顺序选最新成功 run（或显式 `--select`），ffmpeg concat 到 `final/<episode>/cut-<timestamp>.mp4`（legacy 为 `final/cut-*`），并写 manifest。不占 machine lock。
+按镜头顺序选**定稿稿件**（`--select` 可临时改选，不落台账），ffmpeg concat 到 `final/<episode>/cut-<timestamp>.mp4`（legacy 为 `final/cut-*`），并写 manifest。不占 machine lock。
+
+- 选段优先级：`--select` > 定稿稿件 > 最新成功 run；
+- `project.story.enforce=strict` 时，有产出但未定稿的镜头阻断合片（`take_pending`）；`--allow-incomplete` 或 `warn` / `off` 回退最新成功 run 并记 warning；
+- 清单 `clips[].source` 记录每段来源：`finalized` / `latest` / `explicit`。
 
 ## 运维
 
@@ -241,15 +259,15 @@ daoyan logs [-f] [-n N] [--src daoyan-cli|engine|worker|all]
 ### web
 
 ```bash
-daoyan web [--port <n>] [--host <addr>] [--open] [--json]
+daoyan web [--port <n>] [--host <addr>] [--open] [--allow-write] [--json]
 ```
 
-启动临时只读 Web UI（默认 `127.0.0.1` + 系统随机端口），查看项目档案、分镜、人物/场景、任务、工作流、run 产出物与 final 成片；视频支持拖动进度。
+启动 Web UI（默认 `127.0.0.1` + 系统随机端口），查看项目档案、分镜、人物/场景、任务、工作流、run 产出物与 final 成片；视频支持拖动进度。
 
 - story 模式：系列概览、剧集切换、单集剧本/拆解/分镜/成片、全局角色/场景/音色/资产；
 - legacy 模式：镜头/人物/场景/产出统计、剧情简介与分镜一览；
-- 分镜页展示每镜内容、人物、场景、生成参数、全部历史产物与 run 历史，并支持筛选；
-- 不启动引擎、不占 machine lock、不写项目文件；
+- 分镜页展示每镜内容、人物、场景、生成参数、全部历史产物与 run 历史，并支持筛选；定稿稿件置顶并标记；
+- 默认只读：不启动引擎、不占 machine lock、不写项目文件；`--allow-write` 仅开放镜头定稿（`POST /api/takes/finalize|revoke`），页面里可点「定稿 / 撤销定稿」；
 - `Ctrl+C` / `SIGTERM` 优雅关闭；`--json` 输出一次启动信封后继续驻留；
 - `.dycli/machine.json` 缺失时仍可查看共享数据；
 - 媒体仅从 `run.outputs`、`final/` 与 `story/assets/` 白名单读取，支持 HTTP Range；

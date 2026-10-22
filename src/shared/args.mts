@@ -80,3 +80,74 @@ export function requiredPositional(value: string | undefined, label: string): st
     if (value === undefined || value === "") usageError(`缺少${label}`);
     return value;
 }
+
+/**
+ * 通用解析结果：位置参数 + flag 值。
+ */
+export interface ParsedArgs {
+    /**
+     * 位置参数。
+     */
+    positionals: string[];
+    /**
+     * flag 值（boolean 为 true）。
+     */
+    values: Record<string, string | boolean>;
+}
+
+/**
+ * 按 spec 解析参数；未登记的 flag 直接用法错误。
+ */
+export function parseFlags(args: string[], spec: Record<string, "string" | "boolean">): ParsedArgs {
+    // 结果
+    const out: ParsedArgs = { positionals: [], values: {} };
+    for (let i = 0; i < args.length; i++) {
+        // 原始参数
+        const raw = args[i] ?? "";
+        // 解构值
+        const { name, inline } = splitInlineFlag(raw);
+        if (name.startsWith("-")) {
+            // 期望类型
+            const kind = spec[name];
+            if (kind === undefined) usageError(`未知参数 ${name}`);
+            if (kind === "boolean") {
+                if (inline !== undefined) usageError(`${name} 不接受值`);
+                out.values[name] = true;
+                continue;
+            }
+            // 字符串值
+            const v = takeValue(args, i, inline, name);
+            out.values[name] = v.value;
+            i += v.skip;
+            continue;
+        }
+        out.positionals.push(name);
+    }
+    return out;
+}
+
+/**
+ * 取字符串 flag。
+ */
+export function strFlag(parsed: ParsedArgs, name: string): string | undefined {
+    // 值
+    const value = parsed.values[name];
+    return typeof value === "string" ? value : undefined;
+}
+
+/**
+ * 取 boolean flag。
+ */
+export function boolFlag(parsed: ParsedArgs, name: string): boolean {
+    return parsed.values[name] === true;
+}
+
+/**
+ * 取必填字符串 flag。
+ */
+export function requireFlag(parsed: ParsedArgs, name: string): string {
+    // 值
+    const value = strFlag(parsed, name);
+    if (value === undefined) usageError(`缺少 ${name}`);
+    return value;
+}

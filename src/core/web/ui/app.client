@@ -30,6 +30,8 @@ const API = {
     tasks: "/api/tasks",
     finals: "/api/finals",
     workflows: "/api/workflows",
+    takeFinalize: "/api/takes/finalize",
+    takeRevoke: "/api/takes/revoke",
 };
 // 各视图轮询间隔（毫秒）
 const POLL_MS = {
@@ -194,6 +196,8 @@ let playerIndex = 0;
 let toastTimer = null;
 // 最后更新时间
 let lastUpdatedAt = "";
+// 服务是否开放定稿写接口（web --allow-write）
+let writable = false;
 
 // 侧边导航容器
 let navRoot = null;
@@ -505,9 +509,40 @@ async function loadHeader() {
         const data = await requestJson("/api/health");
         if (projectNameEl !== null && typeof data.project === "string") projectNameEl.textContent = data.project;
         if (modeEl !== null) modeEl.textContent = data.mode === null ? "未绑定本机" : data.mode;
+        writable = data.writable === true;
     } catch {
         // 顶栏失败不影响页面主体
     }
+}
+
+/**
+ * 提交写请求（定稿 / 撤销），返回信封 data。
+ */
+async function postJson(path, body) {
+    // 响应
+    const response = await fetch(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(body),
+    });
+    // 响应体
+    const payload = await response.json();
+    if (payload.ok !== true) {
+        // 错误信息
+        const message = payload.error !== undefined ? payload.error.message : `请求失败（HTTP ${response.status}）`;
+        // 恢复建议
+        const hint = payload.error !== undefined && payload.error.hint !== undefined ? ` ${payload.error.hint}` : "";
+        throw new Error(message + hint);
+    }
+    return payload.data;
+}
+
+/**
+ * 刷新当前视图数据（写操作后立即反映）。
+ */
+async function reloadView() {
+    lastSignature = "";
+    await loadCurrent();
 }
 
 /**
@@ -1649,10 +1684,20 @@ function renderTimelineDetail(container, event, gen, map, indexes) {
         section.append(createElement("p", "map-detail-label", "渲染"));
         section.append(mapRow("Run", `${gen.render.runs_count} 次 · ${gen.render.succeeded_count} 成功`));
         section.append(mapRow("最新状态", gen.render.latest_status ?? "未生成"));
+        if (gen.render.finalized_run_id !== null && gen.render.finalized_run_id !== undefined) {
+            section.append(
+                mapRow("定稿稿件", `${gen.render.finalized_run_id} / ${gen.render.finalized_outputs[0]?.name ?? ""}`),
+            );
+        }
         if (gen.render.latest_error !== null) section.append(mapRow("错误", gen.render.latest_error));
         // 产物
         const outputs = createElement("div", "map-assets");
-        for (const output of gen.render.latest_outputs) {
+        // 定稿稿件优先展示
+        const renderOutputs =
+            gen.render.finalized_outputs !== undefined && gen.render.finalized_outputs.length > 0
+                ? gen.render.finalized_outputs
+                : gen.render.latest_outputs;
+        for (const output of renderOutputs) {
             // 打开按钮
             const button = createElement(
                 "button",
@@ -2729,6 +2774,11 @@ function renderShotCard(shot) {
     // 状态与场景
     const headBadges = createElement("div", "chip-row");
     headBadges.append(shotStatusBadge(shot));
+    if (shot.finalized_run !== null && shot.finalized_run !== undefined) {
+        headBadges.append(createElement("span", "chip chip-final", `已定稿 ${shortId(shot.finalized_run)}`));
+    } else if (shot.succeeded_count > 0) {
+        headBadges.append(createElement("span", "chip chip-pending", "待定稿"));
+    }
     if (shot.scene !== null && shot.scene !== undefined) headBadges.append(entityChip(shot.scene, "chip-scene"));
     cardHead.append(headBadges);
     card.append(cardHead);
@@ -2775,9 +2825,11 @@ function renderShotCard(shot) {
     if (artifacts.length === 0) {
         card.append(createElement("p", "muted", "还没有产出物。"));
     } else {
+        // 定稿稿件排在最前
+        const ordered = [...artifacts].sort((a, b) => (a.finalized === true ? 0 : 1) - (b.finalized === true ? 0 : 1));
         // 产物列表
         const list = createElement("div", "artifact-list");
-        for (const item of artifacts) list.append(renderShotArtifactRow(item, artifacts));
+        for (const item of ordered) list.append(renderShotArtifactRow(item, artifacts, shot));
         card.append(list);
     }
 
@@ -2788,7 +2840,7 @@ function renderShotCard(shot) {
 /**
  * 分镜产物的单行展示。
  */
-function renderShotArtifactRow(item, all) {
+function renderShotArtifactRow(item, all, shot) {
     // 产物
     const output = item.output;
     // 行
@@ -2829,6 +2881,7 @@ function renderShotArtifactRow(item, all) {
     meta.append(createElement("span", "", shortId(item.run_id)));
     meta.append(createElement("span", "", formatTime(item.started_at)));
     meta.append(createElement("span", "", formatBytes(output.bytes)));
+    if (item.finalized === true) meta.append(createElement("span", "chip chip-final", "定稿稿件"));
     info.append(meta);
     row.append(info);
 
@@ -2845,8 +2898,41 @@ function renderShotArtifactRow(item, all) {
     const download = createElement("a", "button ghost", "下载");
     download.href = output.download_url;
     actions.append(download);
+    // 定稿按钮（仅视频产物、可用、且服务开放写接口）
+    if (writable && shot !== undefined && output.kind === "video" && available) {
+        // 定稿 / 撤销按钮
+        const takeButton = createElement("button", "button ghost", item.finalized === true ? "撤销定稿" : "定稿");
+        takeButton.type = "button";
+        takeButton.addEventListener("click", () => submitTake(shot, item, takeButton));
+        actions.append(takeButton);
+    }
     row.append(actions);
     return row;
+}
+
+/**
+ * 提交镜头定稿或撤销。
+ */
+async function submitTake(shot, item, button) {
+    // 请求体
+    const body = { shot_id: shot.id };
+    if (currentEpisodeId !== null) body.episode_id = currentEpisodeId;
+    button.disabled = true;
+    try {
+        if (item.finalized === true) {
+            await postJson(API.takeRevoke, body);
+            showToast(`镜 ${shot.id} 已撤销定稿`);
+        } else {
+            body.run_id = item.run_id;
+            body.output = item.output.name;
+            await postJson(API.takeFinalize, body);
+            showToast(`镜 ${shot.id} 已定稿：${item.output.name}`);
+        }
+        await reloadView();
+    } catch (error) {
+        showToast(error instanceof Error ? error.message : "定稿失败", true);
+        button.disabled = false;
+    }
 }
 
 /**
@@ -2871,6 +2957,7 @@ function renderShotRunHistory(shot) {
         const main = createElement("div", "run-main");
         main.append(statusBadge(run.status));
         main.append(createElement("code", "mono", shortId(run.run_id)));
+        if (run.finalized === true) main.append(createElement("span", "chip chip-final", "定稿"));
         main.append(createElement("span", "", `${run.outputs.length} 个产物`));
         main.append(
             createElement("span", "muted", `${formatDuration(run.duration_ms)} · ${formatTime(run.started_at)}`),

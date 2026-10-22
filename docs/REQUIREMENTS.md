@@ -757,7 +757,7 @@ story/assets/voices/<voice-id>/<asset-id>.<ext>
 | 多集 | `ep:<episode-id>:shot:<shot-id>` |
 | 手工 run | 用户自定义；要与某集关联时加 `--episode` |
 
-`wrap` 按 `episode_id` + label 前缀选择默认 run；手工 run 可用 `--select` 显式指定。
+`wrap` 与接力首帧默认使用该镜头的**定稿稿件**（`take finalize` 写入 `takes.json`）；未定稿时按 `project.story.enforce` 处理：`strict` 阻断（`take_pending`，可用 `--allow-incomplete` 绕过），`warn` / `off` 回退最新成功 run 并记 warning。手工 run 可用 `wrap --select <镜号>=<run_id>` 临时指定，不落台账。
 
 #### final
 
@@ -767,7 +767,7 @@ final/<episode-id>/cut-<timestamp>.json
 ```
 
 - `wrap --episode ep01` 写入 `final/ep01/`；
-- manifest 必须包含 `episode_id`、选中的 shot / run / artifact；
+- manifest 必须包含 `episode_id`、选中的 shot / run / artifact 与 `source`（finalized / latest / explicit）；
 - legacy 项目继续写 `final/cut-*`；
 - 不提供系列总合片；每集独立成片，系列总合成是后续能力。
 
@@ -2047,6 +2047,9 @@ episodes/**/anchors/** filter=lfs diff=lfs merge=lfs -text
 | 资产（asset） | 参考图、参考音频等可被工作流消费的文件 |
 | 资产槽位（asset slot） | 工作流声明的逻辑输入，由分镜解析为具体资产 |
 | 分镜（shot） | 某集 `shots.json` 中的单个镜头 recipe |
+| 定稿（finalize） | 从某镜头的多次产出中选定唯一稿件进入工作流的决定 |
+| 定稿稿件（finalized take） | 被定稿的那条视频产物；接力与合片只用它，其余产出是附加产物 |
+| 定稿台账（takes） | `takes.json`（story 模式在 `episodes/<id>/`），只记录决定，候选从 `runs/` 推导 |
 | stale | 某集拆解/分镜基于旧版剧本，需要重新确认或更新 |
 | 门禁（gate） | 拍摄前对单集剧本、拆解、资产、分镜的强制校验 |
 | 设定图工作流 | 用于生成角色/场景参考图的工作流，可用 `run` 独立执行 |

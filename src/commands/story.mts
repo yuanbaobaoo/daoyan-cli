@@ -6,7 +6,7 @@ import { DaoyanCliError } from "../shared/errors.mts";
 import { emitData } from "../shared/json.mts";
 import { say } from "../shared/log.mts";
 import type { CliContext } from "../shared/context.mts";
-import { splitInlineFlag, takeValue, usageError } from "../shared/args.mts";
+import { boolFlag, parseFlags, strFlag, usageError } from "../shared/args.mts";
 import { nowIso, sha256File, writeJsonAtomic } from "../shared/fs.mts";
 import { requireProject } from "../core/project/config.mts";
 import { SHOTS_FILE, STORY_MAP_FILE, type ShotsFile } from "../core/project/types.mts";
@@ -67,67 +67,6 @@ import type {
     StoryScenesFile,
     StoryVoicesFile,
 } from "../core/story/types.mts";
-
-/**
- * 解析后的 flag。
- */
-interface ParsedArgs {
-    /**
-     * 位置参数。
-     */
-    positionals: string[];
-    /**
-     * flag 值（boolean 为 true）。
-     */
-    values: Record<string, string | boolean>;
-}
-
-/**
- * 通用 flag 解析。
- */
-function parseFlags(args: string[], spec: Record<string, "string" | "boolean">): ParsedArgs {
-    // 结果
-    const out: ParsedArgs = { positionals: [], values: {} };
-    for (let i = 0; i < args.length; i++) {
-        // 原始参数
-        const raw = args[i] ?? "";
-        // 解构值
-        const { name, inline } = splitInlineFlag(raw);
-        if (name.startsWith("-")) {
-            // 期望类型
-            const kind = spec[name];
-            if (kind === undefined) usageError(`未知参数 ${name}`);
-            if (kind === "boolean") {
-                if (inline !== undefined) usageError(`${name} 不接受值`);
-                out.values[name] = true;
-                continue;
-            }
-            // 字符串值
-            const v = takeValue(args, i, inline, name);
-            out.values[name] = v.value;
-            i += v.skip;
-            continue;
-        }
-        out.positionals.push(name);
-    }
-    return out;
-}
-
-/**
- * 取字符串 flag。
- */
-function strFlag(parsed: ParsedArgs, name: string): string | undefined {
-    // 值
-    const value = parsed.values[name];
-    return typeof value === "string" ? value : undefined;
-}
-
-/**
- * 取 boolean flag。
- */
-function boolFlag(parsed: ParsedArgs, name: string): boolean {
-    return parsed.values[name] === true;
-}
 
 /**
  * 读取文本输入（- = stdin）。

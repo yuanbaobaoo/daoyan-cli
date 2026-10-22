@@ -8,7 +8,10 @@ import type { Bindings, JsonValue, MachineConfig, ProjectConfig, ShotSpec, Shots
 import { RELAY_DIR } from "../project/types.mts";
 import { resolveWorkflowRef } from "../project/config.mts";
 import { extractLastFrame } from "../media/ffmpeg.mts";
-import { latestRunByLabel, latestSucceededRun, runOutputAbs } from "../run/store.mts";
+import { latestRunByLabel, runOutputAbs } from "../run/store.mts";
+import { resolveEpisodeContext } from "../story/paths.mts";
+import { pickShotTake } from "../story/takes.mts";
+import type { EpisodeContext } from "../story/types.mts";
 import {
     applyLogicalValues,
     applyMachineOverrides,
@@ -252,37 +255,44 @@ function shotLogicalValues(shots: ShotsFile, shot: ShotSpec, stepsOverride?: num
 }
 
 /**
- * 选择上游 run 的产物文件（优先视频）。
+ * 选择上游镜头的定稿稿件作为接力源；未定稿时按门禁策略回退或阻断。
  */
-function pickRelaySource(root: string, upstreamId: string, labelPrefix: string): string {
-    // 上游最新成功 run
-    const rec = latestSucceededRun(root, `${labelPrefix}${upstreamId}`);
-    if (rec === null) {
+function pickRelaySource(
+    root: string,
+    context: EpisodeContext,
+    upstreamId: string,
+    enforceTakes: boolean,
+): { abs: string; run_id: string } {
+    // 上游选稿结果
+    const take = pickShotTake(root, context, upstreamId);
+    if (take.source === "none" || take.run === null || take.output === null) {
         throw new DaoyanCliError({
             code: "relay_upstream_missing",
             message: `接力上游镜 ${upstreamId} 还没有成功 run；先拍上游：daoyan shot ${upstreamId} --wait`,
         });
     }
-    // 视频产物优先
-    const video = rec.outputs.find((o) => /\.(mp4|webm|mkv|mov|gif)$/i.test(o.name));
-    // 兜底取第一个产物
-    const chosen = video ?? rec.outputs[0];
-    if (chosen === undefined) {
+    if (enforceTakes && take.source !== "finalized") {
         throw new DaoyanCliError({
-            code: "relay_upstream_missing",
-            message: `接力上游镜 ${upstreamId} 的 run ${rec.run_id} 没有产物`,
+            code: "take_pending",
+            message: `接力上游镜 ${upstreamId} 尚未定稿${take.stale !== null ? "（定稿记录已失效）" : ""}`,
+            details: {
+                shot_id: upstreamId,
+                run_id: take.run.run_id,
+                reason: take.stale?.reason ?? "unfinalized",
+            },
+            nextActions: [`take finalize ${upstreamId} --run <run_id> --json`],
         });
     }
     // 产物绝对路径
-    const abs = runOutputAbs(root, rec, chosen);
+    const abs = runOutputAbs(root, take.run, take.output);
     if (!existsSync(abs)) {
         throw new DaoyanCliError({
             code: "relay_upstream_missing",
-            message: `接力上游产物不在工作区（可能未 git lfs pull）：${rec.run_id}/${chosen.path}`,
-            details: { run_id: rec.run_id, path: chosen.path },
+            message: `接力上游产物不在工作区（可能未 git lfs pull）：${take.run.run_id}/${take.output.path}`,
+            details: { run_id: take.run.run_id, path: take.output.path },
         });
     }
-    return abs;
+    return { abs, run_id: take.run.run_id };
 }
 
 /**
@@ -293,7 +303,8 @@ function firstFrameUpload(opts: {
     shots: ShotsFile;
     shot: ShotSpec;
     bindings: Bindings | null;
-    labelPrefix: string;
+    context: EpisodeContext;
+    enforceTakes: boolean;
 }): {
     upload: UploadSpec | null;
     descriptor: JsonValue | undefined;
@@ -349,18 +360,18 @@ function firstFrameUpload(opts: {
             message: `镜 ${opts.shot.id} 接力的上游镜号 ${ff.relay} 不存在于分镜表`,
         });
     }
-    // 上游产物
-    const sourceClip = pickRelaySource(opts.root, upstream.id, opts.labelPrefix);
+    // 上游产物（定稿稿件优先）
+    const source = pickRelaySource(opts.root, opts.context, upstream.id, opts.enforceTakes);
     // 接力帧缓存目录
     const relayDir = join(opts.root, RELAY_DIR);
     mkdirSync(relayDir, { recursive: true });
-    // 缓存路径
-    const cache = join(relayDir, `relay_${upstream.id}_to_${opts.shot.id}.png`);
+    // 缓存路径（带来源 run id，换稿件不会复用旧尾帧）
+    const cache = join(relayDir, `relay_${upstream.id}_${source.run_id}_to_${opts.shot.id}.png`);
     // 是否需要重新抽帧
     let needExtract = true;
     if (existsSync(cache)) {
         try {
-            needExtract = statSync(cache).mtimeMs < statSync(sourceClip).mtimeMs;
+            needExtract = statSync(cache).mtimeMs < statSync(source.abs).mtimeMs;
         } catch {
             needExtract = true;
         }
@@ -371,7 +382,7 @@ function firstFrameUpload(opts: {
         return {
             upload: {
                 logical: "first_frame",
-                source: `__RELAY_EXTRACT__:${sourceClip}=>${cache}`,
+                source: `__RELAY_EXTRACT__:${source.abs}=>${cache}`,
                 desiredName: `relay_${upstream.id}_${opts.shot.id}.png`,
                 target: splitTarget(target),
             },
@@ -400,7 +411,8 @@ export async function planShotRuns(opts: {
     shotIds?: string[];
     stepsOverride?: number;
     force: boolean;
-    labelPrefix?: string;
+    context?: EpisodeContext;
+    enforceTakes?: boolean;
     log: (m: string) => void;
 }): Promise<PlannedRuns> {
     // 目标镜头
@@ -425,8 +437,12 @@ export async function planShotRuns(opts: {
     // 结果
     const plans: RunPlan[] = [];
     const skipped: string[] = [];
+    // 剧集上下文（省略时按 legacy 解析）
+    const context = opts.context ?? resolveEpisodeContext(opts.root);
     // label 前缀
-    const labelPrefix = opts.labelPrefix ?? "shot:";
+    const labelPrefix = context.label_prefix;
+    // strict 门禁下接力只吃上游定稿稿件
+    const enforceTakes = opts.enforceTakes ?? false;
     for (const shot of targets) {
         // 已有成功 run：跳过（retake 强制重拍）
         if (!opts.force) {
@@ -486,7 +502,7 @@ export async function planShotRuns(opts: {
         // 逻辑输入
         const values = shotLogicalValues(opts.shots, shot, opts.stepsOverride);
         // 首帧
-        const ff = firstFrameUpload({ root: opts.root, shots: opts.shots, shot, bindings, labelPrefix });
+        const ff = firstFrameUpload({ root: opts.root, shots: opts.shots, shot, bindings, context, enforceTakes });
         // 剧情资产槽位
         const assetPlan = resolveWorkflowAssets({ root: opts.root, shot, workflowAbs: wf.abs });
         // 应用逻辑值

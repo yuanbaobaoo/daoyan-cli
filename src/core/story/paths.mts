@@ -21,6 +21,7 @@ import {
     STORY_SCENES_FILE,
     STORY_SERIES_FILE,
     STORY_VOICES_FILE,
+    TAKES_FILE,
 } from "../project/types.mts";
 import type { EpisodeContext, StoryEpisodeMeta, StorySeriesFile } from "./types.mts";
 
@@ -88,6 +89,21 @@ export function episodeDir(root: string, episodeId: string): string {
  */
 export function storyMapPath(root: string, episodeId: string): string {
     return join(episodeDir(root, episodeId), STORY_MAP_FILE);
+}
+
+/**
+ * 镜头定稿台账绝对路径；episodeId 为 null 表示 legacy（项目根）。
+ */
+export function takesPath(root: string, episodeId: string | null): string {
+    if (episodeId === null || episodeId === "") return join(root, TAKES_FILE);
+    if (!STORY_ID_RE.test(episodeId)) {
+        throw new DaoyanCliError({
+            code: "story_invalid",
+            message: `剧集 id 非法：${episodeId}`,
+            details: { episode_id: episodeId },
+        });
+    }
+    return join(episodeDir(root, episodeId), TAKES_FILE);
 }
 
 /**

@@ -1,6 +1,6 @@
 /** 命令注册表 —— help --json、项目内 Skill 与命令分发共用同一份元数据。
  *  已实现：init / validate / skill update / workflow * / run（异步）/ run cancel /
- *  shot / retake / batch / wrap / status / logs / engine * / help / update。 */
+ *  shot / retake / batch / take * / wrap / status / logs / engine * / help / update。 */
 import type { CliContext } from "../shared/context.mts";
 import type { CommandGroup } from "../shared/groups.mts";
 import { VERSION } from "../shared/version.mts";
@@ -9,6 +9,7 @@ import { runUpdate } from "./update.mts";
 import { runInit } from "./init.mts";
 import { runValidate } from "./validate.mts";
 import { runShot, runBatch } from "./shot.mts";
+import { runTake } from "./take.mts";
 import { runWrap } from "./wrap.mts";
 import { runLogs } from "./logs.mts";
 import { runStatus } from "./status.mts";
@@ -633,13 +634,106 @@ export const COMMANDS: CommandMeta[] = [
         run: (ctx, args) => runBatch(ctx, args),
     },
     {
+        name: "take list",
+        group: "production",
+        summary: "列出各镜候选稿件与定稿状态",
+        usage: "daoyan take list [镜号...] [--episode <id>] [--json]",
+        args: [
+            {
+                name: "镜号",
+                type: "string",
+                required: false,
+                variadic: true,
+                description: "省略时列出本集全部镜头",
+            },
+        ],
+        flags: [{ name: "--episode", type: "string", description: "多集项目必填；单集可省略" }],
+        implemented: true,
+        jsonShape: {
+            episode_id: "string|null",
+            takes_file: "string",
+            enforce: "strict|warn|off",
+            summary: "object",
+            shots: "object[]",
+        },
+        run: (ctx, args) => runTake(ctx, ["list", ...args]),
+    },
+    {
+        name: "take finalize",
+        group: "production",
+        summary: "把某镜的一次产出定为该镜的定稿稿件（下游接力与合片只用它）",
+        usage:
+            "daoyan take finalize <镜号> --run <run_id> [--output <稿件名>] [--note <文本>]\n" +
+            "                    [--source ai|user] [--episode <id>] [--json]",
+        args: [{ name: "镜号", type: "string", required: true, description: "剧集 shots.json 中的镜头 id" }],
+        flags: [
+            { name: "--run", type: "string", required: true, description: "定稿的 run id" },
+            { name: "--output", type: "string", description: "稿件文件名；省略取该 run 的视频主产物" },
+            { name: "--note", type: "string", description: "定稿备注" },
+            { name: "--source", type: "ai|user", default: "ai", description: "定稿者来源" },
+            { name: "--episode", type: "string", description: "多集项目必填；单集可省略" },
+        ],
+        examples: ["daoyan take finalize 03 --run 20261021T153012-mac-7f3a --json"],
+        detail: [
+            "校验：run 必须是本镜本集的 succeeded run，稿件必须是该 run 的视频产物且在工作区。",
+            "重复定稿同一稿件只刷新时间戳；换稿件记 replace，台账保留每镜最近 10 条历史。",
+        ],
+        implemented: true,
+        jsonShape: {
+            episode_id: "string|null",
+            shot_id: "string",
+            run_id: "string",
+            output: "string",
+            changed: "boolean",
+            replaced: "boolean",
+            take: "object",
+            takes_file: "string",
+            next_actions: "string[]",
+        },
+        run: (ctx, args) => runTake(ctx, ["finalize", ...args]),
+    },
+    {
+        name: "take revoke",
+        group: "production",
+        summary: "撤销某镜定稿（本就未定稿时是幂等空操作）",
+        usage: "daoyan take revoke <镜号> [--source ai|user] [--episode <id>] [--json]",
+        args: [{ name: "镜号", type: "string", required: true, description: "镜头 id" }],
+        flags: [
+            { name: "--source", type: "ai|user", default: "ai", description: "操作者来源" },
+            { name: "--episode", type: "string", description: "多集项目必填；单集可省略" },
+        ],
+        implemented: true,
+        jsonShape: {
+            episode_id: "string|null",
+            shot_id: "string",
+            changed: "boolean",
+            revoked: "object|null",
+            fallback: "object|null",
+        },
+        run: (ctx, args) => runTake(ctx, ["revoke", ...args]),
+    },
+    {
         name: "wrap",
         group: "production",
-        summary: "按集从 runs 选段合片，写 final/<episode>/cut-*.mp4 与清单（不占机器锁）",
-        usage: "daoyan wrap [--episode <id>] [--select <镜号>=<run_id> ...] [--json]",
+        summary: "按集用定稿稿件合片，写 final/<episode>/cut-*.mp4 与清单（不占机器锁）",
+        usage: "daoyan wrap [--episode <id>] [--select <镜号>=<run_id> ...] [--allow-incomplete] [--json]",
         flags: [
             { name: "--episode", type: "string", description: "多集项目必填；单集可省略" },
-            { name: "--select", type: "镜号=run_id", description: "显式指定某镜使用的 run（可重复）" },
+            {
+                name: "--select",
+                type: "镜号=run_id",
+                description: "本次合片临时改选某镜的 run（不落台账）",
+            },
+            {
+                name: "--allow-incomplete",
+                type: "boolean",
+                description: "strict 门禁下允许用未定稿镜头的最新成功 run 合片",
+            },
+        ],
+        detail: [
+            "选段优先级：--select > take finalize 的定稿稿件 > 最新成功 run。",
+            "project.story.enforce=strict 时，有产出但未定稿的镜头会阻断合片（take_pending）。",
+            "清单 cut-*.json 的 clips[].source 记录每段来源：finalized / latest / explicit。",
         ],
         implemented: true,
         jsonShape: {
@@ -648,6 +742,7 @@ export const COMMANDS: CommandMeta[] = [
             manifest: "string",
             clips: "object[]",
             missing: "string[]",
+            warnings: "object[]",
         },
         run: (ctx, args) => runWrap(ctx, args),
     },
@@ -708,8 +803,8 @@ export const COMMANDS: CommandMeta[] = [
     {
         name: "web",
         group: "ops",
-        summary: "启动临时只读 Web UI，查看项目、分镜、任务与产出物（Ctrl+C 停止）",
-        usage: "daoyan web [--port <n>] [--host <addr>] [--open] [--json]",
+        summary: "启动 Web UI 查看项目、分镜、任务与产出物；--allow-write 开放镜头定稿（Ctrl+C 停止）",
+        usage: "daoyan web [--port <n>] [--host <addr>] [--open] [--allow-write] [--json]",
         flags: [
             {
                 name: "--port",
@@ -729,11 +824,18 @@ export const COMMANDS: CommandMeta[] = [
                 default: false,
                 description: "启动后尝试用系统默认浏览器打开",
             },
+            {
+                name: "--allow-write",
+                type: "boolean",
+                default: false,
+                description: "开放 POST /api/takes/finalize 与 /revoke（镜头定稿）",
+            },
         ],
-        examples: ["daoyan web", "daoyan web --port 8080 --open", "daoyan web --json"],
+        examples: ["daoyan web", "daoyan web --port 8080 --open", "daoyan web --allow-write --json"],
         detail: [
-            "只读查看器；不启动 ComfyUI、不占 machine lock、不写项目文件。",
+            "默认只读：不启动 ComfyUI、不占 machine lock、不写项目文件。",
             "支持项目概览、分镜、任务、工作流、run 产出物与 final 成片；视频支持拖动进度。",
+            "--allow-write 只增加镜头定稿两个写接口，仍不接受任意路径或 workflow 修改。",
             "--json 输出一次启动信封后继续驻留；Ctrl+C / SIGTERM 优雅关闭。",
         ],
         implemented: true,

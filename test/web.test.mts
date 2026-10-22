@@ -1,7 +1,7 @@
 /** web 服务测试：静态页、只读 API、媒体 Range、路径穿越与优雅关闭。 */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startWebServer } from "../src/core/web/server.mts";
@@ -336,6 +336,159 @@ test("web：静态页、只读 API、媒体 Range 与关闭", async () => {
         // 方法限制
         const post = await fetch(`${handle.url}/api/overview`, { method: "POST" });
         assert.equal(post.status, 405);
+    } finally {
+        await handle.close();
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
+/**
+ * 起服务并请求 JSON 信封。
+ */
+async function jsonOf(response: Response): Promise<Record<string, unknown>> {
+    return (await response.json()) as Record<string, unknown>;
+}
+
+/**
+ * 定稿写接口只在 --allow-write 时开放。
+ */
+test("web：镜头定稿写接口与只读默认", async () => {
+    // 测试项目
+    const root = createFixture();
+    // 只读服务
+    const readonly = await startWebServer({
+        root,
+        project: { name: "web-test", version: 2 },
+        machine: null,
+        shots: makeShots(),
+        assets: { index_html: "<!doctype html>", app_js: "", style_css: "" },
+        host: "127.0.0.1",
+        port: 0,
+    });
+    try {
+        // 健康检查声明只读
+        const health = await jsonOf(await fetch(`${readonly.url}/api/health`));
+        assert.equal((health.data as Record<string, unknown>).writable, false);
+        // 只读模式拒绝定稿写请求
+        const blocked = await fetch(`${readonly.url}/api/takes/finalize`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ shot_id: "01", run_id: "r_test" }),
+        });
+        assert.equal(blocked.status, 405);
+        assert.equal(blocked.headers.get("allow"), "GET, HEAD");
+        assert.equal((await jsonOf(blocked)).ok, false);
+        // 台账未被写
+        assert.equal(existsSync(join(root, "takes.json")), false);
+    } finally {
+        await readonly.close();
+    }
+
+    // 可写服务
+    const handle = await startWebServer({
+        root,
+        project: { name: "web-test", version: 2 },
+        machine: null,
+        shots: makeShots(),
+        assets: { index_html: "<!doctype html>", app_js: "", style_css: "" },
+        host: "127.0.0.1",
+        port: 0,
+        writable: true,
+    });
+    try {
+        // 非 JSON 内容类型
+        const wrongType = await fetch(`${handle.url}/api/takes/finalize`, {
+            method: "POST",
+            headers: { "Content-Type": "text/plain" },
+            body: "shot=01",
+        });
+        assert.equal(wrongType.status, 415);
+        // 跨源请求
+        const crossOrigin = await fetch(`${handle.url}/api/takes/finalize`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Origin: "http://evil.example" },
+            body: JSON.stringify({ shot_id: "01", run_id: "r_test" }),
+        });
+        assert.equal(crossOrigin.status, 403);
+        // 未知写路径
+        assert.equal(
+            (
+                await fetch(`${handle.url}/api/takes/nope`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: "{}",
+                })
+            ).status,
+            404,
+        );
+        // 非 GET/HEAD/POST 仍拒绝
+        assert.equal((await fetch(`${handle.url}/api/overview`, { method: "PUT" })).status, 405);
+        // 缺少 run_id
+        assert.equal(
+            (
+                await fetch(`${handle.url}/api/takes/finalize`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ shot_id: "01" }),
+                })
+            ).status,
+            400,
+        );
+        // 不存在的 run
+        assert.equal(
+            (
+                await fetch(`${handle.url}/api/takes/finalize`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ shot_id: "01", run_id: "r_ghost" }),
+                })
+            ).status,
+            404,
+        );
+        // 不属于本镜的 run（label 是 shot:02）
+        const wrongShot = await fetch(`${handle.url}/api/takes/finalize`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ shot_id: "02", run_id: "r_test" }),
+        });
+        assert.equal(wrongShot.status, 400);
+        // 定稿较早的一条产出
+        const done = await fetch(`${handle.url}/api/takes/finalize`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ shot_id: "01", run_id: "r_test", output: "clip.mp4", note: "就用这版" }),
+        });
+        assert.equal(done.status, 200);
+        // 响应体
+        const doneData = (await jsonOf(done)).data as Record<string, unknown>;
+        assert.equal(doneData.changed, true);
+        assert.equal(doneData.output, "clip.mp4");
+        assert.equal(doneData.takes_file, "takes.json");
+        assert.equal(existsSync(join(root, "takes.json")), true);
+        // 分镜 DTO 反映定稿
+        const shotsData = (await jsonOf(await fetch(`${handle.url}/api/shots`))).data as Record<string, unknown>;
+        // 镜头列表
+        const items = shotsData.shots as Array<Record<string, unknown>>;
+        assert.equal(items[0]?.finalized_run, "r_test");
+        assert.equal(items[0]?.finalized_output, "clip.mp4");
+        assert.equal(items[0]?.take_source, "finalized");
+        assert.equal(items[1]?.take_source, "none");
+        assert.equal((shotsData.summary as Record<string, unknown>).shots_finalized, 1);
+        // 产物行标记
+        const marked = (items[0]?.artifacts as Array<Record<string, unknown>>).filter((a) => a.finalized === true);
+        assert.equal(marked.length, 1);
+        assert.equal((marked[0]?.output as Record<string, unknown>).name, "clip.mp4");
+        // 撤销定稿
+        const revoked = await fetch(`${handle.url}/api/takes/revoke`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ shot_id: "01" }),
+        });
+        assert.equal(revoked.status, 200);
+        assert.equal(((await jsonOf(revoked)).data as Record<string, unknown>).changed, true);
+        // 撤销后回到未定稿
+        const afterData = (await jsonOf(await fetch(`${handle.url}/api/shots`))).data as Record<string, unknown>;
+        assert.equal((afterData.shots as Array<Record<string, unknown>>)[0]?.finalized_run, null);
     } finally {
         await handle.close();
         rmSync(root, { recursive: true, force: true });

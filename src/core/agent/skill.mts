@@ -273,13 +273,14 @@ function skillMd(version: string, commands: readonly SkillCommand[]): string {
         "## 多集短剧生命周期",
         "",
         "```text",
-        "story init → 全局角色/场景/音色 → 单集剧本 sync/approve → 单集 breakdown → 参考资产 → 单集 shots → 分镜工作流 → shot/batch --episode → wrap --episode",
+        "story init → 全局角色/场景/音色 → 单集剧本 sync/approve → 单集 breakdown → 参考资产 → 单集 shots → 分镜工作流 → shot/batch --episode → take finalize → wrap --episode",
         "```",
         "",
         "- 全局设定集在 `story/`，跨集共享；每集数据在 `episodes/<id>/`；",
         "- 每集剧本独立 revision；剧本变更只让该集 breakdown/shots stale；",
         "- 多集项目写入 / 生产 / 单集 show 必须显式 `--episode`；只读系列概览可省略；",
         "- 参考资产必须由 AI / 用户显式指定主参考，不存在自动取第一张；",
+        "- 一个镜头重拍多次后必须用 `take finalize` 指定唯一**定稿稿件**；接力与合片只认它，其余产出是附加产物；",
         "- `shot` / `batch` / `retake` 有剧情门禁；`run` 不受限，用于生成参考图或试验。",
         "",
         "完整流程、模板与恢复见 `reference/story.md`。",
@@ -937,9 +938,21 @@ daoyan batch --json
 ## 首帧与接力
 
 - \`first_frame\`: 锚点 key -> \`meta.anchors\` 文件；
-- \`{"relay":"01"}\`: 取上游镜头最新成功 run 的产物尾帧（\`relay_frames/\` 缓存）；
+- \`{"relay":"01"}\`: 取上游镜头**定稿稿件**的产物尾帧（\`relay_frames/\` 按来源 run 缓存）；未定稿时按 \`project.story.enforce\` 回退最新成功 run（warn/off）或阻断（strict）；
 - bindings 必须有 \`first_frame\` 映射（LoadImage.image 等）；
 - 上传走 \`/upload/image\`，不写引擎 input 目录。
+
+## 镜头定稿
+
+\`\`\`bash
+daoyan take list --episode ep01 --json
+daoyan take finalize 01 --run <run_id> [--output <稿件名>] [--note <文本>] --json
+daoyan take revoke 01 --episode ep01 --json
+\`\`\`
+
+- 定稿写入 \`takes.json\`（story 模式在 \`episodes/<id>/\`）；\`run.json\` 保持不可变，不带定稿标记；
+- 校验：run 是本镜本集的 succeeded run，稿件是该 run 的视频产物且在工作区；
+- 未定稿的产出是附加产物，不进入接力与合片。
 
 ## 合片
 
@@ -948,8 +961,8 @@ daoyan wrap --json
 daoyan wrap --select 01=<run_id> --select 02=<run_id> --json
 \`\`\`
 
-- 默认按镜头顺序选每镜最新成功 run；
-- 输出 \`final/cut-<timestamp>.mp4\` + \`cut-<timestamp>.json\`（记录选中的 run/artifact）；
+- 选段优先级：\`--select\` > 定稿稿件 > 最新成功 run；
+- 输出 \`final/cut-<timestamp>.mp4\` + \`cut-<timestamp>.json\`（\`clips[].source\` 记 finalized / latest / explicit）；
 - wrap 是 CPU 后处理，不占机器锁。
 
 ## 回滚 / 复跑
@@ -998,7 +1011,7 @@ function storyMd(): string {
         "7. 单集拆解与设定资产未通过前，不制作该集分镜工作流；可以先做设定图工作流并用 run 验证。",
         "8. 参考图 / 音频必须通过 `story asset add` 入库，并显式指定主参考（--set-reference 或 story asset set-reference）；不得依赖自动取第一张。",
         "9. 生成参考图用 `run`，产物用 `story asset add --from-run` 入库；不要手工复制到 story/assets。",
-        "10. 多集项目 `shot` / `batch` / `wrap` / 单集写入必须带 --episode；不得假设当前集。",
+        "10. 多集项目 `shot` / `batch` / `take` / `wrap` / 单集写入必须带 --episode；不得假设当前集。",
         "11. 用户确认某一集剧本后才 `story script approve`；AI 不能代替用户确认。",
         "12. 不要把 A 集的 run / final 当成 B 集的。",
         "13. 做生成决策前先读 `story map show --json`：只用其中 catalog 的角色 / 形态 / 场景 / 资产 id，不得编造。",
@@ -1006,6 +1019,7 @@ function storyMd(): string {
         "15. 同一场景的连续镜头优先保持同一形态与场景参考；需要连续性时优先 relay / 首帧接力。",
         "16. 有 blocker 级 gaps 时先补资产 / 修 workflow 槽位，不要用「换一张图凑」绕过。",
         "17. `story-map.json` 只放叙事标注；生成决策（workflow / asset_slots / first_frame / prompt）只写 shots.json。",
+        "18. 镜头有多条产出时必须 `take finalize` 定稿一份再拍下游接力镜头与合片；不要用 `--allow-incomplete` 拿未定稿的产出凑片。",
         "",
         "## 标准顺序",
         "",
@@ -1019,6 +1033,7 @@ function storyMd(): string {
         "→ story map show（读生成上下文）→ 选择 workflow / asset_slots / first_frame / prompt → 更新 shots",
         "→ workflow + bindings + <workflow>.assets.json",
         "→ shot / retake / batch --episode",
+        "→ take list → take finalize 每镜定稿 --episode",
         "→ wrap --episode",
         "```",
         "",
@@ -1044,6 +1059,8 @@ function storyMd(): string {
         "daoyan story map build --episode ep01 --json",
         "daoyan story status --episode ep01 --json",
         "daoyan shot 01 --episode ep01 --json",
+        "daoyan take list --episode ep01 --json",
+        "daoyan take finalize 01 --run <run_id> --episode ep01 --json",
         "daoyan wrap --episode ep01 --json",
         "```",
         "",

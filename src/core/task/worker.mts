@@ -12,7 +12,9 @@ import { onSignal } from "../../shared/signals.mts";
 import { loadMachine, loadShotsFile, readProjectAt } from "../project/config.mts";
 import { LOG_DIR, isTerminalStatus, type MachineConfig, type ProjectConfig } from "../project/types.mts";
 import { resolveEpisodeContext } from "../story/paths.mts";
+import { storyEnforceOf } from "../story/production.mts";
 import { loadEpisodeShots } from "../story/store.mts";
+import type { EpisodeContext } from "../story/types.mts";
 import { attachMachineLock, type AcquiredLock } from "../machine/lock.mts";
 import {
     appendTaskRun,
@@ -235,6 +237,10 @@ export async function runWorker(opts: WorkerOptions): Promise<number> {
         let skippedShots: string[] = [];
         // 单集 label 前缀（legacy: shot:；多集: ep:<id>:shot:）
         let labelPrefix = "shot:";
+        // 剧集上下文（接力选稿需要）
+        let episodeContext: EpisodeContext | null = null;
+        // 接力是否必须用上游定稿稿件
+        let enforceTakes = false;
         if (task.kind === "run") {
             const o = task.options;
             if (o.workflow === undefined || o.workflow === "") {
@@ -258,6 +264,9 @@ export async function runWorker(opts: WorkerOptions): Promise<number> {
                 });
             }
             labelPrefix = context.label_prefix;
+            // 接力选稿上下文；--allow-incomplete 绕过时不强制定稿
+            episodeContext = context;
+            enforceTakes = storyEnforceOf(project) === "strict" && task.options.story_gate_bypassed !== true;
             shotsFile = context.legacy ? loadShotsFile(root) : loadEpisodeShots(root, context.episode_id as string);
             if (shotsFile === null) {
                 throw new DaoyanCliError({
@@ -385,7 +394,8 @@ export async function runWorker(opts: WorkerOptions): Promise<number> {
                         shots: shotsFile as import("../project/types.mts").ShotsFile,
                         shotIds: [id],
                         force: true,
-                        labelPrefix,
+                        ...(episodeContext !== null ? { context: episodeContext } : {}),
+                        enforceTakes,
                         ...(task.options.steps !== undefined ? { stepsOverride: task.options.steps } : {}),
                         log: say,
                     });

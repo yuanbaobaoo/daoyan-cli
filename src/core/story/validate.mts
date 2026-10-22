@@ -26,12 +26,14 @@ import {
     episodeDir,
     listEpisodeMetas,
     readSeries,
+    resolveEpisodeContext,
     scenesPath,
     seriesPath,
     STORY_ID_RE,
     storyEnabled,
     voicesPath,
 } from "./paths.mts";
+import { takeCounts } from "./takes.mts";
 import {
     loadBreakdown,
     loadCharacters,
@@ -1743,6 +1745,19 @@ export function computeEpisodeStoryStatus(
     else if (blockers.some((b) => b.code === "shots_missing" || b.code === "shots_stale")) stage = "storyboard";
     else if (blockers.some((b) => b.code === "workflow_unresolved")) stage = "workflow";
     else if (hasFinal(root, episodeId)) stage = "wrapped";
+    // 定稿进度（无分镜则不统计）
+    const takes = shots !== null ? takeCounts(root, resolveEpisodeContext(root, episodeId), shots) : null;
+    // 定稿警告：不进拍摄门禁（未拍摄无法定稿，会死锁），只影响交付
+    const warnings: StoryBlocker[] = [];
+    if (takes !== null) {
+        for (const id of takes.pending) {
+            if (!takes.stale.includes(id))
+                warnings.push(blocker("take_pending", `镜头 ${id} 有产出但未定稿`, undefined, [id]));
+        }
+        for (const id of takes.stale) {
+            warnings.push(blocker("take_stale", `镜头 ${id} 的定稿稿件已失效，需重新定稿`, undefined, [id]));
+        }
+    }
     // 计数
     const counts = {
         characters: breakdown?.characters.length ?? 0,
@@ -1751,9 +1766,14 @@ export function computeEpisodeStoryStatus(
         voices: breakdown?.voices.length ?? 0,
         shots: shots?.shots.length ?? 0,
         assets: breakdownAssetCount(breakdown, characters, scenes, voices),
+        finalized_shots: takes?.finalized ?? 0,
     };
     // next actions
     const nextActions = nextActionsForEpisode(stage, episodeId, blockers);
+    // 合片前需要先定稿
+    if ((stage === "ready" || stage === "wrapped") && takes !== null && takes.pending.length > 0) {
+        nextActions.unshift(`daoyan take list ${takes.pending.join(" ")} --episode ${episodeId} --json`);
+    }
     return {
         enabled: true,
         episode: { id: meta.id, number: meta.number, title: meta.title },
@@ -1779,7 +1799,8 @@ export function computeEpisodeStoryStatus(
         },
         counts,
         blockers,
-        warnings: [],
+        warnings,
+        takes,
         next_actions: nextActions,
     };
 }
@@ -1863,6 +1884,7 @@ export function computeSeriesStoryStatus(root: string, project?: ProjectConfig |
             stage: status.stage,
             script: { revision: status.script.revision, status: status.script.status },
             blockers: status.blockers,
+            takes: status.takes === null ? null : { finalized: status.takes.finalized, total: status.takes.total },
         };
     });
     // 全局设定
@@ -1896,6 +1918,7 @@ export function computeSeriesStoryStatus(root: string, project?: ProjectConfig |
             voices: voices.voices.length,
             shots,
             assets: assets.length,
+            finalized_shots: episodes.reduce((sum, e) => sum + (e.takes?.finalized ?? 0), 0),
         },
         next_actions: episodes
             .filter((e) => e.blockers.length > 0)

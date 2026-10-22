@@ -1,6 +1,6 @@
-/** web —— 启动临时只读 Web UI，查看项目状态、分镜、任务与产出物。
+/** web —— 启动临时 Web UI，查看项目状态、分镜、任务与产出物。
  *  - 默认 127.0.0.1 + 系统分配端口；Ctrl+C / SIGTERM 优雅关闭；
- *  - 不启动引擎、不占 machine lock、不写项目文件；
+ *  - 不启动引擎、不占 machine lock；默认只读，--allow-write 才开放镜头定稿写接口；
  *  - --json 输出一次启动信封后继续驻留，后续日志走 stderr。 */
 import { spawn } from "node:child_process";
 import { DaoyanCliError } from "../shared/errors.mts";
@@ -32,6 +32,10 @@ interface WebFlags {
      * 是否自动打开浏览器。
      */
     open: boolean;
+    /**
+     * 是否开放镜头定稿写接口。
+     */
+    writable: boolean;
 }
 
 // 默认监听地址
@@ -48,7 +52,7 @@ const START_FAILED_HINT = "检查监听地址与端口占用；端口冲突时�
  */
 function parseArgs(args: string[]): WebFlags {
     // 解析结果
-    const out: WebFlags = { open: false };
+    const out: WebFlags = { open: false, writable: false };
     for (let i = 0; i < args.length; i++) {
         // 当前参数
         const { name, inline } = splitInlineFlag(args[i] ?? "");
@@ -73,6 +77,10 @@ function parseArgs(args: string[]): WebFlags {
         }
         if (name === "--open") {
             out.open = true;
+            continue;
+        }
+        if (name === "--allow-write") {
+            out.writable = true;
             continue;
         }
         usageError(`未知参数 ${name}`);
@@ -139,6 +147,7 @@ export async function runWeb(ctx: CliContext, args: string[]): Promise<number> {
             assets: { index_html: indexHtml, app_js: appJs, style_css: styleCss },
             host,
             port: flags.port ?? DEFAULT_PORT,
+            writable: flags.writable,
         });
     } catch (e) {
         throw new DaoyanCliError({
@@ -157,11 +166,17 @@ export async function runWeb(ctx: CliContext, args: string[]): Promise<number> {
             port: handle.port,
             project: project.name,
             mode: machine?.engine.mode ?? null,
+            writable: flags.writable,
         });
     } else {
         say(`daoyan web · ${project.name} · ${machine?.engine.mode ?? "未绑定本机"}`);
         for (const url of handle.urls.local) say(`  Local:   ${url}`);
         for (const url of handle.urls.network) say(`  Network: ${url}`);
+        say(
+            flags.writable
+                ? "  镜头定稿写接口已开放（POST /api/takes/*）"
+                : "  只读模式；定稿请用 daoyan take finalize",
+        );
         say("  Ctrl+C 停止");
     }
     // 自动打开

@@ -1,4 +1,5 @@
-/** wrap —— 杀青合片：按分镜顺序从 runs 选取成功产物，ffmpeg concat 交付 final/。
+/** wrap —— 杀青合片：按分镜顺序从定稿台账选取稿件，ffmpeg concat 交付 final/。
+ *  未定稿镜头按 project.story.enforce 决定阻断或回退最新成功 run；
  *  CPU 后处理，不占 machine lock；重拍不覆盖（cut-<timestamp>.mp4 + manifest）。 */
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -10,10 +11,11 @@ import { splitInlineFlag, takeValue, usageError } from "../shared/args.mts";
 import { sha256File } from "../shared/fs.mts";
 import { execCapture } from "../shared/exec.mts";
 import { requireProject } from "../core/project/config.mts";
-import { CONCAT_LIST_FILE, type RunRecord } from "../core/project/types.mts";
-import { latestSucceededRun, requireRun, runOutputAbs } from "../core/run/store.mts";
+import { CONCAT_LIST_FILE, type RunOutput, type RunRecord } from "../core/project/types.mts";
+import { listRuns, pickPrimaryOutput, requireRun, runOutputAbs } from "../core/run/store.mts";
 import { resolveEpisodeContext } from "../core/story/paths.mts";
-import { loadContextShots } from "../core/story/production.mts";
+import { loadContextShots, storyEnforceOf } from "../core/story/production.mts";
+import { pickShotTake, takesRelPath } from "../core/story/takes.mts";
 
 /**
  * 选中的片段。
@@ -35,14 +37,19 @@ interface SelectedClip {
      * 运行时绝对路径。
      */
     abs: string;
+    /**
+     * 稿件来源：定稿稿件 / 回退最新成功 run / 本次 --select。
+     */
+    source: "finalized" | "latest" | "explicit";
 }
 
 /**
  * 从 run 中选视频产物（运行时补绝对路径）。
  */
 function pickVideoAt(root: string, rec: RunRecord): { path: string; abs: string } | null {
-    const chosen = rec.outputs.find((o) => /\.(mp4|webm|mkv|mov|gif)$/i.test(o.name)) ?? rec.outputs[0];
-    if (chosen === undefined) return null;
+    // 主产物
+    const chosen: RunOutput | null = pickPrimaryOutput(rec);
+    if (chosen === null) return null;
     return { path: chosen.path, abs: runOutputAbs(root, rec, chosen) };
 }
 
@@ -54,6 +61,8 @@ export async function runWrap(ctx: CliContext, args: string[]): Promise<number> 
     const explicit = new Map<string, string>();
     // --episode
     let episode: string | undefined;
+    // 是否显式绕过定稿门禁
+    let allowIncomplete = false;
     for (let i = 0; i < args.length; i++) {
         const { name, inline } = splitInlineFlag(args[i] ?? "");
         if (name === "--select") {
@@ -71,22 +80,37 @@ export async function runWrap(ctx: CliContext, args: string[]): Promise<number> 
             i += v.skip;
             continue;
         }
+        if (name === "--allow-incomplete") {
+            allowIncomplete = true;
+            continue;
+        }
         usageError(`未知参数 ${name}`);
     }
 
-    const { root } = requireProject(ctx);
+    const { root, config: project } = requireProject(ctx);
     // 剧集上下文
     const context = resolveEpisodeContext(root, episode);
     // 本集分镜
     const shots = loadContextShots(root, context);
+    // 候选 run 池（一次读取，逐镜复用）
+    const pool = listRuns(root);
+    // 定稿门禁是否为 strict
+    const strict = storyEnforceOf(project) === "strict";
     // 选中片段
     const clips: SelectedClip[] = [];
-    // 缺失镜号
+    // 无任何可用产出的镜号
     const missing: string[] = [];
+    // 有产出但未定稿的镜号
+    const unfinalized: string[] = [];
+    // 回退警告
+    const warnings: Array<{ shot: string; code: string; message: string }> = [];
     for (const shot of shots.shots) {
-        // 显式选择或最新成功 run
+        // 显式选择或定稿稿件
         const explicitId = explicit.get(shot.id);
-        let rec: RunRecord | null;
+        let rec: RunRecord | null = null;
+        let pick: { path: string; abs: string } | null = null;
+        // 稿件来源
+        let source: SelectedClip["source"] = "explicit";
         if (explicitId !== undefined) {
             rec = requireRun(root, explicitId);
             if (rec.status !== "succeeded") {
@@ -101,20 +125,57 @@ export async function runWrap(ctx: CliContext, args: string[]): Promise<number> 
                     message: `--select ${shot.id}=${explicitId} 的 run 属于 ${String(rec.episode_id ?? "未归属")}，不是 ${context.episode_id}`,
                 });
             }
+            pick = pickVideoAt(root, rec);
+            source = "explicit";
         } else {
-            rec = latestSucceededRun(root, `${context.label_prefix}${shot.id}`);
+            // 本镜选稿（定稿优先）
+            const take = pickShotTake(root, context, shot.id, pool);
+            if (take.source === "none") {
+                missing.push(shot.id);
+                continue;
+            }
+            if (take.source === "latest") {
+                if (strict && !allowIncomplete) {
+                    unfinalized.push(shot.id);
+                    continue;
+                }
+                warnings.push({
+                    shot: shot.id,
+                    code: take.stale !== null ? "take_stale" : "take_pending",
+                    message:
+                        take.stale !== null
+                            ? `镜 ${shot.id} 定稿记录已失效（${take.stale.message}），回退最新成功 run`
+                            : `镜 ${shot.id} 未定稿，回退最新成功 run ${String(take.run?.run_id ?? "")}`,
+                });
+            }
+            rec = take.run;
+            // 定稿稿件按记录文件名取，避免误选同 run 的其他产物
+            if (rec !== null && take.output !== null) {
+                pick = { path: take.output.path, abs: runOutputAbs(root, rec, take.output) };
+            }
+            source = take.source;
         }
-        if (rec === null) {
+        if (rec === null || pick === null) {
             missing.push(shot.id);
             continue;
         }
-        // 视频产物
-        const pick = pickVideoAt(root, rec);
-        if (pick === null || !existsSync(pick.abs)) {
+        if (!existsSync(pick.abs)) {
             missing.push(shot.id);
             continue;
         }
-        clips.push({ shot: shot.id, run_id: rec.run_id, artifact: pick.path, abs: pick.abs });
+        clips.push({ shot: shot.id, run_id: rec.run_id, artifact: pick.path, abs: pick.abs, source });
+    }
+
+    if (unfinalized.length > 0) {
+        throw new DaoyanCliError({
+            code: "take_pending",
+            message: `合片门禁：${unfinalized.length} 个镜头有产出但未定稿（${unfinalized.join(" ")}）`,
+            details: { shots: unfinalized, episode_id: context.episode_id, takes_file: takesRelPath(root, context) },
+            nextActions: [
+                `take list ${unfinalized.join(" ")} --json`,
+                ...unfinalized.map((id) => `take finalize ${id} --run <run_id> --json`),
+            ],
+        });
     }
 
     if (clips.length < 2) {
@@ -180,8 +241,10 @@ export async function runWrap(ctx: CliContext, args: string[]): Promise<number> 
             shot: c.shot,
             run_id: c.run_id,
             artifact: c.artifact,
+            source: c.source,
         })),
         missing,
+        warnings,
         ffmpeg: { codec: "libx264", crf: 18, pix_fmt: "yuv420p", faststart: true },
     };
     writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
@@ -192,14 +255,16 @@ export async function runWrap(ctx: CliContext, args: string[]): Promise<number> 
         abs_path: outPath,
         manifest: `${context.final_rel}/${manifestName}`,
         sha256: sha256File(outPath),
-        clips: clips.map((c) => ({ shot: c.shot, run_id: c.run_id, artifact: c.artifact })),
+        clips: clips.map((c) => ({ shot: c.shot, run_id: c.run_id, artifact: c.artifact, source: c.source })),
         missing,
+        warnings,
     };
     if (ctx.json) {
         emitData(data);
         return 0;
     }
     if (missing.length > 0) say(`注意：${missing.length} 镜未完成未纳入（${missing.join(" ")}）`);
+    for (const w of warnings) say(`注意：${w.message}`);
     say(`合片完成：${context.final_rel}/${outName}`);
     say(`清单：${context.final_rel}/${manifestName}`);
     return 0;

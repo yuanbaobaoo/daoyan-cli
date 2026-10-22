@@ -22,7 +22,8 @@ export const AGENTS_BLOCK_BODY = [
     "Before creating or running workflows, read `.agents/skills/daoyan/SKILL.md`.",
     "Use `daoyan` commands with `--json`; do not edit `engine/`, `logs/`, or `.dycli/`.",
     "Only one generation task runs per machine; if you get `machine_busy`, inspect the owner and retry later.",
-    "For multi-episode projects, use `daoyan story` commands and pass `--episode <id>` to shot/batch/wrap; check `story status` before generation.",
+    "For multi-episode projects, use `daoyan story` commands and pass `--episode <id>` to shot/batch/take/wrap; check `story status` before generation.",
+    "A shot is usable downstream only after `daoyan take finalize <shot> --run <run_id>`; relay and wrap read the finalized take, never the newest run.",
 ].join("\n");
 
 /**
@@ -41,7 +42,7 @@ export function capabilities(): Record<string, unknown> {
         git_friendly_records: true,
         project_skill: true,
         story_lifecycle: "multi-episode",
-        web_ui: "read-only",
+        web_ui: "read-only, take-write with --allow-write",
         user_level_skill: false,
         http_api: [
             "/system_stats",

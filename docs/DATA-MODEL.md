@@ -9,6 +9,7 @@ project.json                 # 共享：项目配置 v2
 workflows/<name>.json        # 共享：ComfyUI API JSON
 workflows/<name>.bindings.json
 shots.json                   # 共享：shot/batch recipe
+takes.json                   # 共享：镜头定稿台账（legacy 项目在根目录）
 tasks/<task_id>/task.json    # 共享：任务状态
 tasks/<task_id>/events.jsonl # 共享：结构化事件
 runs/<run_id>/run.json       # 共享：不可变运行记录
@@ -41,6 +42,7 @@ episodes/<id>/episode.json        剧集元数据（id / number / title）
 episodes/<id>/script.md|json      单集剧本与 revision / 审批
 episodes/<id>/breakdown.json      单集拆解（制作范围与允许清单）
 episodes/<id>/shots.json          单集分镜
+episodes/<id>/takes.json          单集定稿台账（每镜至多一份定稿稿件）
 episodes/<id>/story-map.json      可选：剧情图谱叙事标注（标题 / 重要度 / 故事时间 / 关系）
 final/<episode-id>/cut-*          单集成片
 ```
@@ -92,6 +94,44 @@ final/<episode-id>/cut-*          单集成片
 - `relations[].from` / `to` 必须是全局角色 id，不能自引用；
 - 结构字段（`at_seconds` / `scene_id` / `characters` 等）不写入该文件；需要修改结构时改 `shots.json`；
 - 写入统一走 `daoyan story map set`，读取合并走 `daoyan story map show`；Web 只读。
+
+#### takes.json（镜头定稿台账）
+
+一个镜头会因重拍产生多条视频，其中只有一份进入工作流。`takes.json` 只记录**决定**：某镜选定哪条 run 的哪个稿件；候选清单永远从 `runs/` 实时推导，不双写。
+
+```json
+{
+  "version": 1,
+  "episode_id": "ep01",
+  "updated_at": "2026-10-22T12:00:00.000Z",
+  "shots": [
+    {
+      "shot_id": "03",
+      "finalized": {
+        "run_id": "20261022T113012-mac-7f3a",
+        "output": "03_badge.mp4",
+        "sha256": "<sha256>",
+        "note": "雨势与走位都对",
+        "source": "user",
+        "finalized_at": "2026-10-22T11:40:00.000Z"
+      },
+      "history": [
+        { "action": "finalize", "run_id": "20261022T113012-mac-7f3a", "output": "03_badge.mp4", "source": "user", "at": "..." },
+        { "action": "replace", "run_id": "20261022T115004-mac-91b2", "output": "03_badge_v2.mp4", "source": "ai", "at": "..." }
+      ]
+    }
+  ]
+}
+```
+
+- 一镜至多一份 `finalized`；未定稿的产出只是附加产物，不进入下游；`finalized: null` 表示已撤销；
+- `source` 取 `ai`（CLI/Agent）或 `user`（人工、Web）；`history` 每镜保留最近 10 条；
+- `sha256` 是定稿时产物内容的快照，用于审计与漂移检测；选稿不做内容重算，只做存在性校验；
+- 写入只走 `daoyan take finalize|revoke`（以及 `dycli web --allow-write` 的定稿接口），不手工编辑；
+- **消费点**：接力首帧抽上游定稿稿件的尾帧（`plans.mts`）、合片按定稿稿件选段（`wrap`）、状态与图谱以定稿稿件为准；
+- 回退策略按 `project.story.enforce`：`strict` = 有产出但未定稿的镜头阻断接力与合片（`take_pending`，可用 `--allow-incomplete` 绕过）；`warn` / `off` = 回退最新成功 run 并记 warning；
+- 定稿记录指向的 run 被删除、状态非 succeeded、稿件改名或产物不在工作区时判为失效（`take_stale`），按上面的回退策略处理，需重新定稿；
+- 不含绝对路径；legacy 项目落在根目录 `takes.json`，`episode_id` 为 `null`。
 
 ## 2. project.json（共享）
 
@@ -254,7 +294,7 @@ shot/batch 必须有 bindings，至少映射 `prompt` 与 `seed`；`run` 不强�
 
 - workflow 选择：单镜 `workflow` > 文件级 `workflow` > `project.default_workflow`；
 - 逻辑值（prompt/seed/width/height/...）通过 bindings 注入；镜头可覆盖 `steps/cfg/length/width/height`，`params` 可追加逻辑输入；
-- 首帧：锚点 key 或接力（取上游最新成功 run 的尾帧）；
+- 首帧：锚点 key 或接力（取上游镜头**定稿稿件**的尾帧；未定稿时按 `project.story.enforce` 回退最新成功 run 或阻断）；
 - `meta.characters` / `meta.scenes` 是可选的故事设定，仅用于展示与复用，不注入 workflow；
 - 人物/场景可以是字符串或对象；对象支持 `id`、`name`、`description`、`reference`（项目内相对路径）；
 - 镜头用 `characters: ["lin"]` / `scene: "city"` 引用 id 或名称；也支持 `cast` / `roles` 与 `location` 别名；
@@ -364,6 +404,7 @@ story 模式额外字段：`episode_id`（legacy / 系列级为 `null`）。多�
 - `workflow.json` 是上传/覆盖后、实际提交的图；
 - `inputs.json` 记录逻辑输入与输入文件哈希；
 - 失败/取消的 run 同样落盘；
+- run 记录不可变，**不带定稿标记**；某条产出是否进入工作流只记录在 `takes.json`；
 - `gpu` 仅在 local 尝试接管时出现（平台不支持时 `takeover:false` 并继续任务）。
 
 ## 8. 机器锁与 GPU 租约（本机，不在仓库）

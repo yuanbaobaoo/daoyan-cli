@@ -1,13 +1,15 @@
 /** Web 只读 HTTP 服务 —— 零依赖 node:http，服务内嵌 SPA 与只读 JSON API。
  *  - 默认只监听 loopback；静态资源与 API 同源，不开放 CORS；
  *  - 业务数据通过 core/web/data.mts 组装，媒体通过 core/web/media.mts 白名单读取；
- *  - 不启动引擎、不占 machine lock、不写项目文件。 */
+ *  - 不启动引擎、不占 machine lock、不写项目文件；
+ *  - 唯一例外：显式 `web --allow-write` 时开放镜头定稿两个写接口。 */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { MachineConfig, ProjectConfig, ShotsFile } from "../project/types.mts";
 import { buildAccessUrls, isLoopbackHost, normalizeHost, type AccessUrls } from "./addresses.mts";
 import type { SkillCommand } from "../agent/skill.mts";
 import { SCHEMA_VERSION } from "../../shared/json.mts";
+import { DaoyanCliError, isDaoyanCliError } from "../../shared/errors.mts";
 import { VERSION } from "../../shared/version.mts";
 import {
     buildOverview,
@@ -34,7 +36,9 @@ import {
     listStoryScenesView,
     listStoryVoicesView,
 } from "./story-data.mts";
-import { listEpisodeMetas, storyEnabled } from "../story/paths.mts";
+import { listEpisodeMetas, resolveEpisodeContext, storyEnabled } from "../story/paths.mts";
+import { loadContextShots } from "../story/production.mts";
+import { finalizeTake, revokeTake, takesRelPath } from "../story/takes.mts";
 
 /**
  * 内嵌前端资源。
@@ -90,6 +94,10 @@ export interface WebServerOptions {
      * 监听端口；0 表示系统分配。
      */
     port?: number;
+    /**
+     * 是否开放镜头定稿写接口（默认只读）。
+     */
+    writable?: boolean;
 }
 
 /**
@@ -158,6 +166,10 @@ interface RouteContext {
      * 实际监听端口。
      */
     port: number;
+    /**
+     * 是否开放定稿写接口。
+     */
+    writable: boolean;
 }
 
 /**
@@ -184,6 +196,12 @@ const ASSET_CACHE_SECONDS = 300;
 const URL_BASE = "http://127.0.0.1";
 // 允许的 HTTP 方法
 const ALLOWED_METHODS = "GET, HEAD";
+// 开放定稿写接口后允许的 HTTP 方法
+const ALLOWED_METHODS_WRITE = "GET, HEAD, POST";
+// 定稿写接口路径
+const TAKE_WRITE_PATHS = new Set(["/api/takes/finalize", "/api/takes/revoke"]);
+// 写接口请求体上限（64 KiB）
+const MAX_WRITE_BODY_BYTES = 64 * 1024;
 // API 路径前缀
 const API_PREFIX = "/api";
 // 媒体路径前缀
@@ -337,6 +355,217 @@ async function overviewOf(ctx: RouteContext, cache: OverviewCache): Promise<Reco
 }
 
 /**
+ * 写请求的参数错误（带 HTTP 状态码）。
+ */
+class WriteRequestError extends Error {
+    /**
+     * HTTP 状态码。
+     */
+    readonly status: number;
+    /**
+     * 错误码。
+     */
+    readonly code: string;
+
+    /**
+     * 创建写请求错误。
+     */
+    constructor(status: number, code: string, message: string) {
+        super(message);
+        this.name = "WriteRequestError";
+        this.status = status;
+        this.code = code;
+    }
+}
+
+/**
+ * 取字符串字段。
+ */
+function stringField(value: unknown): string | undefined {
+    return typeof value === "string" && value !== "" ? value : undefined;
+}
+
+/**
+ * 请求体是否为 JSON。
+ */
+function isJsonRequest(req: IncomingMessage): boolean {
+    // 内容类型
+    const header = Array.isArray(req.headers["content-type"])
+        ? req.headers["content-type"][0]
+        : req.headers["content-type"];
+    return (header ?? "").split(";")[0].trim().toLowerCase() === "application/json";
+}
+
+/**
+ * 写请求必须来自同一 Host（浏览器跨源 POST 会带上 Origin/Referer）。
+ */
+function sameOriginWrite(req: IncomingMessage): boolean {
+    // 请求 Host
+    const host = req.headers.host ?? "";
+    // 来源头
+    const source = typeof req.headers.origin === "string" ? req.headers.origin : req.headers.referer;
+    if (typeof source !== "string" || source === "") return true;
+    try {
+        return new URL(source).host === host;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * 读取受限长度的请求体。
+ */
+async function readBody(req: IncomingMessage, limit: number): Promise<Buffer> {
+    // 分块
+    const chunks: Buffer[] = [];
+    // 累计字节
+    let size = 0;
+    for await (const part of req) {
+        // 当前块
+        const chunk = Buffer.isBuffer(part) ? part : Buffer.from(part as Uint8Array);
+        size += chunk.byteLength;
+        if (size > limit) throw new WriteRequestError(413, "payload_too_large", `请求体超过 ${limit} 字节`);
+        chunks.push(chunk);
+    }
+    return Buffer.concat(chunks);
+}
+
+/**
+ * 输出写请求错误（结构化错误映射到状态码）。
+ */
+function sendWriteError(res: ServerResponse, error: unknown): void {
+    if (error instanceof WriteRequestError) {
+        sendJsonError(res, error.status, error.code, error.message);
+        return;
+    }
+    if (isDaoyanCliError(error)) {
+        // 状态码按错误码分类
+        const status =
+            error.code === "run_not_found" || error.code === "take_not_found"
+                ? 404
+                : error.code === "episode_required" || error.code === "episode_not_found"
+                  ? 400
+                  : error.exit === 2
+                    ? 400
+                    : error.code === "take_invalid" || error.code === "take_pending" || error.code === "story_invalid"
+                      ? 400
+                      : 500;
+        // 响应体
+        const body = Buffer.from(
+            JSON.stringify({
+                ok: false,
+                schema_version: SCHEMA_VERSION,
+                error: {
+                    code: error.code,
+                    message: error.message,
+                    ...(error.hint !== "" ? { hint: error.hint } : {}),
+                    ...(error.nextActions !== undefined ? { next_actions: error.nextActions } : {}),
+                },
+            }),
+            "utf8",
+        );
+        res.statusCode = status;
+        res.setHeader("Content-Type", "application/json; charset=utf-8");
+        res.setHeader("Cache-Control", "no-store");
+        res.setHeader("Content-Length", String(body.byteLength));
+        res.end(body);
+        return;
+    }
+    process.stderr.write(`[web] ${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`);
+    sendJsonError(res, 500, "internal_error", "服务内部错误");
+}
+
+/**
+ * 定稿写接口：POST /api/takes/finalize 与 /api/takes/revoke。
+ * 只接受 JSON 与同源请求，字段仅 shot_id / episode_id / run_id / output / note；
+ * 稿件路径一律从 run 记录反查，不接受外部路径。 */
+async function handleTakeWrite(
+    req: IncomingMessage,
+    res: ServerResponse,
+    ctx: RouteContext,
+    cache: OverviewCache,
+    pathname: string,
+): Promise<void> {
+    try {
+        if (!isJsonRequest(req))
+            throw new WriteRequestError(415, "unsupported_media_type", "只接受 Content-Type: application/json");
+        if (!sameOriginWrite(req)) throw new WriteRequestError(403, "forbidden", "写请求必须同源");
+        // 请求体
+        const body = await parseJsonBody(req);
+        // 镜号
+        const shotId = stringField(body.shot_id);
+        if (shotId === undefined) throw new WriteRequestError(400, "bad_request", "缺少 shot_id");
+        // 剧集上下文
+        const context = resolveEpisodeContext(ctx.root, stringField(body.episode_id));
+        // 本集分镜（镜号必须存在）
+        const shots = loadContextShots(ctx.root, context);
+        if (!shots.shots.some((s) => s.id === shotId)) {
+            throw new WriteRequestError(400, "invalid_shot", `镜 ${shotId} 不在本集分镜`);
+        }
+        // 是否定稿请求
+        const isFinalize = pathname.endsWith("/finalize");
+        // 结果数据
+        let data: Record<string, unknown>;
+        if (isFinalize) {
+            // run id
+            const runId = stringField(body.run_id);
+            if (runId === undefined) throw new WriteRequestError(400, "bad_request", "缺少 run_id");
+            // 定稿结果
+            const result = finalizeTake({
+                root: ctx.root,
+                context,
+                shotId,
+                runId,
+                ...(stringField(body.output) !== undefined ? { output: stringField(body.output) as string } : {}),
+                ...(stringField(body.note) !== undefined ? { note: stringField(body.note) as string } : {}),
+                source: "user",
+            });
+            data = {
+                changed: result.changed,
+                replaced: result.replaced,
+                run_id: result.entry.run_id,
+                output: result.entry.output,
+                take: result.entry,
+            };
+        } else {
+            // 撤销结果
+            const result = revokeTake({ root: ctx.root, context, shotId, source: "user" });
+            data = { changed: result.changed, revoked: result.revoked };
+        }
+        // 概览缓存立即失效，页面刷新即见最新定稿
+        cache.at = 0;
+        cache.data = null;
+        sendJson(res, 200, {
+            episode_id: context.episode_id,
+            shot_id: shotId,
+            takes_file: takesRelPath(ctx.root, context),
+            ...data,
+        });
+    } catch (e) {
+        sendWriteError(res, e);
+    }
+}
+
+/**
+ * 读取并解析 JSON 请求体。
+ */
+async function parseJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+    // 原始文本
+    const text = (await readBody(req, MAX_WRITE_BODY_BYTES)).toString("utf8");
+    try {
+        // 解析结果
+        const parsed = JSON.parse(text) as unknown;
+        if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+            throw new WriteRequestError(400, "bad_request", "请求体必须是 JSON 对象");
+        }
+        return parsed as Record<string, unknown>;
+    } catch (e) {
+        if (e instanceof WriteRequestError) throw e;
+        throw new WriteRequestError(400, "bad_request", "请求体不是合法 JSON");
+    }
+}
+
+/**
  * 分发请求。
  */
 async function handleRequest(
@@ -348,12 +577,22 @@ async function handleRequest(
     try {
         // 统一安全头
         setSecurityHeaders(res);
-        // 请求方法是否 HEAD
-        const headOnly = req.method === "HEAD";
-        // 仅 GET / HEAD
-        if (req.method !== "GET" && req.method !== "HEAD") {
-            res.setHeader("Allow", ALLOWED_METHODS);
-            sendJsonError(res, 405, "method_not_allowed", "只支持 GET / HEAD", headOnly);
+        // 请求方法
+        const method = req.method ?? "GET";
+        // 是否只取响应头
+        const headOnly = method === "HEAD";
+        // 是否为写请求
+        const isWrite = method === "POST";
+        // 只读模式只接受 GET / HEAD；写请求必须显式 web --allow-write
+        if ((!isWrite && method !== "GET" && method !== "HEAD") || (isWrite && !ctx.writable)) {
+            res.setHeader("Allow", ctx.writable ? ALLOWED_METHODS_WRITE : ALLOWED_METHODS);
+            sendJsonError(
+                res,
+                405,
+                "method_not_allowed",
+                isWrite ? "定稿写接口未开启；用 daoyan web --allow-write 启动" : "只支持 GET / HEAD",
+                headOnly,
+            );
             return;
         }
         // Host 校验
@@ -371,6 +610,16 @@ async function handleRequest(
         }
         // 路径
         const pathname = url.pathname;
+
+        // 定稿写接口（仅 --allow-write）
+        if (isWrite) {
+            if (!TAKE_WRITE_PATHS.has(pathname)) {
+                sendJsonError(res, 404, "not_found", "接口不存在", headOnly);
+                return;
+            }
+            await handleTakeWrite(req, res, ctx, cache, pathname);
+            return;
+        }
 
         // 静态页面
         if (pathname === "/" || pathname === "/index.html") {
@@ -401,6 +650,7 @@ async function handleRequest(
                     version: VERSION,
                     project: ctx.project.name,
                     mode: ctx.machine?.engine.mode ?? null,
+                    writable: ctx.writable,
                 },
                 headOnly,
             );
@@ -493,7 +743,7 @@ async function handleRequest(
                 sendJsonError(res, 410, "use_episode_api", "story 模式请使用 /api/episodes/<id>/shots", headOnly);
                 return;
             }
-            sendJson(res, 200, buildShotsView(ctx.root, ctx.shots), headOnly);
+            sendJson(res, 200, buildShotsView(ctx.root, ctx.shots, "shot:", resolveEpisodeContext(ctx.root)), headOnly);
             return;
         }
 
@@ -719,6 +969,7 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
         assets: options.assets,
         host,
         port,
+        writable: options.writable === true,
     };
     // HTTP 服务
     const server: Server = createServer((req, res) => {

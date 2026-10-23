@@ -194,6 +194,20 @@ daoyan run cancel <task_id>
 
 worker 执行 `/interrupt` → `/free` → local 停止 → GPU 恢复，写 `cancelled`；worker 已死则 stale 恢复并标记 `interrupted`。
 
+### run reassign
+
+```bash
+daoyan run reassign <run_id> --episode <id> [--shot <镜号>] [--source ai|user]
+```
+
+把 story 化之前（或手工 `run` 产出）的**未归属** run 挂到某一集的某个镜头：改写 `run.json` 的 `episode_id` 与 `label`，并写 `reassigned` 审计段。
+
+- 镜号省略时从原 label `shot:<n>` 推导；label 是自定义值时必须给 `--shot`；
+- 只处理 `episode_id` 为空的 run；已归属其它集的返回 `run_assigned`；归属完全一致时是幂等空操作；
+- 目标镜号必须存在于该集 `shots.json`；
+- `run.json` 默认不可变，这是唯一的显式例外；`task.json` 是历史执行记录，不改写（会在 `warnings` 里说明）；
+- 迁移后该 run 才能被 `take finalize` 选为该镜定稿稿件，也会出现在该集分镜页；若根目录 `takes.json` 曾引用它，会提示需在新集重新定稿。
+
 ### shot / retake / batch
 
 ```bash

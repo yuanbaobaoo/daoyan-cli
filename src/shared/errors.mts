@@ -43,6 +43,7 @@ export const ERROR_CODES = [
     "machine_lock_corrupt",
     "task_not_found",
     "run_not_found",
+    "run_assigned",
     "worker_start_failed",
     "worker_crashed",
     // 运行
@@ -201,6 +202,11 @@ export const ERROR_META: Record<ErrCode, ErrorMeta> = {
     },
     task_not_found: { retryable: false, hint: "检查 task_id；用 status --json 查看最近任务。" },
     run_not_found: { retryable: false, hint: "检查 run_id；用 status --json 查看最近运行。" },
+    run_assigned: {
+        retryable: false,
+        hint: "run reassign 只迁移未归属（episode_id 为空）的 legacy run；已属于某集的 run 不再改归属。",
+        nextActions: ["status --run <run_id> --json"],
+    },
     worker_start_failed: { retryable: true, hint: "检查项目目录写权限与 Node 可执行文件后重试。" },
     worker_crashed: {
         retryable: true,

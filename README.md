@@ -112,6 +112,7 @@ dycli --version
 
 - `daoyan run <workflow.json|name> [--set nodeId.input=value ...] [--label <label>] [--episode <id>] [--engine <url>] [--request-id <id>] [--wait] [--dry-run] [--timeout <小时>] [--json]` — 执行一个 workflow（默认异步 task；`--wait` 才阻塞）。
 - `daoyan run cancel <task_id> [--json]` — 取消一个 task（worker 执行 interrupt → free → stop → restore）。
+- `daoyan run reassign <run_id> --episode <id> [--shot <镜号>] [--json]` — 把 story 化之前未归属的 run 迁到某集某镜，之后才能定稿与合片。
 - `daoyan shot <镜号...> [--episode <id>] [--steps N] [--request-id <id>] [--allow-incomplete] [--wait] [--timeout <小时>] [--json]` — 拍摄指定镜头（一个 task 多个 run；默认异步）。
 - `daoyan retake <镜号...> [--episode <id>] [--steps N] [--request-id <id>] [--allow-incomplete] [--wait] [--timeout <小时>] [--json]` — 强制重拍指定镜头（忽略已有成功 run）。
 - `daoyan batch [--episode <id>] [--request-id <id>] [--allow-incomplete] [--wait] [--timeout <小时>] [--json]` — 连拍全部未完成镜头（已有成功 run 跳过；默认异步）。

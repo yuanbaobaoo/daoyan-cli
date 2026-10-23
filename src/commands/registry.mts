@@ -15,7 +15,7 @@ import { runLogs } from "./logs.mts";
 import { runStatus } from "./status.mts";
 import { runEngine } from "./engine.mts";
 import { runWorkflow } from "./workflow.mts";
-import { runRun, runCancel } from "./run.mts";
+import { runRun, runCancel, runReassign } from "./run.mts";
 import { runSkill } from "./skill.mts";
 import { runWeb } from "./web.mts";
 import { runStory } from "./story.mts";
@@ -559,6 +559,40 @@ export const COMMANDS: CommandMeta[] = [
         args: [{ name: "task_id", type: "string", required: true, description: "任务 id" }],
         implemented: true,
         run: (ctx, args) => runCancel(ctx, args),
+    },
+    {
+        name: "run reassign",
+        group: "production",
+        summary: "把未归属（legacy）的 run 迁到某一集的某个镜头，之后才能定稿与合片",
+        usage: "daoyan run reassign <run_id> --episode <id> [--shot <镜号>] [--source ai|user] [--json]",
+        args: [{ name: "run_id", type: "string", required: true, description: "要迁移的 run id" }],
+        flags: [
+            { name: "--episode", type: "string", required: true, description: "目标剧集 id" },
+            {
+                name: "--shot",
+                type: "string",
+                description: "目标镜号；省略时从原 label shot:<n> 推导",
+            },
+            { name: "--source", type: "ai|user", default: "ai", description: "操作者来源（写入审计段）" },
+        ],
+        detail: [
+            "run 记录默认不可变；这是唯一的显式例外，只改 episode_id 与 label，并写 reassigned 审计段。",
+            "只迁移 episode_id 为空的 run；已归属某集的返回 run_assigned。",
+            "task 记录是历史执行事实，不改写；命令会在 warnings 里说明。",
+            "迁移后该 run 才能被 take finalize 选为该镜定稿稿件。",
+        ],
+        implemented: true,
+        jsonShape: {
+            run_id: "string",
+            episode_id: "string|null",
+            label: "string",
+            changed: "boolean",
+            prior_label: "string|null",
+            prior_episode_id: "string|null",
+            warnings: "string[]",
+            next_actions: "string[]",
+        },
+        run: (ctx, args) => runReassign(ctx, args),
     },
     {
         name: "shot",

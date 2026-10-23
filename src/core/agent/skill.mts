@@ -952,6 +952,7 @@ daoyan take revoke 01 --episode ep01 --json
 
 - 定稿写入 \`takes.json\`（story 模式在 \`episodes/<id>/\`）；\`run.json\` 保持不可变，不带定稿标记；
 - 校验：run 是本镜本集的 succeeded run，稿件是该 run 的视频产物且在工作区；
+- story 化之前的老产出 label 是 \`shot:<n>\` 且 \`episode_id\` 为空，不属于任何集：先 \`daoyan run reassign <run_id> --episode <id> [--shot <n>]\` 迁移归属，再定稿；
 - 未定稿的产出是附加产物，不进入接力与合片。
 
 ## 合片

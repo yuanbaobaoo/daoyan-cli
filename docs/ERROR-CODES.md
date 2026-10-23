@@ -67,6 +67,7 @@
 | `machine_lock_corrupt` | 否 | — | 锁损坏；确认无任务后删除 `~/.dycli/machine.lock` |
 | `task_not_found` | 否 | — | task id 不存在 |
 | `run_not_found` | 否 | — | run id 不存在 |
+| `run_assigned` | 否 | — | run 已归属某集，`run reassign` 只迁移未归属的 run |
 | `worker_start_failed` | 是 | — | detached worker 启动失败 |
 | `worker_crashed` | 是 | — | worker 退出；task `interrupted`，下次任务 stale 恢复 |
 | `run_failed` | 否 | — | 通用执行失败 |

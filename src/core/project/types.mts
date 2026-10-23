@@ -888,6 +888,27 @@ export interface RunRecord {
      * 终态错误（成功为 null）。
      */
     error: { code: string; message: string; details?: Record<string, unknown> } | null;
+    /**
+     * 归属迁移留痕（仅 run reassign 写入；缺省表示从未迁移）。
+     */
+    reassigned?: {
+        /**
+         * 迁移前的 label。
+         */
+        from_label: string | null;
+        /**
+         * 迁移前的剧集 id。
+         */
+        from_episode_id: string | null;
+        /**
+         * 迁移时间。
+         */
+        at: string;
+        /**
+         * 触发来源。
+         */
+        by: "ai" | "user";
+    };
 }
 
 /**

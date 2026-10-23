@@ -88,6 +88,7 @@ var init_errors = __esm({
       "machine_lock_corrupt",
       "task_not_found",
       "run_not_found",
+      "run_assigned",
       "worker_start_failed",
       "worker_crashed",
       // 运行
@@ -212,6 +213,11 @@ var init_errors = __esm({
       },
       task_not_found: { retryable: false, hint: "\u68C0\u67E5 task_id\uFF1B\u7528 status --json \u67E5\u770B\u6700\u8FD1\u4EFB\u52A1\u3002" },
       run_not_found: { retryable: false, hint: "\u68C0\u67E5 run_id\uFF1B\u7528 status --json \u67E5\u770B\u6700\u8FD1\u8FD0\u884C\u3002" },
+      run_assigned: {
+        retryable: false,
+        hint: "run reassign \u53EA\u8FC1\u79FB\u672A\u5F52\u5C5E\uFF08episode_id \u4E3A\u7A7A\uFF09\u7684 legacy run\uFF1B\u5DF2\u5C5E\u4E8E\u67D0\u96C6\u7684 run \u4E0D\u518D\u6539\u5F52\u5C5E\u3002",
+        nextActions: ["status --run <run_id> --json"]
+      },
       worker_start_failed: { retryable: true, hint: "\u68C0\u67E5\u9879\u76EE\u76EE\u5F55\u5199\u6743\u9650\u4E0E Node \u53EF\u6267\u884C\u6587\u4EF6\u540E\u91CD\u8BD5\u3002" },
       worker_crashed: {
         retryable: true,
@@ -1821,6 +1827,7 @@ daoyan take revoke 01 --episode ep01 --json
 
 - \u5B9A\u7A3F\u5199\u5165 \`takes.json\`\uFF08story \u6A21\u5F0F\u5728 \`episodes/<id>/\`\uFF09\uFF1B\`run.json\` \u4FDD\u6301\u4E0D\u53EF\u53D8\uFF0C\u4E0D\u5E26\u5B9A\u7A3F\u6807\u8BB0\uFF1B
 - \u6821\u9A8C\uFF1Arun \u662F\u672C\u955C\u672C\u96C6\u7684 succeeded run\uFF0C\u7A3F\u4EF6\u662F\u8BE5 run \u7684\u89C6\u9891\u4EA7\u7269\u4E14\u5728\u5DE5\u4F5C\u533A\uFF1B
+- story \u5316\u4E4B\u524D\u7684\u8001\u4EA7\u51FA label \u662F \`shot:<n>\` \u4E14 \`episode_id\` \u4E3A\u7A7A\uFF0C\u4E0D\u5C5E\u4E8E\u4EFB\u4F55\u96C6\uFF1A\u5148 \`daoyan run reassign <run_id> --episode <id> [--shot <n>]\` \u8FC1\u79FB\u5F52\u5C5E\uFF0C\u518D\u5B9A\u7A3F\uFF1B
 - \u672A\u5B9A\u7A3F\u7684\u4EA7\u51FA\u662F\u9644\u52A0\u4EA7\u7269\uFF0C\u4E0D\u8FDB\u5165\u63A5\u529B\u4E0E\u5408\u7247\u3002
 
 ## \u5408\u7247
@@ -12846,6 +12853,111 @@ var init_production = __esm({
   }
 });
 
+// src/core/run/reassign.mts
+import { existsSync as existsSync25 } from "fs";
+function reassignRunToEpisode(opts) {
+  const run2 = requireRun(opts.root, opts.runId);
+  const priorLabel = run2.label;
+  const priorEpisode = run2.episode_id ?? null;
+  const context = resolveEpisodeContext(opts.root, opts.episodeId);
+  if (context.episode_id === null) {
+    throw new DaoyanCliError({
+      code: "story_invalid",
+      message: `\u76EE\u6807 ${opts.episodeId} \u4E0D\u662F\u6709\u6548\u5267\u96C6`,
+      details: { episode_id: opts.episodeId }
+    });
+  }
+  const labeledShot = opts.shotId ?? LEGACY_SHOT_LABEL_RE.exec(priorLabel ?? "")?.[1] ?? EPISODE_SHOT_LABEL_RE.exec(priorLabel ?? "")?.[1];
+  if (priorEpisode === context.episode_id && labeledShot !== void 0 && priorLabel === `${context.label_prefix}${labeledShot}`) {
+    return {
+      record: run2,
+      changed: false,
+      prior_label: priorLabel,
+      prior_episode_id: priorEpisode,
+      label: priorLabel,
+      warnings: []
+    };
+  }
+  if (priorEpisode !== null) {
+    throw new DaoyanCliError({
+      code: "run_assigned",
+      message: `run ${opts.runId} \u5DF2\u5F52\u5C5E\u5267\u96C6 ${priorEpisode}\uFF0Creassign \u53EA\u8FC1\u79FB\u672A\u5F52\u5C5E\u7684 run`,
+      details: { run_id: opts.runId, label: priorLabel, episode_id: priorEpisode }
+    });
+  }
+  const shotId = opts.shotId ?? LEGACY_SHOT_LABEL_RE.exec(priorLabel ?? "")?.[1];
+  if (shotId === void 0) {
+    throw new DaoyanCliError({
+      code: "usage",
+      message: `run ${opts.runId} \u7684 label \u662F ${String(priorLabel ?? "\u7A7A")}\uFF0C\u63A8\u4E0D\u51FA\u955C\u53F7\uFF1B\u8BF7\u7528 --shot <\u955C\u53F7> \u6307\u5B9A`,
+      exit: 2,
+      details: { run_id: opts.runId, label: priorLabel }
+    });
+  }
+  const label = `${context.label_prefix}${shotId}`;
+  const shots = loadEpisodeShots(opts.root, context.episode_id);
+  if (shots === null) {
+    throw new DaoyanCliError({
+      code: "story_invalid",
+      message: `\u5267\u96C6 ${context.episode_id} \u6CA1\u6709 shots.json\uFF0C\u65E0\u6CD5\u5F52\u5C5E\u955C\u5934 ${shotId}`,
+      details: { episode_id: context.episode_id }
+    });
+  }
+  if (!shots.shots.some((s) => s.id === shotId)) {
+    throw new DaoyanCliError({
+      code: "story_invalid",
+      message: `\u955C ${shotId} \u4E0D\u5728 ${context.episode_id} \u7684\u5206\u955C\u91CC`,
+      details: { episode_id: context.episode_id, available: shots.shots.map((s) => s.id).join(" ") }
+    });
+  }
+  const next = {
+    ...run2,
+    episode_id: context.episode_id,
+    label,
+    reassigned: {
+      from_label: priorLabel,
+      from_episode_id: priorEpisode,
+      at: nowIso(),
+      by: opts.by ?? "ai"
+    }
+  };
+  writeRun(opts.root, next);
+  const warnings = [];
+  if (legacyTakeReferences(opts.root, opts.runId)) {
+    warnings.push(
+      `\u6839\u76EE\u5F55 takes.json \u91CC\u6709\u6307\u5411\u8BE5 run \u7684\u5B9A\u7A3F\u8BB0\u5F55\uFF1B\u8FC1\u79FB\u540E\u8BE5\u8BB0\u5F55\u4F1A\u5224\u4E3A\u5931\u6548\uFF0C\u9700\u8981\u5728 ${context.episode_id} \u91CD\u65B0 take finalize\u3002`
+    );
+  }
+  const task = readTask(opts.root, run2.task_id);
+  if (task !== null && (task.episode_id ?? null) !== context.episode_id) {
+    warnings.push(
+      `\u6240\u5C5E task ${run2.task_id} \u7684 episode_id \u4ECD\u4E3A ${String(task.episode_id ?? "\u672A\u5F52\u5C5E")}\uFF08\u6267\u884C\u8BB0\u5F55\u4E0D\u6539\u5199\uFF09\u3002`
+    );
+  }
+  return { record: next, changed: true, prior_label: priorLabel, prior_episode_id: priorEpisode, label, warnings };
+}
+function legacyTakeReferences(root, runId) {
+  const file = takesPath(root, null);
+  if (!existsSync25(file)) return false;
+  const takes = readJsonIfExists(file);
+  if (takes === null || !Array.isArray(takes.shots)) return false;
+  return takes.shots.some((s) => s.finalized !== null && s.finalized !== void 0 && s.finalized.run_id === runId);
+}
+var LEGACY_SHOT_LABEL_RE, EPISODE_SHOT_LABEL_RE;
+var init_reassign = __esm({
+  "src/core/run/reassign.mts"() {
+    "use strict";
+    init_errors();
+    init_fs();
+    init_store3();
+    init_store();
+    init_paths();
+    init_store2();
+    LEGACY_SHOT_LABEL_RE = /^shot:(.+)$/;
+    EPISODE_SHOT_LABEL_RE = /^ep:[^:]+:shot:(.+)$/;
+  }
+});
+
 // src/core/media/ffmpeg.mts
 import { spawn as spawn5 } from "child_process";
 function run(argv) {
@@ -12900,7 +13012,7 @@ var init_ffmpeg = __esm({
 });
 
 // src/core/task/plans.mts
-import { existsSync as existsSync25, mkdirSync as mkdirSync4, statSync as statSync6 } from "fs";
+import { existsSync as existsSync26, mkdirSync as mkdirSync4, statSync as statSync6 } from "fs";
 import { basename as basename6, join as join21 } from "path";
 function splitTarget2(target) {
   const dot = target.indexOf(".");
@@ -13029,7 +13141,7 @@ function pickRelaySource(root, context, upstreamId, enforceTakes) {
     });
   }
   const abs = runOutputAbs(root, take.run, take.output);
-  if (!existsSync25(abs)) {
+  if (!existsSync26(abs)) {
     throw new DaoyanCliError({
       code: "relay_upstream_missing",
       message: `\u63A5\u529B\u4E0A\u6E38\u4EA7\u7269\u4E0D\u5728\u5DE5\u4F5C\u533A\uFF08\u53EF\u80FD\u672A git lfs pull\uFF09\uFF1A${take.run.run_id}/${take.output.path}`,
@@ -13058,7 +13170,7 @@ function firstFrameUpload(opts) {
       });
     }
     const src = join21(opts.root, rel);
-    if (!existsSync25(src)) {
+    if (!existsSync26(src)) {
       throw new DaoyanCliError({
         code: "anchor_not_found",
         message: `\u951A\u70B9\u56FE\u7247\u4E0D\u5B58\u5728\uFF1A${rel}`,
@@ -13088,7 +13200,7 @@ function firstFrameUpload(opts) {
   mkdirSync4(relayDir, { recursive: true });
   const cache = join21(relayDir, `relay_${upstream.id}_${source.run_id}_to_${opts.shot.id}.png`);
   let needExtract = true;
-  if (existsSync25(cache)) {
+  if (existsSync26(cache)) {
     try {
       needExtract = statSync6(cache).mtimeMs < statSync6(source.abs).mtimeMs;
     } catch {
@@ -13270,7 +13382,7 @@ var init_signals = __esm({
 });
 
 // src/core/task/events.mts
-import { existsSync as existsSync26, readFileSync as readFileSync20 } from "fs";
+import { existsSync as existsSync27, readFileSync as readFileSync20 } from "fs";
 import { join as join22 } from "path";
 import { appendFileSync as appendFileSync2 } from "fs";
 function eventsPath(taskDir2) {
@@ -13278,7 +13390,7 @@ function eventsPath(taskDir2) {
 }
 function readEvents(taskDir2, fromSeq = 0) {
   const file = eventsPath(taskDir2);
-  if (!existsSync26(file)) return [];
+  if (!existsSync27(file)) return [];
   const out = [];
   for (const line of readFileSync20(file, "utf8").split("\n")) {
     if (line.trim() === "") continue;
@@ -13507,7 +13619,7 @@ var init_preflight = __esm({
 });
 
 // src/core/run/executor.mts
-import { existsSync as existsSync27, readFileSync as readFileSync21, statSync as statSync7, openSync as openSync3, readSync as readSync2, closeSync as closeSync3 } from "fs";
+import { existsSync as existsSync28, readFileSync as readFileSync21, statSync as statSync7, openSync as openSync3, readSync as readSync2, closeSync as closeSync3 } from "fs";
 import { basename as basename7, join as join23 } from "path";
 function collectOutputItems(outputs) {
   const out = [];
@@ -13530,7 +13642,7 @@ function collectOutputItems(outputs) {
   return out;
 }
 function readTailText(file, lines) {
-  if (!existsSync27(file)) return "";
+  if (!existsSync28(file)) return "";
   let size = 0;
   try {
     size = statSync7(file).size;
@@ -13832,7 +13944,7 @@ function patchRunCleanup(opts) {
   let first = true;
   for (const runId of opts.runIds) {
     const file = join23(opts.root, "runs", runId, "run.json");
-    if (!existsSync27(file)) continue;
+    if (!existsSync28(file)) continue;
     try {
       const rec = JSON.parse(readFileSync21(file, "utf8"));
       rec.engine.cleanup = opts.cleanup;
@@ -13874,7 +13986,7 @@ var init_executor = __esm({
 });
 
 // src/core/task/worker.mts
-import { existsSync as existsSync28, readdirSync as readdirSync8 } from "fs";
+import { existsSync as existsSync29, readdirSync as readdirSync8 } from "fs";
 import { basename as basename8, dirname as dirname10, join as join24, resolve as resolve5 } from "path";
 function isFatalRunError(code) {
   return code === "engine_oom" || code === "engine_crashed" || code === "engine_unreachable" || code === "engine_busy" || code === "engine_start_failed" || code === "engine_stop_failed" || code === "gpu_lease_corrupt" || code === "machine_busy" || code === "machine_lock_corrupt" || code === "worker_start_failed";
@@ -14549,7 +14661,7 @@ var init_create = __esm({
 });
 
 // src/core/run/summary.mts
-import { existsSync as existsSync29 } from "fs";
+import { existsSync as existsSync30 } from "fs";
 import { join as join26 } from "path";
 function outputSummaries(root, rec) {
   return rec.outputs.map((o) => {
@@ -14560,7 +14672,7 @@ function outputSummaries(root, rec) {
       abs_path: abs,
       sha256: o.sha256,
       bytes: o.bytes,
-      present: existsSync29(abs)
+      present: existsSync30(abs)
     };
   });
 }
@@ -14664,6 +14776,7 @@ function runWaitData(root, task, runs, extra = {}) {
 }
 async function runRun(ctx2, args) {
   if (args[0] === "cancel") return runCancel(ctx2, args.slice(1));
+  if (args[0] === "reassign") return runReassign(ctx2, args.slice(1));
   const flags = parseRunArgs(args);
   const { root, config: project } = requireProject(ctx2);
   const machine = loadMachine(root);
@@ -14788,6 +14901,53 @@ async function runCancel(ctx2, args) {
   }
   return 0;
 }
+async function runReassign(ctx2, args) {
+  const parsed = parseFlags(args, {
+    "--episode": "string",
+    "--shot": "string",
+    "--source": "string"
+  });
+  const runId = parsed.positionals[0];
+  if (runId === void 0 || runId === "" || runId.startsWith("-")) {
+    usageError("\u7F3A\u5C11 run_id\uFF1Adaoyan run reassign <run_id> --episode <id> [--shot <\u955C\u53F7>]");
+  }
+  if (parsed.positionals.length > 1) usageError(`\u672A\u77E5\u53C2\u6570 ${parsed.positionals.slice(1).join(" ")}`);
+  const source = strFlag(parsed, "--source") ?? "ai";
+  if (source !== "ai" && source !== "user") usageError("--source \u5FC5\u987B\u662F ai|user");
+  const { root } = requireProject(ctx2);
+  const result = reassignRunToEpisode({
+    root,
+    runId,
+    episodeId: requireFlag(parsed, "--episode"),
+    ...strFlag(parsed, "--shot") !== void 0 ? { shotId: strFlag(parsed, "--shot") } : {},
+    by: source
+  });
+  const data = {
+    run_id: result.record.run_id,
+    episode_id: result.record.episode_id ?? null,
+    label: result.label,
+    changed: result.changed,
+    prior_label: result.prior_label,
+    prior_episode_id: result.prior_episode_id,
+    warnings: result.warnings,
+    next_actions: result.changed ? [`daoyan take list --episode ${String(result.record.episode_id)} --json`] : []
+  };
+  if (ctx2.json) {
+    emitData(data);
+    return 0;
+  }
+  if (!result.changed) {
+    say(`run ${result.record.run_id} \u5DF2\u5F52\u5C5E ${result.label}\uFF0C\u65E0\u9700\u8FC1\u79FB`);
+    return 0;
+  }
+  say(
+    `run ${result.record.run_id} \u5F52\u5C5E\u8FC1\u79FB\uFF1A${String(result.prior_label ?? "\u65E0 label")} / ${String(
+      result.prior_episode_id ?? "\u672A\u5F52\u5C5E"
+    )} \u2192 ${result.label}`
+  );
+  for (const w of result.warnings) say(`\u6CE8\u610F\uFF1A${w}`);
+  return 0;
+}
 async function enqueueRunTask(opts) {
   const created = await createAndStartTask({
     root: opts.root,
@@ -14850,6 +15010,7 @@ var init_run = __esm({
     init_fs();
     init_config();
     init_paths();
+    init_reassign();
     init_plans();
     init_create();
     init_store();
@@ -15212,7 +15373,7 @@ var init_take = __esm({
 });
 
 // src/commands/wrap.mts
-import { existsSync as existsSync30, mkdirSync as mkdirSync5, writeFileSync as writeFileSync8 } from "fs";
+import { existsSync as existsSync31, mkdirSync as mkdirSync5, writeFileSync as writeFileSync8 } from "fs";
 import { join as join27 } from "path";
 function pickVideoAt(root, rec) {
   const chosen = pickPrimaryOutput(rec);
@@ -15302,7 +15463,7 @@ async function runWrap(ctx2, args) {
       missing.push(shot.id);
       continue;
     }
-    if (!existsSync30(pick.abs)) {
+    if (!existsSync31(pick.abs)) {
       missing.push(shot.id);
       continue;
     }
@@ -15415,7 +15576,7 @@ var init_wrap = __esm({
 });
 
 // src/commands/logs.mts
-import { closeSync as closeSync5, existsSync as existsSync31, openSync as openSync5, readSync as readSync3, readdirSync as readdirSync9, statSync as statSync8 } from "fs";
+import { closeSync as closeSync5, existsSync as existsSync32, openSync as openSync5, readSync as readSync3, readdirSync as readdirSync9, statSync as statSync8 } from "fs";
 import { join as join28 } from "path";
 function parseArgs2(args) {
   const out = { follow: false, n: 100, src: "all" };
@@ -15480,7 +15641,7 @@ function cleanLines(raw) {
   return out;
 }
 function readTail(file, n) {
-  if (!existsSync31(file)) return [];
+  if (!existsSync32(file)) return [];
   let size = 0;
   try {
     size = statSync8(file).size;
@@ -15500,8 +15661,8 @@ function readTail(file, n) {
 }
 function fileSources(root, src) {
   const dir = join28(root, LOG_DIR);
-  const engines = existsSync31(dir) ? readdirSync9(dir).filter((f) => /^engine-.*\.log$/.test(f)).sort().reverse() : [];
-  const workers = existsSync31(dir) ? readdirSync9(dir).filter((f) => /^worker-.*\.log$/.test(f)).sort().reverse() : [];
+  const engines = existsSync32(dir) ? readdirSync9(dir).filter((f) => /^engine-.*\.log$/.test(f)).sort().reverse() : [];
+  const workers = existsSync32(dir) ? readdirSync9(dir).filter((f) => /^worker-.*\.log$/.test(f)).sort().reverse() : [];
   const all = [
     ...workers[0] !== void 0 ? [{ name: "worker", file: join28(dir, workers[0]) }] : [],
     ...engines[0] !== void 0 ? [{ name: "engine", file: join28(dir, engines[0]) }] : [],
@@ -15597,7 +15758,7 @@ async function runLogs(ctx2, args) {
     return taskEvents(ctx2, root, taskId, flags);
   }
   const sources = fileSources(root, flags.src);
-  const existing = sources.filter((s) => existsSync31(s.file));
+  const existing = sources.filter((s) => existsSync32(s.file));
   if (existing.length === 0) {
     if (ctx2.json) {
       emitData({ sources: {}, note: "\u6682\u65E0\u65E5\u5FD7\u6587\u4EF6\uFF1B\u8FD0\u884C\u4EFB\u52A1\u540E\u53EF\u7528 logs --task <id>" });
@@ -15631,7 +15792,7 @@ async function runLogs(ctx2, args) {
     while (!stop) {
       await new Promise((r) => setTimeout(r, 500));
       for (const s of existing) {
-        if (!existsSync31(s.file)) continue;
+        if (!existsSync32(s.file)) continue;
         let size = 0;
         try {
           size = statSync8(s.file).size;
@@ -15685,7 +15846,7 @@ var init_logs = __esm({
 });
 
 // src/core/status/snapshot.mts
-import { existsSync as existsSync32 } from "fs";
+import { existsSync as existsSync33 } from "fs";
 import { join as join29 } from "path";
 async function probeEngine(root, machine, engineTimeoutMs = 3e3) {
   if (machine.engine.mode === "remote") {
@@ -15723,7 +15884,7 @@ function shotProgress(root, shots, context) {
   return shots.shots.map((s) => {
     const label = `${labelPrefix}${s.id}`;
     const rec = pool.find((r) => r.label === label && r.status === "succeeded") ?? null;
-    const present = rec !== null && rec.outputs.some((o) => existsSync32(join29(root, RUNS_DIR, rec.run_id, o.path)));
+    const present = rec !== null && rec.outputs.some((o) => existsSync33(join29(root, RUNS_DIR, rec.run_id, o.path)));
     const take = context === void 0 ? null : pickShotTake(root, context, s.id, pool);
     return {
       id: s.id,
@@ -16075,7 +16236,7 @@ var init_status = __esm({
 });
 
 // src/commands/engine.mts
-import { existsSync as existsSync33, readdirSync as readdirSync10 } from "fs";
+import { existsSync as existsSync34, readdirSync as readdirSync10 } from "fs";
 import { isAbsolute as isAbsolute6, join as join30, relative, resolve as resolve6 } from "path";
 async function comfyTags(limit) {
   try {
@@ -16136,7 +16297,7 @@ async function runEngine(ctx2, args) {
           mode: "local",
           comfyui_dir: portablePath(found.root, dirs.comfyDir),
           venv_dir: portablePath(found.root, dirs.venvDir),
-          installed: existsSync33(join30(dirs.comfyDir, "main.py")),
+          installed: existsSync34(join30(dirs.comfyDir, "main.py")),
           version: machine2.engine.comfyui_version ?? found.config.comfyui?.version ?? null
         };
       } else if (machine2 !== null && machine2.engine.mode === "remote") {
@@ -16243,7 +16404,7 @@ async function runEngine(ctx2, args) {
       let comfyDir;
       let venvDir;
       let version;
-      if (existsSync33(join30(asPath, "main.py"))) {
+      if (existsSync34(join30(asPath, "main.py"))) {
         comfyDir = asPath;
         venvDir = join30(asPath, ".venv");
         if (!await venvReady(venvDir)) {
@@ -16256,7 +16417,7 @@ async function runEngine(ctx2, args) {
         const base = join30(root, "engine", "versions", target);
         comfyDir = join30(base, "ComfyUI");
         venvDir = join30(base, ".venv");
-        if (!existsSync33(join30(comfyDir, "main.py"))) {
+        if (!existsSync34(join30(comfyDir, "main.py"))) {
           throw new DaoyanCliError({
             code: "provision_failed",
             message: `\u672A\u627E\u5230\u7248\u672C ${target}\uFF08${portablePath(root, comfyDir)}\uFF09\u3002\u5148\u5B89\u88C5\uFF1Adaoyan engine install ${target}`
@@ -16571,7 +16732,7 @@ var init_ops = __esm({
 });
 
 // src/commands/workflow.mts
-import { existsSync as existsSync34, readFileSync as readFileSync23, readdirSync as readdirSync11 } from "fs";
+import { existsSync as existsSync35, readFileSync as readFileSync23, readdirSync as readdirSync11 } from "fs";
 import { basename as basename9, join as join31, resolve as resolve7 } from "path";
 function readStdin() {
   try {
@@ -16656,7 +16817,7 @@ function readOpsFile(path) {
   }
 }
 function isEmptyPlaceholder(abs) {
-  if (!existsSync34(abs)) return false;
+  if (!existsSync35(abs)) return false;
   try {
     const parsed = parseGraph(JSON.parse(readFileSync23(abs, "utf8")));
     return !hasGraphErrors(parsed.issues) && Object.keys(parsed.graph).length === 0;
@@ -16680,7 +16841,7 @@ async function runWorkflow(ctx2, args) {
     const { root } = requireProject(ctx2);
     const target = resolveWorkflowRef(root, name);
     const replaced = isEmptyPlaceholder(target.abs);
-    if (existsSync34(target.abs) && !replaced) {
+    if (existsSync35(target.abs) && !replaced) {
       throw new DaoyanCliError({ code: "usage", message: `workflow ${name} \u5DF2\u5B58\u5728\uFF1A${target.rel}`, exit: 2 });
     }
     ensureDir(join31(root, WORKFLOWS_DIR));
@@ -16706,7 +16867,7 @@ async function runWorkflow(ctx2, args) {
     const { root } = requireProject(ctx2);
     const target = resolveWorkflowRef(root, name);
     const replaced = isEmptyPlaceholder(target.abs);
-    if (existsSync34(target.abs) && !replaced) {
+    if (existsSync35(target.abs) && !replaced) {
       throw new DaoyanCliError({ code: "usage", message: `workflow ${name} \u5DF2\u5B58\u5728`, exit: 2 });
     }
     const loaded = loadGraphFile(resolve7(process.cwd(), source), basename9(source));
@@ -16718,7 +16879,7 @@ async function runWorkflow(ctx2, args) {
   if (sub === "list") {
     const { root } = requireProject(ctx2);
     const dir = join31(root, WORKFLOWS_DIR);
-    const items = existsSync34(dir) ? readdirSync11(dir).filter((f) => f.endsWith(".json") && !f.endsWith(BINDINGS_SUFFIX)).sort().map((f) => {
+    const items = existsSync35(dir) ? readdirSync11(dir).filter((f) => f.endsWith(".json") && !f.endsWith(BINDINGS_SUFFIX)).sort().map((f) => {
       const abs = join31(dir, f);
       try {
         const parsed = parseGraph(JSON.parse(readFileSync23(abs, "utf8")));
@@ -16782,7 +16943,7 @@ async function runWorkflow(ctx2, args) {
       nodes: stats.nodes,
       links: stats.links,
       graph_sha256: loaded.sha256,
-      bindings: existsSync34(bindingsPathOf(ref.abs)) ? bindingsPathOf(ref.abs).slice(root.length + 1) : null,
+      bindings: existsSync35(bindingsPathOf(ref.abs)) ? bindingsPathOf(ref.abs).slice(root.length + 1) : null,
       ...full ? { graph: loaded.graph } : { node_list: nodeSummaries(loaded.graph) }
     };
     if (ctx2.json) {
@@ -17147,7 +17308,7 @@ var init_addresses = __esm({
 });
 
 // src/core/web/data.mts
-import { existsSync as existsSync35, readdirSync as readdirSync12, readFileSync as readFileSync24, statSync as statSync9 } from "fs";
+import { existsSync as existsSync36, readdirSync as readdirSync12, readFileSync as readFileSync24, statSync as statSync9 } from "fs";
 import { basename as basename10, join as join32, resolve as resolve8, sep as sep2 } from "path";
 function extensionOf(name) {
   const dot = name.lastIndexOf(EXTENSION_SEPARATOR);
@@ -17183,7 +17344,7 @@ function artifactOf(root, run2, output2) {
   const base = runDir(root, run2.run_id);
   const abs = resolve8(base, output2.path);
   const within = abs !== base && abs.startsWith(base + sep2);
-  const present = within && existsSync35(abs);
+  const present = within && existsSync36(abs);
   let bytes = output2.bytes;
   let lfsPointer = false;
   if (present) {
@@ -17220,7 +17381,7 @@ function safeReadRun(root, runId) {
 }
 function safeListRuns(root) {
   const dir = join32(root, RUNS_DIR);
-  if (!existsSync35(dir)) return [];
+  if (!existsSync36(dir)) return [];
   const out = [];
   for (const ent of readdirSync12(dir, { withFileTypes: true })) {
     if (!ent.isDirectory()) continue;
@@ -17241,7 +17402,7 @@ function safeReadTask(root, taskId) {
 }
 function safeListTasks(root) {
   const dir = join32(root, TASKS_DIR);
-  if (!existsSync35(dir)) return [];
+  if (!existsSync36(dir)) return [];
   const out = [];
   for (const ent of readdirSync12(dir, { withFileTypes: true })) {
     if (!ent.isDirectory()) continue;
@@ -17345,7 +17506,7 @@ function getRunDetail(root, runId) {
     overrides: run2.overrides,
     input_files: inputsSnapshot?.files ?? [],
     events,
-    workflow_snapshot: existsSync35(join32(runDir(root, run2.run_id), RUN_WORKFLOW_FILE))
+    workflow_snapshot: existsSync36(join32(runDir(root, run2.run_id), RUN_WORKFLOW_FILE))
   };
 }
 function listRunsView(root, episodeId) {
@@ -17641,7 +17802,7 @@ function buildShotsView(root, shots, labelPrefix = "shot:", context) {
 }
 function listFinals(root, episodeId) {
   const dir = episodeId !== void 0 && episodeId !== "" ? join32(root, FINAL_DIR, episodeId) : join32(root, FINAL_DIR);
-  if (!existsSync35(dir)) return [];
+  if (!existsSync36(dir)) return [];
   const entries = readdirSync12(dir, { withFileTypes: true }).filter((e) => e.isFile());
   const referenced = /* @__PURE__ */ new Set();
   const out = [];
@@ -17651,7 +17812,7 @@ function listFinals(root, episodeId) {
       const manifest = JSON.parse(readFileSync24(join32(dir, entry.name), "utf8"));
       const cut = typeof manifest.cut === "string" ? manifest.cut : "";
       if (cut === "" || basename10(cut) !== cut || cut.includes("/") || cut.includes("\\")) continue;
-      if (!existsSync35(join32(dir, cut))) continue;
+      if (!existsSync36(join32(dir, cut))) continue;
       referenced.add(cut);
       const stat = statSync9(join32(dir, cut));
       const mediaUrl = finalMediaUrl(cut, episodeId);
@@ -17702,7 +17863,7 @@ function listFinals(root, episodeId) {
 }
 function listWorkflows(root, project) {
   const dir = join32(root, WORKFLOWS_DIR);
-  if (!existsSync35(dir)) return [];
+  if (!existsSync36(dir)) return [];
   const defaultRef = (project.default_workflow ?? "").trim();
   const out = [];
   for (const entry of readdirSync12(dir, { withFileTypes: true })) {
@@ -17719,7 +17880,7 @@ function listWorkflows(root, project) {
       name,
       path: `${WORKFLOWS_DIR}/${entry.name}`,
       nodes,
-      bindings: existsSync35(join32(dir, `${name}.bindings.json`)),
+      bindings: existsSync36(join32(dir, `${name}.bindings.json`)),
       default: defaultRef === name || defaultRef === `workflows/${name}` || defaultRef === `workflows/${name}.json`,
       valid: graph !== null && typeof graph === "object"
     });
@@ -17867,7 +18028,7 @@ var init_data = __esm({
 });
 
 // src/core/web/media.mts
-import { createReadStream, existsSync as existsSync36, realpathSync, statSync as statSync10 } from "fs";
+import { createReadStream, existsSync as existsSync37, realpathSync, statSync as statSync10 } from "fs";
 import { basename as basename11, extname, join as join33, sep as sep3 } from "path";
 import { pipeline } from "stream/promises";
 function contentTypeOf(name) {
@@ -17884,7 +18045,7 @@ function safeRealpath(file) {
   }
 }
 function makeTarget(abs, name, etag) {
-  if (!existsSync36(abs)) return null;
+  if (!existsSync37(abs)) return null;
   try {
     const stat = statSync10(abs);
     if (!stat.isFile()) return null;
@@ -18103,14 +18264,14 @@ var init_media = __esm({
 });
 
 // src/core/story/map.mts
-import { existsSync as existsSync37, readFileSync as readFileSync25, readdirSync as readdirSync13, statSync as statSync11 } from "fs";
+import { existsSync as existsSync38, readFileSync as readFileSync25, readdirSync as readdirSync13, statSync as statSync11 } from "fs";
 import { join as join34 } from "path";
 function hashIfExists(file) {
-  return existsSync37(file) ? sha256File(file) : "";
+  return existsSync38(file) ? sha256File(file) : "";
 }
 function projectOf(root) {
   const file = join34(root, PROJECT_FILE);
-  if (!existsSync37(file)) return null;
+  if (!existsSync38(file)) return null;
   try {
     return JSON.parse(readFileSync25(file, "utf8"));
   } catch {
@@ -18139,7 +18300,7 @@ function outputKind(name) {
 }
 function assetRefOf(root, asset) {
   const abs = join34(root, asset.path);
-  const present = existsSync37(abs);
+  const present = existsSync38(abs);
   let bytes = asset.bytes;
   let lfsPointer = false;
   if (present) {
@@ -18393,7 +18554,7 @@ function voiceView(voice) {
 }
 function readStoryMapAnnotations(root, episodeId) {
   const file = storyMapPath(root, episodeId);
-  if (!existsSync37(file)) return { doc: null, warnings: [] };
+  if (!existsSync38(file)) return { doc: null, warnings: [] };
   let raw;
   try {
     raw = JSON.parse(readFileSync25(file, "utf8"));
@@ -18819,7 +18980,7 @@ function anchorOf(root, shot, shots) {
   if (typeof first !== "string" || first === "") return null;
   const path = shots.meta.anchors[first];
   if (path === void 0 || path === "") return null;
-  return { key: first, path, present: existsSync37(join34(root, path)) };
+  return { key: first, path, present: existsSync38(join34(root, path)) };
 }
 function buildEventFacts(root, shots, characters, fps, beats) {
   const facts = [];
@@ -18967,7 +19128,7 @@ function buildWorkflowCandidate(root, name, rel, abs, project) {
 }
 function collectWorkflowCatalog(root, project) {
   const dir = join34(root, WORKFLOWS_DIR);
-  if (!existsSync37(dir)) return [];
+  if (!existsSync38(dir)) return [];
   const out = [];
   for (const entry of readdirSync13(dir, { withFileTypes: true })) {
     if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
@@ -19514,7 +19675,7 @@ function materializeStoryMap(root, episodeId, options) {
     });
   }
   const existingRead = readStoryMapAnnotations(root, episodeId);
-  if (!options.force && existingRead.doc === null && existsSync37(storyMapPath(root, episodeId))) {
+  if (!options.force && existingRead.doc === null && existsSync38(storyMapPath(root, episodeId))) {
     throw new DaoyanCliError({
       code: "story_invalid",
       message: "\u73B0\u6709 story-map.json \u65E0\u6CD5\u89E3\u6790",
@@ -19595,11 +19756,11 @@ var init_map = __esm({
 });
 
 // src/core/web/story-data.mts
-import { existsSync as existsSync38, statSync as statSync12 } from "fs";
+import { existsSync as existsSync39, statSync as statSync12 } from "fs";
 import { join as join35 } from "path";
 function assetView(root, asset) {
   const abs = join35(root, asset.path);
-  const present = existsSync38(abs);
+  const present = existsSync39(abs);
   let bytes = asset.bytes;
   let lfsPointer = false;
   if (present) {
@@ -19755,10 +19916,10 @@ function buildStoryEpisodeView(root, episodeId, project) {
     artifacts: artifacts.items,
     finals,
     files: {
-      script_md: existsSync38(join35(dir, "script.md")),
-      script_json: existsSync38(join35(dir, "script.json")),
-      breakdown: existsSync38(join35(dir, "breakdown.json")),
-      shots: existsSync38(join35(dir, "shots.json"))
+      script_md: existsSync39(join35(dir, "script.md")),
+      script_json: existsSync39(join35(dir, "script.json")),
+      breakdown: existsSync39(join35(dir, "breakdown.json")),
+      shots: existsSync39(join35(dir, "shots.json"))
     },
     episodes: listEpisodeMetas(root)
   };
@@ -20569,7 +20730,7 @@ var init_web = __esm({
 });
 
 // src/commands/story.mts
-import { existsSync as existsSync39, readFileSync as readFileSync26 } from "fs";
+import { existsSync as existsSync40, readFileSync as readFileSync26 } from "fs";
 import { join as join36 } from "path";
 function readTextInput(file, label) {
   if (file === void 0 || file === "") usageError(`\u9700\u8981 ${label}`);
@@ -20713,10 +20874,10 @@ async function storyEpisode(ctx2, args) {
       {
         episode: meta,
         files: {
-          script_md: existsSync39(join36(dir, "script.md")),
-          script_json: existsSync39(join36(dir, "script.json")),
-          breakdown: existsSync39(join36(dir, "breakdown.json")),
-          shots: existsSync39(join36(dir, "shots.json"))
+          script_md: existsSync40(join36(dir, "script.md")),
+          script_json: existsSync40(join36(dir, "script.json")),
+          breakdown: existsSync40(join36(dir, "breakdown.json")),
+          shots: existsSync40(join36(dir, "shots.json"))
         }
       },
       [`${meta.id}  \u7B2C ${meta.number} \u96C6  ${meta.title}`, meta.summary ?? ""]
@@ -20781,7 +20942,7 @@ async function storyScript(ctx2, args) {
       ...baseText !== void 0 ? { baseRevision: Number(baseText) } : {}
     });
     const stale = ["breakdown", "shots"].filter(
-      (name) => existsSync39(join36(context.dir, name === "breakdown" ? "breakdown.json" : "shots.json"))
+      (name) => existsSync40(join36(context.dir, name === "breakdown" ? "breakdown.json" : "shots.json"))
     );
     output(
       ctx2,
@@ -20864,7 +21025,7 @@ async function storyBreakdown(ctx2, args) {
       });
     }
     const baseSha = strFlag(parsed, "--base-sha256");
-    if (baseSha !== void 0 && existsSync39(context.breakdown_path ?? "")) {
+    if (baseSha !== void 0 && existsSync40(context.breakdown_path ?? "")) {
       if (sha256File(context.breakdown_path) !== baseSha) {
         throw new DaoyanCliError({ code: "story_conflict", message: "breakdown \u5DF2\u88AB\u5176\u5B83\u4FEE\u6539" });
       }
@@ -20956,7 +21117,7 @@ async function storyGlobal(ctx2, kind, args) {
     if (parsed.positionals.length > 0) usageError(`\u672A\u77E5\u53C2\u6570 ${parsed.positionals.join(" ")}`);
     const target = kind === "characters" ? join36(root, "story/characters.json") : kind === "scenes" ? join36(root, "story/scenes.json") : join36(root, "story/voices.json");
     const baseSha = strFlag(parsed, "--base-sha256");
-    if (baseSha !== void 0 && existsSync39(target) && sha256File(target) !== baseSha) {
+    if (baseSha !== void 0 && existsSync40(target) && sha256File(target) !== baseSha) {
       throw new DaoyanCliError({ code: "story_conflict", message: `${kind} \u5DF2\u88AB\u5176\u5B83\u4FEE\u6539` });
     }
     const raw = requireRecord(readJsonInput(strFlag(parsed, "--file"), "--file <json|->"), kind);
@@ -21143,7 +21304,7 @@ async function storyShots(ctx2, args) {
     throw new DaoyanCliError({ code: "story_invalid", message: "\u62C6\u89E3\u4E0D\u5B58\u5728\uFF0C\u4E0D\u80FD\u5199\u5206\u955C" });
   }
   const baseSha = strFlag(parsed, "--base-sha256");
-  if (baseSha !== void 0 && existsSync39(context.shots_path) && sha256File(context.shots_path) !== baseSha) {
+  if (baseSha !== void 0 && existsSync40(context.shots_path) && sha256File(context.shots_path) !== baseSha) {
     throw new DaoyanCliError({ code: "story_conflict", message: "shots.json \u5DF2\u88AB\u5176\u5B83\u4FEE\u6539" });
   }
   const raw = requireRecord(readJsonInput(strFlag(parsed, "--file"), "--file <shots.json|->"), "shots");
@@ -21257,7 +21418,7 @@ async function storyMap(ctx2, args) {
     }
     const baseSha = strFlag(parsed, "--base-sha256");
     const file = storyMapPath(root, context.episode_id);
-    if (baseSha !== void 0 && existsSync39(file) && sha256File(file) !== baseSha) {
+    if (baseSha !== void 0 && existsSync40(file) && sha256File(file) !== baseSha) {
       throw new DaoyanCliError({ code: "story_conflict", message: "story-map.json \u5DF2\u88AB\u5176\u5B83\u4FEE\u6539" });
     }
     const shots = loadEpisodeShots(root, context.episode_id);
@@ -21839,6 +22000,40 @@ var init_registry = __esm({
         args: [{ name: "task_id", type: "string", required: true, description: "\u4EFB\u52A1 id" }],
         implemented: true,
         run: (ctx2, args) => runCancel(ctx2, args)
+      },
+      {
+        name: "run reassign",
+        group: "production",
+        summary: "\u628A\u672A\u5F52\u5C5E\uFF08legacy\uFF09\u7684 run \u8FC1\u5230\u67D0\u4E00\u96C6\u7684\u67D0\u4E2A\u955C\u5934\uFF0C\u4E4B\u540E\u624D\u80FD\u5B9A\u7A3F\u4E0E\u5408\u7247",
+        usage: "daoyan run reassign <run_id> --episode <id> [--shot <\u955C\u53F7>] [--source ai|user] [--json]",
+        args: [{ name: "run_id", type: "string", required: true, description: "\u8981\u8FC1\u79FB\u7684 run id" }],
+        flags: [
+          { name: "--episode", type: "string", required: true, description: "\u76EE\u6807\u5267\u96C6 id" },
+          {
+            name: "--shot",
+            type: "string",
+            description: "\u76EE\u6807\u955C\u53F7\uFF1B\u7701\u7565\u65F6\u4ECE\u539F label shot:<n> \u63A8\u5BFC"
+          },
+          { name: "--source", type: "ai|user", default: "ai", description: "\u64CD\u4F5C\u8005\u6765\u6E90\uFF08\u5199\u5165\u5BA1\u8BA1\u6BB5\uFF09" }
+        ],
+        detail: [
+          "run \u8BB0\u5F55\u9ED8\u8BA4\u4E0D\u53EF\u53D8\uFF1B\u8FD9\u662F\u552F\u4E00\u7684\u663E\u5F0F\u4F8B\u5916\uFF0C\u53EA\u6539 episode_id \u4E0E label\uFF0C\u5E76\u5199 reassigned \u5BA1\u8BA1\u6BB5\u3002",
+          "\u53EA\u8FC1\u79FB episode_id \u4E3A\u7A7A\u7684 run\uFF1B\u5DF2\u5F52\u5C5E\u67D0\u96C6\u7684\u8FD4\u56DE run_assigned\u3002",
+          "task \u8BB0\u5F55\u662F\u5386\u53F2\u6267\u884C\u4E8B\u5B9E\uFF0C\u4E0D\u6539\u5199\uFF1B\u547D\u4EE4\u4F1A\u5728 warnings \u91CC\u8BF4\u660E\u3002",
+          "\u8FC1\u79FB\u540E\u8BE5 run \u624D\u80FD\u88AB take finalize \u9009\u4E3A\u8BE5\u955C\u5B9A\u7A3F\u7A3F\u4EF6\u3002"
+        ],
+        implemented: true,
+        jsonShape: {
+          run_id: "string",
+          episode_id: "string|null",
+          label: "string",
+          changed: "boolean",
+          prior_label: "string|null",
+          prior_episode_id: "string|null",
+          warnings: "string[]",
+          next_actions: "string[]"
+        },
+        run: (ctx2, args) => runReassign(ctx2, args)
       },
       {
         name: "shot",

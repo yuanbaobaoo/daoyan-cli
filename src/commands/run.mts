@@ -1,12 +1,23 @@
 /** run —— 执行一个 workflow（异步 task；--wait 才阻塞）。
- *  Agent 默认拿到 task_id，用 status --task 观测；`run cancel` 显式取消。 */
+ *  Agent 默认拿到 task_id，用 status --task 观测；`run cancel` 显式取消；
+ *  `run reassign` 把未归属的 legacy run 迁到某一集某镜头。 */
 import { emitData } from "../shared/json.mts";
 import { say } from "../shared/log.mts";
 import type { CliContext } from "../shared/context.mts";
-import { parseJsonValue, splitInlineFlag, takeValue, usageError } from "../shared/args.mts";
+import {
+    parseFlags,
+    parseJsonValue,
+    requireFlag,
+    splitInlineFlag,
+    strFlag,
+    takeValue,
+    usageError,
+} from "../shared/args.mts";
 import { isHttpUrl } from "../shared/fs.mts";
 import { loadMachine, requireProject, resolveWorkflowRef } from "../core/project/config.mts";
 import { resolveEpisodeContext } from "../core/story/paths.mts";
+import { reassignRunToEpisode } from "../core/run/reassign.mts";
+import type { TakeSourceKind } from "../core/story/types.mts";
 import type { JsonValue } from "../core/project/types.mts";
 import { planSingleRun } from "../core/task/plans.mts";
 import { cancelTask, createAndStartTask, taskExitCode, taskRuns, waitForTask } from "../core/task/create.mts";
@@ -149,8 +160,9 @@ export function runWaitData(
  * run 命令入口。
  */
 export async function runRun(ctx: CliContext, args: string[]): Promise<number> {
-    // 防御：subcommand 未命中时也支持 run cancel
+    // 防御：subcommand 未命中时也支持 run cancel / run reassign
     if (args[0] === "cancel") return runCancel(ctx, args.slice(1));
+    if (args[0] === "reassign") return runReassign(ctx, args.slice(1));
 
     // 解析参数
     const flags = parseRunArgs(args);
@@ -296,6 +308,62 @@ export async function runCancel(ctx: CliContext, args: string[]): Promise<number
             say("取消请求已发送；查看：daoyan status --task " + task.task_id);
         }
     }
+    return 0;
+}
+
+/**
+ * run reassign <run_id> —— 把未归属的 legacy run 迁到某集某镜。
+ */
+export async function runReassign(ctx: CliContext, args: string[]): Promise<number> {
+    // 解析结果
+    const parsed = parseFlags(args, {
+        "--episode": "string",
+        "--shot": "string",
+        "--source": "string",
+    });
+    // run id
+    const runId = parsed.positionals[0];
+    if (runId === undefined || runId === "" || runId.startsWith("-")) {
+        usageError("缺少 run_id：daoyan run reassign <run_id> --episode <id> [--shot <镜号>]");
+    }
+    if (parsed.positionals.length > 1) usageError(`未知参数 ${parsed.positionals.slice(1).join(" ")}`);
+    // 来源
+    const source = strFlag(parsed, "--source") ?? "ai";
+    if (source !== "ai" && source !== "user") usageError("--source 必须是 ai|user");
+    const { root } = requireProject(ctx);
+    // 迁移结果
+    const result = reassignRunToEpisode({
+        root,
+        runId,
+        episodeId: requireFlag(parsed, "--episode"),
+        ...(strFlag(parsed, "--shot") !== undefined ? { shotId: strFlag(parsed, "--shot") as string } : {}),
+        by: source as TakeSourceKind,
+    });
+    // 数据信封
+    const data = {
+        run_id: result.record.run_id,
+        episode_id: result.record.episode_id ?? null,
+        label: result.label,
+        changed: result.changed,
+        prior_label: result.prior_label,
+        prior_episode_id: result.prior_episode_id,
+        warnings: result.warnings,
+        next_actions: result.changed ? [`daoyan take list --episode ${String(result.record.episode_id)} --json`] : [],
+    };
+    if (ctx.json) {
+        emitData(data);
+        return 0;
+    }
+    if (!result.changed) {
+        say(`run ${result.record.run_id} 已归属 ${result.label}，无需迁移`);
+        return 0;
+    }
+    say(
+        `run ${result.record.run_id} 归属迁移：${String(result.prior_label ?? "无 label")} / ${String(
+            result.prior_episode_id ?? "未归属",
+        )} → ${result.label}`,
+    );
+    for (const w of result.warnings) say(`注意：${w}`);
     return 0;
 }
 

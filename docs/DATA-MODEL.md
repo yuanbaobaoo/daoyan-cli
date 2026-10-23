@@ -405,6 +405,7 @@ story 模式额外字段：`episode_id`（legacy / 系列级为 `null`）。多�
 - `inputs.json` 记录逻辑输入与输入文件哈希；
 - 失败/取消的 run 同样落盘；
 - run 记录不可变，**不带定稿标记**；某条产出是否进入工作流只记录在 `takes.json`；
+- 唯一例外是 `run reassign`：把未归属（`episode_id: null`）的 run 挂到某集某镜，只改 `episode_id` 与 `label`，并追加 `reassigned { from_label, from_episode_id, at, by }` 审计段；`task.json` 不改写；
 - `gpu` 仅在 local 尝试接管时出现（平台不支持时 `takeover:false` 并继续任务）。
 
 ## 8. 机器锁与 GPU 租约（本机，不在仓库）

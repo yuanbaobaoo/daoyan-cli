@@ -74,8 +74,6 @@ const MIME_TYPES: Record<string, string> = {
 };
 // 默认 MIME
 const DEFAULT_MIME = "application/octet-stream";
-// 媒体缓存时间（秒）
-const MEDIA_CACHE_SECONDS = 31_536_000;
 // 路径分隔符
 const PATH_SEPARATOR = sep;
 // 文件名非法字符
@@ -179,7 +177,7 @@ export function resolveFinalMedia(root: string, name: string): MediaTarget | nul
         // 文件状态
         const stat = statSync(abs);
         if (!stat.isFile()) return null;
-        return makeTarget(abs, name, `"${stat.size}-${Math.floor(stat.mtimeMs)}"`);
+        return makeTarget(abs, name, `"${stat.size}-${stat.mtimeMs}"`);
     } catch {
         return null;
     }
@@ -203,7 +201,7 @@ export function resolveStoryMedia(root: string, relPath: string): MediaTarget | 
         // 文件状态
         const stat = statSync(abs);
         if (!stat.isFile()) return null;
-        return makeTarget(abs, basename(abs), `"${stat.size}-${Math.floor(stat.mtimeMs)}"`);
+        return makeTarget(abs, basename(abs), `"${stat.size}-${stat.mtimeMs}"`);
     } catch {
         return null;
     }
@@ -231,7 +229,7 @@ export function resolveEpisodeFinalMedia(root: string, episodeId: string, name: 
         // 文件状态
         const stat = statSync(abs);
         if (!stat.isFile()) return null;
-        return makeTarget(abs, name, `"${stat.size}-${Math.floor(stat.mtimeMs)}"`);
+        return makeTarget(abs, name, `"${stat.size}-${stat.mtimeMs}"`);
     } catch {
         return null;
     }
@@ -301,7 +299,7 @@ export async function serveMedia(
     // 公共响应头
     res.setHeader("Content-Type", target.content_type);
     res.setHeader("Accept-Ranges", "bytes");
-    res.setHeader("Cache-Control", `private, max-age=${MEDIA_CACHE_SECONDS}, immutable`);
+    res.setHeader("Cache-Control", "private, no-cache");
     res.setHeader("ETag", target.etag);
     // 下载文件名
     const filename = target.name.replace(UNSAFE_FILENAME_CHARS, "_");

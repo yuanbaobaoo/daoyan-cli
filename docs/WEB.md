@@ -2,10 +2,10 @@
 
 `daoyan web` 在项目内启动一个临时的本地 HTTP 服务，用浏览器查看项目状态、分镜、任务、工作流、run 产出物与 final 成片。
 
-它默认只查看，唯一的写能力是**镜头定稿**：
+它提供三类写操作：**确认剧本**、**生成 / 重新生成镜头**、**镜头定稿**：
 
-- 不启动 ComfyUI，不占 machine lock，不触发任何生成；
-- 分镜页每条视频稿件可直接「定稿 / 撤销定稿」，只写 `takes.json`；
+- 页面本身不启动 ComfyUI；生成操作会创建异步 task，由 detached worker 执行；
+- 剧集页可「确认剧本」；分镜卡可「生成 / 重新生成」；分镜页每条视频稿件可「定稿 / 撤销定稿」；
 - 默认只监听 `127.0.0.1`，端口由系统分配；
 - `Ctrl+C` / `SIGTERM` 关闭服务；
 - 前端资源内嵌在 `dist/cli.mjs`，不依赖 CDN 或外部静态目录。
@@ -107,6 +107,16 @@ GET /media/final/<episode>/<name>        单集成片
 
 AI 通过 `daoyan story map show --episode <id> --json` 获取同一份生成上下文，决定每镜的 workflow、`asset_slots`、`first_frame` 与 prompt，再用 `daoyan story shots set` 写回。
 
+### 实时更新
+
+服务运行期间持续扫描 `project.json` / `shots.json` / `story/` / `episodes/` / `workflows/` / `final/` 及 run / task 记录的时间戳，无需重启：
+
+- 变更通过 `GET /api/events`（SSE）推送 `revision` 事件，页面收到后热更新当前视图与顶栏；
+- `GET /api/revision` 返回当前版本号，供 SSE 不可用时轮询兜底；
+- 每个 API 请求都会重读磁盘上的 project / machine / shots，避免启动快照；
+- 参考图等媒体改为 `Cache-Control: private, no-cache` + ETag，同名文件替换后立即重新校验；
+- 任务进度：任务卡展示当前阶段、运行时长（每秒走动）与事件数；`tasks/*/events.jsonl` 追加事件会触发 SSE，展开详情自动跟随最新事件。
+
 legacy 项目继续使用原有 `/api/shots`、`/api/finals`、`/media/final/<name>`。
 
 ### legacy
@@ -173,15 +183,21 @@ legacy 项目继续使用原有 `/api/shots`、`/api/finals`、`/media/final/<na
 | GET/HEAD | `/media/final/:name` | 成片流 |
 | POST | `/api/takes/finalize` | 镜头定稿；body `{shot_id, run_id, output?, note?, episode_id?}` |
 | POST | `/api/takes/revoke` | 撤销定稿；body `{shot_id, episode_id?}` |
+| POST | `/api/script/approve` | 确认剧本；body `{episode_id}` |
+| POST | `/api/episodes/:id/shots/:shot_id/generate` | 生成 / 重拍镜头；body `{regenerate?: boolean}` |
+| POST | `/api/shots/generate` | legacy 镜头生成；body `{shot_id, regenerate?: boolean}` |
+| GET | `/api/events` | SSE 项目变更推送（`ready` / `revision`） |
+| GET | `/api/revision` | 当前项目版本号 |
 
-接受 `GET` / `HEAD` / `POST`，`Allow: GET, HEAD, POST`；POST 只用于上面两个定稿路径，其他路径返回 `405`。
+接受 `GET` / `HEAD` / `POST`，`Allow: GET, HEAD, POST`；POST 只用于上面的写接口，其他路径返回 `405`。
 
-定稿写接口的约束：
+写接口的约束：
 
 - 必须 `Content-Type: application/json`（跨源预检失败即被拒），请求体上限 64 KiB；
 - 带 `Origin` / `Referer` 时必须与请求 `Host` 同源；
 - 只接受白名单字段，稿件一律从 `run.json` 的 `outputs[]` 反查，**不接受任何文件路径**；
-- 校验与 CLI `take finalize` 同源（本镜本集、`succeeded`、视频产物、在工作区），失败按 `400/404` 返回错误信封与 `hint`。
+- 定稿校验与 CLI `take finalize` 同源；镜头生成会校验镜号、本机配置与剧情门禁，然后创建异步 task；
+- 失败按 `400/404/409` 返回错误信封与 `hint`。
 
 ### 媒体 Range
 
@@ -205,17 +221,18 @@ Range: bytes=-500
 - 媒体 URL 不能直接映射文件系统路径：必须先命中 `run.json` 的 `outputs[]` 或 `final/` 目录；
 - 解析后的 `realpath` 必须仍在允许目录内，阻止符号链接逃逸；
 - loopback 监听时校验 `Host` 头，降低 DNS rebinding 风险；
-- 不开放 CORS；写能力只有镜头定稿，且要求 JSON 内容类型 + 同源 `Origin`；
+- 不开放 CORS；写接口（定稿 / 确认剧本 / 镜头生成）均要求 JSON 内容类型 + 同源 `Origin`；
 - 响应带 `Content-Security-Policy`、`X-Content-Type-Options`、`Referrer-Policy`、`X-Frame-Options`；
 - API 不返回绝对路径；异常只写 stderr，不回传堆栈。
 
 ## 5. 数据与限制
 
-- 只读读取 `project.json`、`.dycli/machine.json`、`shots.json`、`workflows/`、`tasks/`、`runs/`、`final/`、`takes.json`；
+- 读取 `project.json`、`.dycli/machine.json`、`shots.json`、`workflows/`、`tasks/`、`runs/`、`final/`、`takes.json`；
+- 写操作只有：定稿台账、确认剧本、单个镜头的生成 / 重拍 task；
 - 单个损坏的 `run.json` / `task.json` / manifest 会被跳过，不会拖垮列表；
 - 文件缺失或 Git LFS pointer 会在页面标记，并提示 `git lfs pull`；
-- 前端轮询刷新（2–15 秒，按页面），页面隐藏时暂停；
-- 不提供网页触发 `run` / `retake` / `batch` / `run cancel`；这些操作仍走 CLI。页面定稿也只写定稿台账，不触发任何生成。
+- 项目源文件与任务事件通过 SSE 实时推送，前端同时保留 2–15 秒轮询兜底；
+- 不提供网页触发 `batch` / `run cancel`；这些操作仍走 CLI。
 
 ## 6. 故障排查
 

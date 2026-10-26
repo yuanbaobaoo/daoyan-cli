@@ -52,6 +52,15 @@ const BLOCKER = "blocker";
 const WARNING = "warning";
 // run 媒体前缀
 const RUN_MEDIA_PREFIX = "/media/run";
+
+/**
+ * run 产物媒体地址（带内容版本）。
+ */
+function runMediaUrl(runId: string, name: string, version: string): string {
+    // 基础地址
+    const url = `${RUN_MEDIA_PREFIX}/${encodeURIComponent(runId)}/${encodeURIComponent(name)}`;
+    return version !== "" ? `${url}?v=${encodeURIComponent(version)}` : url;
+}
 // 最多展示的节点类名
 const MAX_NODE_CLASSES = 20;
 // 视频扩展名
@@ -1254,11 +1263,14 @@ function assetRefOf(root: string, asset: StoryAsset): StoryMapAssetRef {
     let bytes = asset.bytes;
     // LFS pointer
     let lfsPointer = false;
+    // 媒体版本（同名文件替换后换 URL）
+    let version: string = asset.sha256;
     if (present) {
         try {
             // 文件状态
             const stat = statSync(abs);
             bytes = stat.size;
+            version = `${stat.size}-${stat.mtimeMs}`;
             lfsPointer = isLfsPointerFile(abs);
         } catch {
             // 保留记录值
@@ -1268,7 +1280,7 @@ function assetRefOf(root: string, asset: StoryAsset): StoryMapAssetRef {
         id: asset.id,
         role: asset.role ?? null,
         path: asset.path,
-        media_url: storyMediaUrl(asset.path),
+        media_url: storyMediaUrl(asset.path, version),
         present,
         lfs_pointer: lfsPointer,
         width: asset.width ?? null,
@@ -2498,7 +2510,7 @@ function buildRenderIndex(root: string, episodeId: string): Map<string, StoryMap
             latest_outputs: (latest?.outputs ?? []).map((output) => ({
                 name: output.name,
                 kind: outputKind(output.name),
-                media_url: `${RUN_MEDIA_PREFIX}/${encodeURIComponent(latest?.run_id ?? "")}/${encodeURIComponent(output.name)}`,
+                media_url: runMediaUrl(latest?.run_id ?? "", output.name, output.sha256),
                 bytes: output.bytes,
             })),
             finalized_run_id: finalized?.run_id ?? null,
@@ -2508,7 +2520,7 @@ function buildRenderIndex(root: string, episodeId: string): Map<string, StoryMap
                           {
                               name: finalizedOutput.name,
                               kind: outputKind(finalizedOutput.name),
-                              media_url: `${RUN_MEDIA_PREFIX}/${encodeURIComponent(finalized.run_id)}/${encodeURIComponent(finalizedOutput.name)}`,
+                              media_url: runMediaUrl(finalized.run_id, finalizedOutput.name, finalizedOutput.sha256),
                               bytes: finalizedOutput.bytes,
                           },
                       ]

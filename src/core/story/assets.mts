@@ -34,12 +34,17 @@ const STORY_MEDIA_PREFIX = "/media/story";
 /**
  * story 资产媒体地址。
  */
-export function storyMediaUrl(path: string): string {
+export function storyMediaUrl(path: string, version?: string | null): string {
     // 资产根前缀
     const prefix = `${STORY_ASSETS_DIR}/`;
     // owner 相对路径
     const rel = path.startsWith(prefix) ? path.slice(prefix.length) : path;
-    return `${STORY_MEDIA_PREFIX}/${rel.split("/").map(encodeURIComponent).join("/")}`;
+    // 基础地址
+    const url = `${STORY_MEDIA_PREFIX}/${rel.split("/").map(encodeURIComponent).join("/")}`;
+    // 内容版本（同名文件替换后强制换 URL）
+    return version !== undefined && version !== null && version !== ""
+        ? `${url}?v=${encodeURIComponent(version)}`
+        : url;
 }
 
 /**

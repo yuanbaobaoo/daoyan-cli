@@ -1,7 +1,7 @@
 /** Web story 模式：系列 / 剧集 API、设定资产与媒体白名单。 */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startWebServer } from "../src/core/web/server.mts";
@@ -135,11 +135,19 @@ test("web story：系列 / 剧集 / 设定资产 / 媒体", async () => {
             data: { items: Array<{ forms: Array<{ assets: Array<{ media_url: string }> }> }> };
         };
         const mediaUrl = charactersData.data.items[0]?.forms[0]?.assets[0]?.media_url;
-        assert.match(String(mediaUrl), /^\/media\/story\/characters\/lin\/default\/front\.png$/);
+        assert.match(String(mediaUrl), /^\/media\/story\/characters\/lin\/default\/front\.png(\?|$)/);
         // 媒体
         const media = await fetch(`${handle.url}${String(mediaUrl)}`);
         assert.equal(media.status, 200);
         assert.equal(media.headers.get("content-type"), "image/png");
+        // 可重验证：同名图片替换后浏览器会重新校验
+        assert.match(String(media.headers.get("cache-control")), /no-cache/);
+        const etag = media.headers.get("etag");
+        assert.ok(etag);
+        const revalidated = await fetch(`${handle.url}${String(mediaUrl)}`, {
+            headers: { "If-None-Match": String(etag) },
+        });
+        assert.equal(revalidated.status, 304);
         // 穿越
         const traversal = await fetch(`${handle.url}/media/story/..%2F..%2Fproject.json`);
         assert.notEqual(traversal.status, 200);
@@ -240,11 +248,14 @@ test("web story：镜头卡参考图与 workflow 槽位", async () => {
         assert.equal(references[0]?.slot, "hero");
         assert.equal(references[0]?.target, "10.image");
         assert.equal(references[0]?.status, "ready");
-        assert.match(String(references[0]?.asset?.media_url), /^\/media\/story\/characters\/lin\/default\/front\.png$/);
+        assert.match(
+            String(references[0]?.asset?.media_url),
+            /^\/media\/story\/characters\/lin\/default\/front\.png(\?|$)/,
+        );
         assert.equal(references[1]?.kind, "scene");
         assert.equal(references[1]?.slot, "scene");
         assert.equal(references[1]?.target, "20.image");
-        assert.match(String(references[1]?.asset?.media_url), /^\/media\/story\/scenes\/city\/establishing\.png$/);
+        assert.match(String(references[1]?.asset?.media_url), /^\/media\/story\/scenes\/city\/establishing\.png(\?|$)/);
         // 移除槽位后：有图但未接入
         rmSync(assetsFile);
         const unwired = await fetch(`${handle.url}/api/episodes/ep01`);
@@ -267,6 +278,49 @@ test("web story：镜头卡参考图与 workflow 槽位", async () => {
             unwiredRefs.every((ref) => ref.asset?.present === true),
             true,
         );
+    } finally {
+        await handle.close();
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("web story：确认剧本", async () => {
+    const root = fixture();
+    // 改回待确认
+    const scriptFile = join(root, "episodes", "ep01", "script.json");
+    const meta = JSON.parse(readFileSync(scriptFile, "utf8")) as Record<string, unknown>;
+    writeFileSync(scriptFile, JSON.stringify({ ...meta, status: "draft", approved_at: null }, null, 2) + "\n");
+    const project: ProjectConfig = { name: "story-web", version: 2 };
+    const handle = await startWebServer({
+        root,
+        project,
+        machine: null,
+        shots: null,
+        commands: [],
+        assets: { index_html: "<!doctype html>", app_js: "", style_css: "" },
+    });
+    try {
+        // 跨源拒绝
+        const crossOrigin = await fetch(`${handle.url}/api/script/approve`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Origin: "http://evil.example" },
+            body: JSON.stringify({ episode_id: "ep01" }),
+        });
+        assert.equal(crossOrigin.status, 403);
+        // 确认
+        const approved = await fetch(`${handle.url}/api/script/approve`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ episode_id: "ep01" }),
+        });
+        assert.equal(approved.status, 200);
+        const approvedData = (await approved.json()) as { data: { script: { status: string; approved_at: string } } };
+        assert.equal(approvedData.data.script.status, "approved");
+        assert.equal(typeof approvedData.data.script.approved_at, "string");
+        // 剧集视图同步
+        const detail = await fetch(`${handle.url}/api/episodes/ep01`);
+        const detailData = (await detail.json()) as { data: { script: { meta: { status: string } } } };
+        assert.equal(detailData.data.script.meta.status, "approved");
     } finally {
         await handle.close();
         rmSync(root, { recursive: true, force: true });

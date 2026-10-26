@@ -1,6 +1,6 @@
 /** web —— 启动 Web UI，查看项目状态、分镜、任务与产出物，并可定稿镜头。
  *  - 默认 127.0.0.1 + 系统分配端口；Ctrl+C / SIGTERM 优雅关闭；
- *  - 不启动引擎、不占 machine lock、不触发任何生成；唯一写入是镜头定稿台账；
+ *  - 默认不启动引擎、不占 machine lock；可确认剧本、创建镜头生成任务与定稿；
  *  - --json 输出一次启动信封后继续驻留，后续日志走 stderr。 */
 import { spawn } from "node:child_process";
 import { DaoyanCliError } from "../shared/errors.mts";

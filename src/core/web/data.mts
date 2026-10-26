@@ -293,6 +293,32 @@ export interface WebRunDetail extends WebRunSummary {
 }
 
 /**
+ * 任务实时进度。
+ */
+export interface WebTaskProgress {
+    /**
+     * 最近事件类型（无事件时回退 task.status）。
+     */
+    phase: string;
+    /**
+     * 阶段展示文案。
+     */
+    label: string;
+    /**
+     * 当前 run id（事件带有时）。
+     */
+    run_id: string | null;
+    /**
+     * 事件总数（最大 seq）。
+     */
+    event_count: number;
+    /**
+     * 最近事件时间。
+     */
+    updated_at: string | null;
+}
+
+/**
  * 任务列表项。
  */
 export interface WebTaskItem {
@@ -360,6 +386,10 @@ export interface WebTaskItem {
      * 是否仍在运行。
      */
     active: boolean;
+    /**
+     * 实时进度。
+     */
+    progress: WebTaskProgress;
 }
 
 /**
@@ -537,6 +567,28 @@ export interface WebShotReference {
 }
 
 /**
+ * 镜头当前活动任务。
+ */
+export interface WebShotActiveTask {
+    /**
+     * task id。
+     */
+    task_id: string;
+    /**
+     * 任务类型。
+     */
+    kind: TaskRecord["kind"];
+    /**
+     * 任务状态。
+     */
+    status: TaskRecord["status"];
+    /**
+     * 当前阶段文案。
+     */
+    label: string;
+}
+
+/**
  * 镜头展示项。
  */
 export interface WebShotItem {
@@ -668,6 +720,10 @@ export interface WebShotItem {
      * 参考图 / 参考音频（story 模式解析 workflow 槽位后填充）。
      */
     references?: WebShotReference[];
+    /**
+     * 当前活动任务（生成 / 重拍中）。
+     */
+    active_task?: WebShotActiveTask | null;
 }
 
 /**
@@ -927,6 +983,21 @@ function isLfsPointer(file: string, size: number): boolean {
 }
 
 /**
+ * 追加媒体版本参数（同名文件替换后强制换 URL）。
+ */
+export function withMediaVersion(url: string, version: string | null | undefined): string {
+    if (version === undefined || version === null || version === "") return url;
+    return `${url}${url.includes("?") ? "&" : "?"}v=${encodeURIComponent(version)}`;
+}
+
+/**
+ * 媒体下载地址。
+ */
+export function mediaDownloadUrl(url: string): string {
+    return `${url}${url.includes("?") ? "&" : "?"}download=1`;
+}
+
+/**
  * run 产物媒体地址。
  */
 function runMediaUrl(runId: string, name: string): string {
@@ -959,18 +1030,21 @@ function artifactOf(root: string, run: RunRecord, output: RunOutput): WebArtifac
     let bytes = output.bytes;
     // LFS pointer 标记
     let lfsPointer = false;
+    // 媒体版本
+    let version: string = output.sha256;
     if (present) {
         try {
             // 文件状态
             const stat = statSync(abs);
             bytes = stat.size;
+            version = `${stat.size}-${stat.mtimeMs}`;
             lfsPointer = isLfsPointer(abs, stat.size);
         } catch {
             // stat 失败按记录值展示
         }
     }
     // 媒体地址
-    const mediaUrl = runMediaUrl(run.run_id, output.name);
+    const mediaUrl = withMediaVersion(runMediaUrl(run.run_id, output.name), version);
     return {
         run_id: run.run_id,
         name: output.name,
@@ -981,7 +1055,7 @@ function artifactOf(root: string, run: RunRecord, output: RunOutput): WebArtifac
         present,
         lfs_pointer: lfsPointer,
         media_url: mediaUrl,
-        download_url: `${mediaUrl}?download=1`,
+        download_url: mediaDownloadUrl(mediaUrl),
     };
 }
 
@@ -1208,10 +1282,60 @@ export function listRunsView(root: string, episodeId?: string): WebRunSummary[] 
         .map((r) => runSummaryDto(root, r));
 }
 
+// 任务阶段文案
+const TASK_PHASE_LABELS: Record<string, string> = {
+    queued: "排队中",
+    worker_started: "已领取任务",
+    machine_lock_acquired: "已获取机器锁",
+    engine_starting: "引擎启动中",
+    engine_started: "引擎已启动",
+    engine_ready: "引擎就绪",
+    gpu_takeover_started: "GPU 接管中",
+    gpu_takeover_finished: "GPU 接管完成",
+    run_started: "开始执行",
+    upload_started: "上传输入",
+    upload_finished: "输入已上传",
+    submitted: "已提交引擎",
+    progress: "生成中",
+    run_succeeded: "镜头成功",
+    run_failed: "镜头失败",
+    cleanup_started: "清理中",
+    cleanup_finished: "清理完成",
+    cancel_requested: "正在取消",
+    finished: "已结束",
+};
+
+/**
+ * 从事件流推导任务进度。
+ */
+function taskProgressOf(root: string, rec: TaskRecord): WebTaskProgress {
+    // 事件
+    let events: TaskEvent[] = [];
+    try {
+        events = readEvents(taskDir(root, rec.task_id));
+    } catch {
+        events = [];
+    }
+    // 最近事件
+    const latest = events[events.length - 1] ?? null;
+    // 阶段
+    const phase = latest?.type ?? rec.status;
+    return {
+        phase,
+        label: TASK_PHASE_LABELS[phase] ?? phase,
+        run_id:
+            latest !== null && typeof latest.data.run_id === "string" && latest.data.run_id !== ""
+                ? latest.data.run_id
+                : null,
+        event_count: latest?.seq ?? 0,
+        updated_at: latest?.ts ?? null,
+    };
+}
+
 /**
  * 任务列表项。
  */
-function taskItem(rec: TaskRecord): WebTaskItem {
+function taskItem(root: string, rec: TaskRecord): WebTaskItem {
     return {
         task_id: rec.task_id,
         kind: rec.kind,
@@ -1229,6 +1353,7 @@ function taskItem(rec: TaskRecord): WebTaskItem {
         next_actions: rec.next_actions,
         run_count: rec.runs.length,
         active: !isTerminalStatus(rec.status),
+        progress: taskProgressOf(root, rec),
     };
 }
 
@@ -1240,7 +1365,7 @@ export function listTasksView(root: string, episodeId?: string): { items: WebTas
     const tasks = safeListTasks(root).filter(
         (t) => episodeId === undefined || episodeId === "" || t.episode_id === episodeId,
     );
-    return { items: tasks.map(taskItem), total: tasks.length };
+    return { items: tasks.map((task) => taskItem(root, task)), total: tasks.length };
 }
 
 /**
@@ -1262,7 +1387,7 @@ export function getTaskDetail(root: string, taskId: string): WebTaskDetail | nul
     } catch {
         events = [];
     }
-    return { ...taskItem(task), runs_detail: runs, events };
+    return { ...taskItem(root, task), runs_detail: runs, events };
 }
 
 /**
@@ -1511,6 +1636,14 @@ export function buildShotsView(
     seedEntities(sceneMap, sceneDefs);
     // 全部 run
     const runs = safeListRuns(root);
+    // 活动任务（镜头生成 / 重拍中）
+    const activeTaskByShot = new Map<string, TaskRecord>();
+    const episodeId = context?.episode_id ?? null;
+    for (const task of safeListTasks(root)) {
+        if (isTerminalStatus(task.status)) continue;
+        if ((task.episode_id ?? null) !== episodeId) continue;
+        for (const shotId of task.options.shots ?? []) activeTaskByShot.set(shotId, task);
+    }
     // label -> runs
     const byLabel = new Map<string, RunRecord[]>();
     for (const run of runs) {
@@ -1590,6 +1723,8 @@ export function buildShotsView(
         for (const item of artifacts) {
             item.finalized = item.run_id === finalizedRun && item.output.name === finalizedOutput;
         }
+        // 活动任务
+        const activeTask = activeTaskByShot.get(shot.id) ?? null;
         return {
             id: shot.id,
             slug: shot.slug ?? null,
@@ -1622,6 +1757,15 @@ export function buildShotsView(
             cfg: shot.cfg ?? shots.defaults.cfg ?? null,
             notes: shot.notes ?? null,
             params: shot.params ?? null,
+            active_task:
+                activeTask !== null
+                    ? {
+                          task_id: activeTask.task_id,
+                          kind: activeTask.kind,
+                          status: activeTask.status,
+                          label: taskProgressOf(root, activeTask).label,
+                      }
+                    : null,
         };
     });
     // 人物聚合
@@ -1691,7 +1835,7 @@ export function listFinals(root: string, episodeId?: string): WebFinalItem[] {
             // 文件状态
             const stat = statSync(join(dir, cut));
             // 媒体地址
-            const mediaUrl = finalMediaUrl(cut, episodeId);
+            const mediaUrl = withMediaVersion(finalMediaUrl(cut, episodeId), `${stat.size}-${stat.mtimeMs}`);
             // 片段列表
             const clips = Array.isArray(manifest.clips)
                 ? manifest.clips
@@ -1707,7 +1851,7 @@ export function listFinals(root: string, episodeId?: string): WebFinalItem[] {
                 name: cut,
                 manifest: entry.name,
                 media_url: mediaUrl,
-                download_url: `${mediaUrl}?download=1`,
+                download_url: mediaDownloadUrl(mediaUrl),
                 bytes: stat.size,
                 present: true,
                 lfs_pointer: isLfsPointer(join(dir, cut), stat.size),
@@ -1727,13 +1871,13 @@ export function listFinals(root: string, episodeId?: string): WebFinalItem[] {
             // 文件状态
             const stat = statSync(join(dir, entry.name));
             // 媒体地址
-            const mediaUrl = finalMediaUrl(entry.name, episodeId);
+            const mediaUrl = withMediaVersion(finalMediaUrl(entry.name, episodeId), `${stat.size}-${stat.mtimeMs}`);
             out.push({
                 episode_id: episodeId !== undefined && episodeId !== "" ? episodeId : null,
                 name: entry.name,
                 manifest: null,
                 media_url: mediaUrl,
-                download_url: `${mediaUrl}?download=1`,
+                download_url: mediaDownloadUrl(mediaUrl),
                 bytes: stat.size,
                 present: true,
                 lfs_pointer: isLfsPointer(join(dir, entry.name), stat.size),
@@ -1880,7 +2024,7 @@ function buildSharedOverview(root: string, project: ProjectConfig, shots: ShotsF
         active_task: null,
         active_tasks: [],
         synced_running_tasks: [],
-        recent_tasks: tasks.slice(0, 10).map(taskItem),
+        recent_tasks: tasks.slice(0, 10).map((task) => taskItem(root, task)),
         gpu: null,
         skill: null,
         shots: storyFields === null ? shotProgress(root, shots, resolveEpisodeContext(root)) : [],
@@ -1954,7 +2098,7 @@ export async function buildOverview(
         next_actions: storyFields !== null ? storyFields.story.next_actions : base.next_actions,
         stats: storyFields !== null ? withStoryStats(stats, storyFields.story) : stats,
         recent_artifacts: flattenArtifacts(root, runs).slice(0, OVERVIEW_ARTIFACT_LIMIT),
-        recent_tasks: tasks.slice(0, 10).map(taskItem),
+        recent_tasks: tasks.slice(0, 10).map((task) => taskItem(root, task)),
         generated_at: nowIso(),
     };
 }

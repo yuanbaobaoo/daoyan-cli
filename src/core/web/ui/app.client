@@ -1,5 +1,5 @@
 /* daoyan web 客户端 —— 原生 JS 单页应用，无构建依赖。
- * 数据来自同源 API；唯一的写操作是镜头定稿（POST /api/takes/*）。
+ * 数据来自同源 API；写操作只有镜头定稿、确认剧本与创建镜头生成任务。
  * DOM 文本统一用 textContent，避免提示词等字段注入 HTML。 */
 
 // 页面视图
@@ -171,6 +171,12 @@ let lastSignature = "";
 let requestController = null;
 // 轮询定时器
 let pollTimer = null;
+// 项目变更订阅
+let projectEvents = null;
+// 最近一次项目版本
+let projectRevision = null;
+// 变更刷新防抖定时器
+let revisionRefreshTimer = null;
 // 当前产物筛选
 let artifactFilters = { label: "", status: "", kind: "", search: "" };
 // 当前分镜筛选
@@ -189,6 +195,8 @@ let mapBlockedOnly = false;
 let openTaskId = null;
 // 任务详情缓存
 const taskDetailCache = new Map();
+// 收到项目变更后强制刷新展开的任务详情
+let taskDetailRefresh = false;
 // 播放列表
 let playerItems = [];
 // 播放索引
@@ -204,6 +212,8 @@ let navRoot = null;
 let viewRoot = null;
 // 项目名元素
 let projectNameEl = null;
+// 侧栏项目名元素
+let brandProjectEl = null;
 // 模式元素
 let modeEl = null;
 // 连接状态元素
@@ -276,6 +286,21 @@ function formatDuration(ms) {
     // 余数秒
     const rest = seconds % 60;
     return rest === 0 ? `${minutes} 分` : `${minutes} 分 ${rest} 秒`;
+}
+
+/**
+ * 刷新任务运行时长（每秒调用）。
+ */
+function tickTaskElapsed() {
+    for (const node of document.querySelectorAll("[data-task-elapsed]")) {
+        // 开始时间
+        const started = Date.parse(node.dataset.started ?? "");
+        if (Number.isNaN(started)) continue;
+        // 结束时间（未结束则用当前时间）
+        const finishedRaw = node.dataset.finished ?? "";
+        const finished = finishedRaw === "" ? Date.now() : Date.parse(finishedRaw);
+        node.textContent = `已运行 ${formatDuration(Math.max(0, (Number.isNaN(finished) ? Date.now() : finished) - started))}`;
+    }
 }
 
 /**
@@ -421,12 +446,12 @@ function renderShell() {
             <aside class="sidebar">
                 <div class="brand">
                     <div class="brand-mark"><span class="brand-dot"></span>daoyan web</div>
-                    <p class="brand-sub">项目查看器 · 可定稿镜头</p>
+                    <p id="brand-project" class="brand-sub" hidden></p>
                 </div>
                 <nav id="nav" class="nav" aria-label="页面导航"></nav>
                 <div class="sidebar-foot">
                     <code>Ctrl+C</code> 停止服务<br />
-                    数据来自当前项目目录；仅镜头定稿会写回 takes.json。
+                    数据来自当前项目目录；可确认剧本、生成镜头与定稿。
                 </div>
             </aside>
             <main class="main">
@@ -450,6 +475,7 @@ function renderShell() {
     navRoot = document.querySelector("#nav");
     viewRoot = document.querySelector("#view");
     projectNameEl = document.querySelector("#project-name");
+    brandProjectEl = document.querySelector("#brand-project");
     modeEl = document.querySelector("#project-mode");
     connectionEl = document.querySelector("#connection");
     updatedEl = document.querySelector("#updated-at");
@@ -500,6 +526,19 @@ function setConnection(state, text) {
 }
 
 /**
+ * 设置页面标题与侧栏项目名。
+ */
+function setProjectName(name) {
+    // 清洗后的名称
+    const value = typeof name === "string" ? name.trim() : "";
+    document.title = value === "" ? "daoyan web" : value;
+    if (brandProjectEl !== null) {
+        brandProjectEl.textContent = value;
+        brandProjectEl.hidden = value === "";
+    }
+}
+
+/**
  * 加载顶栏项目信息（不探测引擎）。
  */
 async function loadHeader() {
@@ -507,6 +546,7 @@ async function loadHeader() {
         // 健康检查数据
         const data = await requestJson("/api/health");
         if (projectNameEl !== null && typeof data.project === "string") projectNameEl.textContent = data.project;
+        setProjectName(data.project);
         if (modeEl !== null) modeEl.textContent = data.mode === null ? "未绑定本机" : data.mode;
     } catch {
         // 顶栏失败不影响页面主体
@@ -549,6 +589,7 @@ async function reloadView() {
 function updateHeader(data) {
     if (projectNameEl !== null && data !== null && data.project !== undefined && data.project.name !== undefined) {
         projectNameEl.textContent = data.project.name;
+        setProjectName(data.project.name);
     }
     if (modeEl !== null && data !== null && data.mode !== undefined) {
         modeEl.textContent = data.mode === null ? "未绑定本机" : data.mode;
@@ -703,6 +744,52 @@ function onHashChange() {
     renderLoading();
     void loadCurrent();
     schedulePoll();
+}
+
+/**
+ * 从 SSE 事件里取版本号。
+ */
+function revisionFromEvent(event) {
+    try {
+        // 事件数据
+        const data = JSON.parse(event.data);
+        return typeof data.revision === "number" ? data.revision : null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * 项目发生变化：重载顶栏与当前视图。
+ */
+function onProjectRevision(revision) {
+    if (revision === null || revision === projectRevision) return;
+    projectRevision = revision;
+    taskDetailRefresh = true;
+    if (!loaded) return;
+    if (revisionRefreshTimer !== null) window.clearTimeout(revisionRefreshTimer);
+    revisionRefreshTimer = window.setTimeout(() => {
+        revisionRefreshTimer = null;
+        void loadHeader();
+        void loadCurrent();
+    }, 120);
+}
+
+/**
+ * 订阅项目变更（SSE；失败时保留定时轮询兜底）。
+ */
+function connectProjectEvents() {
+    if (typeof EventSource === "undefined") return;
+    if (projectEvents !== null) projectEvents.close();
+    projectEvents = new EventSource("/api/events");
+    projectEvents.addEventListener("ready", (event) => {
+        // 建立基线，不触发首屏重载
+        const revision = revisionFromEvent(event);
+        if (revision !== null) projectRevision = revision;
+    });
+    projectEvents.addEventListener("revision", (event) => {
+        onProjectRevision(revisionFromEvent(event));
+    });
 }
 
 /**
@@ -913,9 +1000,39 @@ function renderEpisode(data) {
     // 剧情图谱
     viewRoot.append(renderStoryMap(data.map));
     // 剧本
+    const scriptMeta = data.script.meta ?? {};
+    const scriptApproved = scriptMeta.status === "approved";
     const scriptHead = createElement("div", "section-head");
     scriptHead.append(createElement("h3", "section-title", "剧本"));
-    scriptHead.append(createElement("span", "section-meta", `r${data.script.meta.revision}`));
+    const scriptActions = createElement("div", "section-actions");
+    scriptActions.append(
+        createElement(
+            "span",
+            "section-meta",
+            scriptMeta.revision > 0 ? `r${scriptMeta.revision} · ${scriptApproved ? "已确认" : "待确认"}` : "尚未同步",
+        ),
+    );
+    if (!scriptApproved && scriptMeta.revision > 0) {
+        // 确认剧本
+        const approve = createElement("button", "button", "确认剧本");
+        approve.type = "button";
+        approve.addEventListener("click", async () => {
+            if (approve.disabled) return;
+            approve.disabled = true;
+            approve.textContent = "确认中…";
+            try {
+                await postJson("/api/script/approve", { episode_id: episode.id });
+                showToast("剧本已确认");
+                await reloadView();
+            } catch (error) {
+                showToast(error instanceof Error ? error.message : "确认失败", true);
+                approve.disabled = false;
+                approve.textContent = "确认剧本";
+            }
+        });
+        scriptActions.append(approve);
+    }
+    scriptHead.append(scriptActions);
     viewRoot.append(scriptHead);
     const script = createElement(
         "pre",
@@ -2965,6 +3082,20 @@ function renderPromptText(shot) {
 }
 
 /**
+ * 请求生成 / 重新生成镜头。
+ */
+async function requestShotGeneration(shot, regenerate) {
+    // story 模式按集提交；legacy 走根分镜
+    if (currentEpisodeId !== null) {
+        return postJson(
+            `/api/episodes/${encodeURIComponent(currentEpisodeId)}/shots/${encodeURIComponent(shot.id)}/generate`,
+            { regenerate },
+        );
+    }
+    return postJson("/api/shots/generate", { shot_id: shot.id, regenerate });
+}
+
+/**
  * 单个分镜卡片。
  */
 function renderShotCard(shot) {
@@ -3019,6 +3150,46 @@ function renderShotCard(shot) {
     meta.append(createElement("span", "", shot.workflow ?? "默认 workflow"));
     meta.append(createElement("span", "", `${shot.runs_count} run / ${shot.succeeded_count} 成功`));
     card.append(meta);
+
+    // 生成 / 重新生成
+    const activeTask = shot.active_task ?? null;
+    const running = activeTask !== null || shot.latest_status === "running" || shot.latest_status === "queued";
+    const regenerate = shot.done === true;
+    const actions = createElement("div", "card-actions shot-actions");
+    const generate = createElement(
+        "button",
+        "button",
+        running ? (activeTask !== null ? `${activeTask.label}…` : "生成中…") : regenerate ? "重新生成" : "生成",
+    );
+    generate.type = "button";
+    generate.disabled = running;
+    if (running) generate.title = activeTask !== null ? `任务 ${activeTask.task_id}` : "已有镜头在生成";
+    generate.addEventListener("click", async () => {
+        if (generate.disabled) return;
+        if (regenerate && !window.confirm(`重新生成镜头 ${shot.id}？会创建新的拍摄任务。`)) return;
+        generate.disabled = true;
+        const label = generate.textContent;
+        generate.textContent = "提交中…";
+        try {
+            const data = await requestShotGeneration(shot, regenerate);
+            showToast(`已创建任务 ${shortId(data.task_id ?? "")}`);
+            await reloadView();
+        } catch (error) {
+            showToast(error instanceof Error ? error.message : "创建任务失败", true);
+            generate.disabled = false;
+            generate.textContent = label;
+        }
+    });
+    actions.append(generate);
+    if (activeTask !== null) {
+        const progressLink = createElement("button", "button ghost", "查看任务");
+        progressLink.type = "button";
+        progressLink.addEventListener("click", () => {
+            window.location.hash = `${HASH_PREFIX}tasks`;
+        });
+        actions.append(progressLink);
+    }
+    card.append(actions);
 
     // 完整提示词
     const promptDetails = createElement("details", "shot-prompt");
@@ -3496,6 +3667,7 @@ function renderTasks(data) {
         return;
     }
     viewRoot.append(renderTaskList(tasks));
+    tickTaskElapsed();
 }
 
 /**
@@ -3549,6 +3721,39 @@ function renderTaskCard(task) {
     }
     card.append(meta);
 
+    // 实时进度
+    const progress = task.progress;
+    if (progress !== null && progress !== undefined) {
+        // 进度容器
+        const block = createElement("div", "task-progress");
+        // 一行摘要
+        const line = createElement("div", "task-progress-line");
+        if (task.active === true) line.append(createElement("span", "task-pulse"));
+        line.append(createElement("span", "task-progress-label", progress.label ?? "—"));
+        if (progress.run_id !== null && progress.run_id !== undefined) {
+            line.append(createElement("code", "mono task-progress-run", shortId(progress.run_id)));
+        }
+        // 运行时长（每秒刷新）
+        const elapsed = createElement("span", "task-progress-elapsed", "");
+        elapsed.dataset.taskElapsed = "1";
+        const started = task.started_at ?? task.created_at;
+        if (started !== null && started !== undefined) elapsed.dataset.started = started;
+        if (task.active !== true) {
+            const finished = task.finished_at ?? progress.updated_at;
+            if (finished !== null && finished !== undefined) elapsed.dataset.finished = finished;
+        }
+        line.append(elapsed);
+        line.append(createElement("span", "muted", `${progress.event_count ?? 0} 个事件`));
+        block.append(line);
+        // 活动任务显示流动进度条
+        if (task.active === true) {
+            const bar = createElement("div", "task-progress-bar");
+            bar.append(createElement("span"));
+            block.append(bar);
+        }
+        card.append(block);
+    }
+
     // 详情容器
     const detail = createElement("div", "task-detail");
     detail.hidden = openTaskId !== task.task_id;
@@ -3576,20 +3781,26 @@ function renderTaskCard(task) {
 async function loadTaskDetail(taskId, container) {
     if (container === null) return;
     container.hidden = false;
-    container.textContent = "加载中…";
     // 缓存项
     const cached = taskDetailCache.get(taskId);
-    if (cached !== undefined && Date.now() - cached.at < TASK_DETAIL_CACHE_MS) {
+    const force = taskDetailRefresh;
+    // 有缓存且无需强制刷新：直接复用
+    if (cached !== undefined && !force && Date.now() - cached.at < TASK_DETAIL_CACHE_MS) {
         renderTaskDetail(container, cached.data);
         return;
     }
+    // 强制刷新时先显示旧内容，避免每次事件都闪"加载中"
+    if (cached !== undefined) renderTaskDetail(container, cached.data);
+    else container.textContent = "加载中…";
     try {
         // 详情数据
         const data = await requestJson(`/api/tasks/${encodeURIComponent(taskId)}`);
         taskDetailCache.set(taskId, { at: Date.now(), data });
+        taskDetailRefresh = false;
         renderTaskDetail(container, data);
     } catch (error) {
-        container.textContent = `加载失败：${error instanceof Error ? error.message : String(error)}`;
+        if (cached === undefined)
+            container.textContent = `加载失败：${error instanceof Error ? error.message : String(error)}`;
     }
 }
 
@@ -3598,6 +3809,36 @@ async function loadTaskDetail(taskId, container) {
  */
 function renderTaskDetail(container, data) {
     clearNode(container);
+    // 实时进度
+    const progress = data.progress;
+    if (progress !== null && progress !== undefined) {
+        // 进度条
+        const head = createElement("div", "task-progress task-progress-detail");
+        const line = createElement("div", "task-progress-line");
+        if (data.active === true) line.append(createElement("span", "task-pulse"));
+        line.append(createElement("span", "task-progress-label", progress.label ?? "—"));
+        if (progress.run_id !== null && progress.run_id !== undefined) {
+            line.append(createElement("code", "mono task-progress-run", shortId(progress.run_id)));
+        }
+        const elapsed = createElement("span", "task-progress-elapsed", "");
+        elapsed.dataset.taskElapsed = "1";
+        const started = data.started_at ?? data.created_at;
+        if (started !== null && started !== undefined) elapsed.dataset.started = started;
+        if (data.active !== true) {
+            const finished = data.finished_at ?? progress.updated_at;
+            if (finished !== null && finished !== undefined) elapsed.dataset.finished = finished;
+        }
+        line.append(elapsed);
+        line.append(createElement("span", "muted", `${progress.event_count ?? 0} 个事件`));
+        head.append(line);
+        if (data.active === true) {
+            const bar = createElement("div", "task-progress-bar");
+            bar.append(createElement("span"));
+            head.append(bar);
+        }
+        container.append(head);
+        tickTaskElapsed();
+    }
     // run 列表
     const runs = Array.isArray(data.runs_detail) ? data.runs_detail : [];
     container.append(createElement("h4", "", `Runs（${runs.length}）`));
@@ -3665,6 +3906,12 @@ function renderTaskDetail(container, data) {
         eventList.append(item);
     }
     container.append(eventList);
+    // 运行中自动跟随最新事件
+    if (data.active === true) {
+        window.requestAnimationFrame(() => {
+            eventList.scrollTop = eventList.scrollHeight;
+        });
+    }
 }
 
 /**
@@ -3966,6 +4213,8 @@ function start() {
     document.addEventListener("visibilitychange", () => {
         if (!document.hidden) void loadCurrent();
     });
+    connectProjectEvents();
+    window.setInterval(tickTaskElapsed, 1000);
     void loadHeader();
     onHashChange();
 }

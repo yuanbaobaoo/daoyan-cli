@@ -483,6 +483,12 @@ a:hover {
     font-weight: 700;
 }
 
+.section-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
 .section-meta {
     color: var(--text-muted);
     font-size: 12px;
@@ -779,6 +785,91 @@ a:hover {
     margin-top: 7px;
     color: var(--text-muted);
     font-size: 11px;
+}
+
+.task-progress {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 10px;
+}
+
+.task-progress-detail {
+    margin: 0 0 12px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-soft);
+}
+
+.task-progress-line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-soft);
+    font-size: 11px;
+}
+
+.task-progress-label {
+    color: var(--text);
+    font-weight: 600;
+}
+
+.task-progress-run {
+    color: var(--text-muted);
+    font-size: 10px;
+}
+
+.task-progress-elapsed {
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.task-pulse {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+    animation: task-pulse 1.6s ease-out infinite;
+}
+
+.task-progress-bar {
+    height: 3px;
+    overflow: hidden;
+    border-radius: 99px;
+    background: var(--bg-soft);
+}
+
+.task-progress-detail .task-progress-bar {
+    background: var(--bg);
+}
+
+.task-progress-bar span {
+    display: block;
+    width: 35%;
+    height: 100%;
+    border-radius: 99px;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    animation: task-progress-slide 1.4s ease-in-out infinite;
+}
+
+@keyframes task-pulse {
+    0% {
+        box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 45%, transparent);
+    }
+    100% {
+        box-shadow: 0 0 0 6px transparent;
+    }
+}
+
+@keyframes task-progress-slide {
+    0% {
+        transform: translateX(-100%);
+    }
+    100% {
+        transform: translateX(300%);
+    }
 }
 
 .task-detail {

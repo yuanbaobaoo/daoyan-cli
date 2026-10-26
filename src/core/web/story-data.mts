@@ -13,6 +13,8 @@ import {
     type WebShotAssetRef,
     type WebShotItem,
     type WebShotReference,
+    withMediaVersion,
+    mediaDownloadUrl,
 } from "./data.mts";
 import { isLfsPointerFile, listAssets, storyMediaUrl } from "../story/assets.mts";
 import { episodeDir, listEpisodeMetas, readEpisodeMeta, readSeries, resolveEpisodeContext } from "../story/paths.mts";
@@ -43,18 +45,21 @@ function assetView(root: string, asset: StoryAsset): Record<string, unknown> {
     let bytes = asset.bytes;
     // 局部值
     let lfsPointer = false;
+    // 媒体版本（同名文件替换后换 URL）
+    let version: string = asset.sha256;
     if (present) {
         try {
             // 文件状态
             const stat = statSync(abs);
             bytes = stat.size;
+            version = `${stat.size}-${stat.mtimeMs}`;
             lfsPointer = isLfsPointerFile(abs);
         } catch {
             // 保留记录值
         }
     }
     // 媒体地址
-    const mediaUrl = storyMediaUrl(asset.path);
+    const mediaUrl = withMediaVersion(storyMediaUrl(asset.path), version);
     return {
         id: asset.id,
         role: asset.role ?? null,
@@ -72,7 +77,7 @@ function assetView(root: string, asset: StoryAsset): Record<string, unknown> {
         present,
         lfs_pointer: lfsPointer,
         media_url: mediaUrl,
-        download_url: `${mediaUrl}?download=1`,
+        download_url: mediaDownloadUrl(mediaUrl),
     };
 }
 

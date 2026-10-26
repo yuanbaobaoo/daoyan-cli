@@ -128,7 +128,7 @@ dycli --version
 - `daoyan status --run <run_id> [--wait] [--timeout <秒>] [--json]` — 查看单 run 详情，可等待终态。
 - `daoyan logs [-f] [-n N] [--task <task_id> | --run <run_id>] [--json]` — 结构化事件流。
 - `daoyan logs [-f] [-n N] [--src daoyan-cli|engine|worker|all]` — 引擎 / worker 文本日志。
-- `daoyan web [--port <n>] [--host <addr>] [--open] [--json]` — 启动 Web UI 查看项目、分镜、任务与产出物；分镜页可直接定稿 / 撤销镜头稿件。
+- `daoyan web [--port <n>] [--host <addr>] [--open] [--json]` — 启动 Web UI 查看项目、分镜、任务与产出物；可确认剧本、生成 / 重新生成镜头，并定稿 / 撤销镜头稿件。
 
 ### 引擎
 

@@ -1601,12 +1601,13 @@ a:hover {
 .shot-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 520px), 1fr));
+    grid-auto-rows: 1fr;
     gap: 16px;
-    align-items: start;
 }
 
 .shot-card-rich {
     gap: 12px;
+    height: 100%;
 }
 
 .shot-title-text {

@@ -4,17 +4,39 @@
 
 // 页面视图
 const VIEWS = [
-    { id: "overview", label: "概览", hint: "项目与运行状态" },
-    { id: "episodes", label: "剧集", hint: "分集与视频详情" },
-    { id: "characters", label: "角色", hint: "角色、形态与参考图" },
-    { id: "scenes", label: "场景", hint: "场景与参考图" },
-    { id: "voices", label: "音色", hint: "音色与参考音频" },
-    { id: "assets", label: "设定资产", hint: "全部参考资产" },
-    { id: "artifacts", label: "产出物", hint: "播放与下载" },
-    { id: "tasks", label: "任务", hint: "任务与事件" },
-    { id: "finals", label: "成片", hint: "合片结果" },
-    { id: "workflows", label: "工作流", hint: "图与 bindings" },
+    { id: "overview", label: "概览", hint: "项目与运行状态", icon: "overview" },
+    { id: "episodes", label: "剧集", hint: "分集与视频详情", icon: "episodes" },
+    { id: "characters", label: "角色", hint: "角色、形态与参考图", icon: "characters" },
+    { id: "scenes", label: "场景", hint: "场景与参考图", icon: "scenes" },
+    { id: "voices", label: "音色", hint: "音色与参考音频", icon: "voices" },
+    { id: "assets", label: "设定资产", hint: "全部参考资产", icon: "assets" },
+    { id: "artifacts", label: "产出物", hint: "播放与下载", icon: "artifacts" },
+    { id: "tasks", label: "任务", hint: "任务与事件", icon: "tasks" },
+    { id: "finals", label: "成片", hint: "合片结果", icon: "finals" },
+    { id: "workflows", label: "工作流", hint: "图与 bindings", icon: "workflows" },
 ];
+const NAV_SECTIONS = [
+    { label: "创作", views: ["overview", "episodes"] },
+    { label: "设定", views: ["characters", "scenes", "voices", "assets"] },
+    { label: "制作", views: ["artifacts", "tasks", "finals", "workflows"] },
+];
+const ICON_PATHS = {
+    overview:
+        '<rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/>',
+    episodes: '<path d="M4 5.5h16v13H4z"/><path d="m8 3 2 2.5M14 3l2 2.5M10 9l5 3-5 3z"/>',
+    characters:
+        '<circle cx="9" cy="8" r="3"/><path d="M3.5 19c.6-3.2 2.4-5 5.5-5s4.9 1.8 5.5 5M16 5.5a3 3 0 0 1 0 5.8M17 14c2.2.4 3.4 2 3.8 4.5"/>',
+    scenes: '<path d="m3 17 5-6 4 4 3-3 6 6v2H3z"/><circle cx="16.5" cy="6.5" r="2.5"/><path d="M3 4h18v16H3z"/>',
+    voices: '<rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3M9 21h6"/>',
+    assets: '<path d="M4 7.5 12 3l8 4.5v9L12 21l-8-4.5z"/><path d="m4 7.5 8 4.5 8-4.5M12 12v9"/>',
+    artifacts: '<path d="M4 5h16v14H4z"/><path d="m10 9 5 3-5 3zM8 2v3M16 2v3"/>',
+    tasks: '<path d="M9 5h10M9 12h10M9 19h10"/><path d="m3 5 1 1 2-2M3 12l1 1 2-2M3 19l1 1 2-2"/>',
+    finals: '<circle cx="12" cy="12" r="9"/><path d="m10 8 6 4-6 4z"/>',
+    workflows:
+        '<rect x="3" y="3" width="6" height="6" rx="1.5"/><rect x="15" y="15" width="6" height="6" rx="1.5"/><path d="M9 6h5a4 4 0 0 1 4 4v5M15 18h-5a4 4 0 0 1-4-4V9"/>',
+    project: '<path d="M4 20V10l8-6 8 6v10M8 20v-6h8v6M2 20h20"/>',
+    menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
+};
 // 合法视图集合（剧集详情由 hash 的 episode/<id> 单独解析）
 const VIEW_IDS = new Set(VIEWS.map((view) => view.id));
 // 默认视图
@@ -182,6 +204,7 @@ let projectRevision = null;
 let revisionRefreshTimer = null;
 // 当前产物筛选
 let artifactFilters = { label: "", status: "", kind: "", search: "" };
+let episodeSection = "shots";
 // 图谱 Tab（graph | timeline）
 let mapTab = "graph";
 // 图谱聚合模式（character | form）
@@ -202,6 +225,7 @@ let taskDetailRefresh = false;
 let playerItems = [];
 // 播放索引
 let playerIndex = 0;
+let modalPreviousFocus = null;
 // Toast 定时器
 let toastTimer = null;
 // 最后更新时间
@@ -235,6 +259,20 @@ function createElement(tag, className, text) {
     if (className !== undefined && className !== "") node.className = className;
     if (text !== undefined && text !== null) node.textContent = String(text);
     return node;
+}
+
+function createIcon(name) {
+    const icon = document.createElementNS(SVG_NS, "svg");
+    icon.setAttribute("class", "nav-icon");
+    icon.setAttribute("viewBox", "0 0 24 24");
+    icon.setAttribute("fill", "none");
+    icon.setAttribute("stroke", "currentColor");
+    icon.setAttribute("stroke-width", "1.7");
+    icon.setAttribute("stroke-linecap", "round");
+    icon.setAttribute("stroke-linejoin", "round");
+    icon.setAttribute("aria-hidden", "true");
+    icon.innerHTML = ICON_PATHS[name] ?? ICON_PATHS.overview;
+    return icon;
 }
 
 /**
@@ -448,19 +486,22 @@ async function fetchJson(path) {
 function renderShell() {
     appRoot.innerHTML = `
         <div class="app-shell">
-            <aside class="sidebar">
+            <aside id="sidebar" class="sidebar">
                 <div class="brand">
-                    <div class="brand-mark"><span class="brand-dot"></span>daoyan web</div>
+                    <div class="brand-mark"><span class="brand-dot"></span><span>daoyan <span class="brand-edition">web</span></span></div>
                     <p id="brand-project" class="brand-sub" hidden></p>
                 </div>
                 <nav id="nav" class="nav" aria-label="页面导航"></nav>
                 <div class="sidebar-bottom">
                     <nav id="nav-bottom" class="nav" aria-label="项目管理"></nav>
+                    <p class="sidebar-foot">AI 视频创作操作台</p>
                 </div>
             </aside>
+            <button id="nav-backdrop" class="nav-backdrop" type="button" aria-label="关闭导航"></button>
             <main class="main">
                 <header class="topbar">
                     <div class="topbar-left">
+                        <button id="nav-toggle" class="icon-button nav-toggle" type="button" aria-label="打开导航" aria-expanded="false" aria-controls="sidebar"></button>
                         <h1 id="project-name" class="project-name">项目</h1>
                         <span id="project-mode" class="project-mode">—</span>
                     </div>
@@ -484,6 +525,19 @@ function renderShell() {
     modeEl = document.querySelector("#project-mode");
     connectionEl = document.querySelector("#connection");
     updatedEl = document.querySelector("#updated-at");
+    const navToggle = document.querySelector("#nav-toggle");
+    navToggle.append(createIcon("menu"));
+    navToggle.addEventListener("click", () => setNavOpen(!document.body.classList.contains("nav-open")));
+    document.querySelector("#nav-backdrop").addEventListener("click", () => setNavOpen(false));
+    document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") setNavOpen(false);
+    });
+}
+
+function setNavOpen(open) {
+    document.body.classList.toggle("nav-open", open);
+    const toggle = document.querySelector("#nav-toggle");
+    if (toggle !== null) toggle.setAttribute("aria-expanded", String(open));
 }
 
 /**
@@ -491,18 +545,25 @@ function renderShell() {
  */
 function renderNav() {
     clearNode(navRoot);
-    for (const view of VIEWS) {
-        if (view.id === "voices" && !projectSettings.audio) continue;
-        // 导航按钮
-        const button = createElement("button", "nav-item");
-        button.type = "button";
-        button.dataset.view = view.id;
-        button.append(createElement("span", "nav-label", view.label));
-        button.append(createElement("span", "nav-hint", view.hint));
-        button.addEventListener("click", () => {
-            window.location.hash = `${HASH_PREFIX}${view.id}`;
-        });
-        navRoot.append(button);
+    for (const section of NAV_SECTIONS) {
+        const group = createElement("div", "nav-section");
+        group.append(createElement("p", "nav-section-label", section.label));
+        for (const viewId of section.views) {
+            const view = VIEWS.find((item) => item.id === viewId);
+            if (view.id === "voices" && !projectSettings.audio) continue;
+            const button = createElement("button", "nav-item");
+            button.type = "button";
+            button.dataset.view = view.id;
+            button.title = view.hint;
+            button.append(createIcon(view.icon));
+            button.append(createElement("span", "nav-label", view.label));
+            button.addEventListener("click", () => {
+                window.location.hash = `${HASH_PREFIX}${view.id}`;
+                setNavOpen(false);
+            });
+            group.append(button);
+        }
+        navRoot.append(group);
     }
     // 底部项目管理
     if (navBottomRoot !== null) {
@@ -510,10 +571,11 @@ function renderNav() {
         const project = createElement("button", "nav-item");
         project.type = "button";
         project.dataset.view = "project";
+        project.append(createIcon("project"));
         project.append(createElement("span", "nav-label", "项目管理"));
-        project.append(createElement("span", "nav-hint", "模式、音频与项目设置"));
         project.addEventListener("click", () => {
             window.location.hash = `${HASH_PREFIX}project`;
+            setNavOpen(false);
         });
         navBottomRoot.append(project);
     }
@@ -772,6 +834,7 @@ async function loadCurrent() {
  * 切换视图。
  */
 function onHashChange() {
+    setNavOpen(false);
     // 原始 hash
     const raw = window.location.hash.replace(/^#\/?/, "");
     // 路径段
@@ -794,6 +857,7 @@ function onHashChange() {
     if (view === "voices" && !projectSettings.audio) view = DEFAULT_VIEW;
     currentView = view;
     currentEpisodeId = episodeId;
+    episodeSection = "shots";
     mapTab = "graph";
     mapMode = "character";
     mapFocus = null;
@@ -902,6 +966,16 @@ function statCard(label, value, hint) {
     return card;
 }
 
+function summaryItem(label, value, hint) {
+    const item = createElement("div", "summary-item");
+    item.append(createElement("span", "summary-label", label));
+    const copy = createElement("div");
+    copy.append(createElement("strong", "", value));
+    copy.append(createElement("small", "", hint));
+    item.append(copy);
+    return item;
+}
+
 /**
  * 剧情阶段徽标。
  */
@@ -957,18 +1031,18 @@ function assetNode(asset, compact) {
  * 剧集列表页。
  */
 function renderEpisodes(data) {
-    // 剧集
     const episodes = Array.isArray(data.episodes) ? data.episodes : [];
-    // 页头
+    const ready = episodes.filter((episode) => episode.stage === "ready" || episode.stage === "wrapped").length;
+    const blockers = episodes.reduce((total, episode) => total + episode.blockers.length, 0);
     const head = createElement("div", "view-head");
     const headText = createElement("div");
     headText.append(createElement("p", "eyebrow", "Episodes"));
-    headText.append(createElement("h2", "page-title", "剧集"));
+    headText.append(createElement("h2", "page-title", "剧集制作"));
     headText.append(
         createElement(
             "p",
             "page-subtitle",
-            data.series?.title ? `${data.series.title} · ${episodes.length} 集` : `${episodes.length} 集`,
+            data.series?.title ? `${data.series.title} · 选择一集进入剧本、分镜与制作流程` : "选择一集进入制作流程",
         ),
     );
     head.append(headText);
@@ -977,47 +1051,56 @@ function renderEpisodes(data) {
         viewRoot.append(emptyNode("还没有剧集", "在项目管理切换到多集模式后新增剧集。"));
         return;
     }
-    // 剧集网格
-    const grid = createElement("div", "grid");
+
+    const summary = createElement("div", "collection-summary");
+    summary.append(
+        summaryItem("总集数", episodes.length, "当前系列"),
+        summaryItem("可拍摄", ready, "剧本与资产已就绪"),
+        summaryItem("待处理", blockers, blockers > 0 ? "阻断项" : "没有阻断"),
+    );
+    viewRoot.append(summary);
+
+    const list = createElement("div", "episode-list");
     for (const episode of episodes) {
-        // 卡片
-        const card = createElement("article", "card episode-card");
-        // 内容
-        const body = createElement("div", "card-body");
-        body.append(createElement("p", "eyebrow", `第 ${episode.number} 集`));
-        body.append(createElement("h3", "card-title", episode.title));
-        // 元信息
-        const meta = createElement("div", "card-meta");
-        meta.append(stageBadge(episode.stage));
-        meta.append(createElement("span", "", `剧本 r${episode.script.revision} · ${episode.script.status}`));
+        const row = createElement("article", "episode-row");
+        const number = createElement("div", "episode-number");
+        number.append(createElement("span", "", String(episode.number).padStart(2, "0")));
+        number.append(createElement("small", "", "EPISODE"));
+        row.append(number);
+
+        const main = createElement("div", "episode-row-main");
+        const titleLine = createElement("div", "episode-title-line");
+        titleLine.append(createElement("h3", "", episode.title));
+        titleLine.append(stageBadge(episode.stage));
+        main.append(titleLine);
+        main.append(
+            createElement(
+                "p",
+                "episode-row-meta",
+                `剧本 r${episode.script.revision} · ${episode.script.status === "approved" ? "已确认" : "待确认"}`,
+            ),
+        );
         if (episode.blockers.length > 0) {
-            meta.append(createElement("span", "text-warn", `${episode.blockers.length} 项阻断`));
+            const issues = createElement("div", "episode-issues");
+            issues.append(createElement("strong", "", `${episode.blockers.length} 项待处理`));
+            issues.append(createElement("span", "", episode.blockers[0].message));
+            main.append(issues);
+        } else {
+            main.append(createElement("p", "episode-ready", "当前没有阻断，可以继续制作"));
         }
-        body.append(meta);
-        // 阻断摘要
-        if (episode.blockers.length > 0) {
-            const list = createElement("ul", "mini-list");
-            for (const blocker of episode.blockers.slice(0, 3)) {
-                list.append(createElement("li", "", blocker.message));
-            }
-            body.append(list);
-        }
-        // 操作
-        const actions = createElement("div", "card-actions");
-        const open = createElement("button", "button", "查看剧集");
+        row.append(main);
+
+        const open = createElement("button", "button episode-open", "进入制作 →");
         open.type = "button";
         open.addEventListener("click", () => {
             window.location.hash = `${HASH_PREFIX}episode/${encodeURIComponent(episode.id)}`;
         });
-        actions.append(open);
-        body.append(actions);
-        card.append(body);
-        grid.append(card);
+        row.append(open);
+        list.append(row);
     }
-    viewRoot.append(grid);
-    // 下一步
+    viewRoot.append(list);
     if (Array.isArray(data.next_actions) && data.next_actions.length > 0) {
-        const callout = createElement("div", "callout");
+        const callout = createElement("div", "callout next-actions");
         callout.append(createElement("strong", "", "下一步"));
         const list = createElement("ul", "mini-list");
         for (const action of data.next_actions) list.append(createElement("li", "", action));
@@ -1070,136 +1153,175 @@ function renderEpisode(data) {
         callout.append(list);
         viewRoot.append(callout);
     }
-    // 剧情图谱（单视频模式隐藏）
-    if (!single) viewRoot.append(renderStoryMap(data.map));
-    // 剧本
-    const scriptMeta = data.script.meta ?? {};
-    const scriptApproved = scriptMeta.status === "approved";
-    const scriptHead = createElement("div", "section-head");
-    scriptHead.append(createElement("h3", "section-title", "剧本"));
-    const scriptActions = createElement("div", "section-actions");
-    scriptActions.append(
-        createElement(
-            "span",
-            "section-meta",
-            scriptMeta.revision > 0 ? `r${scriptMeta.revision} · ${scriptApproved ? "已确认" : "待确认"}` : "尚未同步",
-        ),
-    );
-    if (!scriptApproved && scriptMeta.revision > 0) {
-        // 确认剧本
-        const approve = createElement("button", "button", "确认剧本");
-        approve.type = "button";
-        approve.addEventListener("click", async () => {
-            if (approve.disabled) return;
-            approve.disabled = true;
-            approve.textContent = "确认中…";
-            try {
-                await postJson("/api/script/approve", { episode_id: episode.id });
-                showToast("剧本已确认");
-                await reloadView();
-            } catch (error) {
-                showToast(error instanceof Error ? error.message : "确认失败", true);
-                approve.disabled = false;
-                approve.textContent = "确认剧本";
-            }
+
+    const sections = [
+        { id: "shots", label: "分镜制作", count: data.shots?.shots?.length ?? 0 },
+        { id: "script", label: "剧本与拆解" },
+        ...(single ? [] : [{ id: "map", label: "剧情图谱" }]),
+        { id: "activity", label: "任务与成片", count: data.tasks.length + data.finals.length },
+    ];
+    const tabs = createElement("div", "workspace-tabs");
+    tabs.setAttribute("role", "tablist");
+    tabs.setAttribute("aria-label", "剧集工作区");
+    for (const section of sections) {
+        const tab = createElement(
+            "button",
+            `workspace-tab${episodeSection === section.id ? " active" : ""}`,
+            section.count === undefined ? section.label : `${section.label} ${section.count}`,
+        );
+        tab.type = "button";
+        tab.setAttribute("role", "tab");
+        tab.setAttribute("aria-selected", String(episodeSection === section.id));
+        tab.addEventListener("click", () => {
+            episodeSection = section.id;
+            clearNode(viewRoot);
+            renderEpisode(data);
         });
-        scriptActions.append(approve);
+        tabs.append(tab);
     }
-    scriptHead.append(scriptActions);
-    viewRoot.append(scriptHead);
-    const script = createElement(
-        "pre",
-        "script-text",
-        data.script.content === "" ? "（尚未同步）" : data.script.content,
-    );
-    viewRoot.append(script);
-    // 拆解
-    const breakdown = data.breakdown;
-    const breakdownHead = createElement("div", "section-head");
-    breakdownHead.append(createElement("h3", "section-title", "本集拆解"));
-    breakdownHead.append(
-        createElement("span", "section-meta", breakdown === null ? "缺失" : `source r${breakdown.source_revision}`),
-    );
-    viewRoot.append(breakdownHead);
-    if (breakdown === null) {
-        viewRoot.append(emptyNode("还没有拆解", "使用 daoyan story breakdown set 写入本集角色、形态与场景。"));
-    } else {
-        const list = createElement("div", "layout-two");
-        // 角色
-        const cast = createElement("div", "panel");
-        cast.append(createElement("h4", "panel-title", "角色与形态"));
-        const castList = createElement("ul", "mini-list");
-        for (const item of breakdown.characters) {
-            castList.append(createElement("li", "", `${item.id} · ${item.forms.join(" / ")}`));
+    viewRoot.append(tabs);
+
+    // 剧情图谱（单视频模式隐藏）
+    if (!single && episodeSection === "map") viewRoot.append(renderStoryMap(data.map));
+    if (episodeSection === "script") {
+        const scriptMeta = data.script.meta ?? {};
+        const scriptApproved = scriptMeta.status === "approved";
+        const scriptHead = createElement("div", "section-head");
+        scriptHead.append(createElement("h3", "section-title", "剧本"));
+        const scriptActions = createElement("div", "section-actions");
+        scriptActions.append(
+            createElement(
+                "span",
+                "section-meta",
+                scriptMeta.revision > 0
+                    ? `r${scriptMeta.revision} · ${scriptApproved ? "已确认" : "待确认"}`
+                    : "尚未同步",
+            ),
+        );
+        if (!scriptApproved && scriptMeta.revision > 0) {
+            // 确认剧本
+            const approve = createElement("button", "button", "确认剧本");
+            approve.type = "button";
+            approve.addEventListener("click", async () => {
+                if (approve.disabled) return;
+                approve.disabled = true;
+                approve.textContent = "确认中…";
+                try {
+                    await postJson("/api/script/approve", { episode_id: episode.id });
+                    showToast("剧本已确认");
+                    await reloadView();
+                } catch (error) {
+                    showToast(error instanceof Error ? error.message : "确认失败", true);
+                    approve.disabled = false;
+                    approve.textContent = "确认剧本";
+                }
+            });
+            scriptActions.append(approve);
         }
-        cast.append(castList);
-        // 场景 / 音色 / beat
-        const other = createElement("div", "panel");
-        other.append(createElement("h4", "panel-title", projectSettings.audio ? "场景 / 音色 / Beat" : "场景 / Beat"));
-        other.append(createElement("p", "", `场景：${breakdown.scenes.join("、") || "无"}`));
-        if (projectSettings.audio) {
-            other.append(createElement("p", "", `音色：${breakdown.voices.join("、") || "无"}`));
+        scriptHead.append(scriptActions);
+        viewRoot.append(scriptHead);
+        const script = createElement(
+            "pre",
+            "script-text",
+            data.script.content === "" ? "（尚未同步）" : data.script.content,
+        );
+        viewRoot.append(script);
+        // 拆解
+        const breakdown = data.breakdown;
+        const breakdownHead = createElement("div", "section-head");
+        breakdownHead.append(createElement("h3", "section-title", "本集拆解"));
+        breakdownHead.append(
+            createElement("span", "section-meta", breakdown === null ? "缺失" : `source r${breakdown.source_revision}`),
+        );
+        viewRoot.append(breakdownHead);
+        if (breakdown === null) {
+            viewRoot.append(emptyNode("还没有拆解", "使用 daoyan story breakdown set 写入本集角色、形态与场景。"));
+        } else {
+            const list = createElement("div", "layout-two");
+            // 角色
+            const cast = createElement("div", "panel");
+            cast.append(createElement("h4", "panel-title", "角色与形态"));
+            const castList = createElement("ul", "mini-list");
+            for (const item of breakdown.characters) {
+                castList.append(createElement("li", "", `${item.id} · ${item.forms.join(" / ")}`));
+            }
+            cast.append(castList);
+            // 场景 / 音色 / beat
+            const other = createElement("div", "panel");
+            other.append(
+                createElement("h4", "panel-title", projectSettings.audio ? "场景 / 音色 / Beat" : "场景 / Beat"),
+            );
+            other.append(createElement("p", "", `场景：${breakdown.scenes.join("、") || "无"}`));
+            if (projectSettings.audio) {
+                other.append(createElement("p", "", `音色：${breakdown.voices.join("、") || "无"}`));
+            }
+            other.append(
+                createElement("p", "", `Beat：${(breakdown.beats ?? []).map((b) => b.id).join("、") || "无"}`),
+            );
+            list.append(cast);
+            list.append(other);
+            viewRoot.append(list);
         }
-        other.append(createElement("p", "", `Beat：${(breakdown.beats ?? []).map((b) => b.id).join("、") || "无"}`));
-        list.append(cast);
-        list.append(other);
-        viewRoot.append(list);
     }
     // 分镜
-    const shots = data.shots;
-    const shotsHead = createElement("div", "section-head");
-    shotsHead.append(createElement("h3", "section-title", "分镜"));
-    shotsHead.append(
-        createElement("span", "section-meta", shots === null ? "缺失" : `${shots.summary.shots_total} 镜`),
-    );
-    viewRoot.append(shotsHead);
-    if (shots === null || shots.shots.length === 0) {
-        viewRoot.append(emptyNode("还没有分镜", "使用 daoyan story shots set 写入本集分镜。"));
-    } else {
-        const grid = createElement("div", "shot-grid");
-        for (const shot of shots.shots) grid.append(renderShotCard(shot));
-        viewRoot.append(grid);
-    }
-    // 任务
-    const taskHead = createElement("div", "section-head");
-    taskHead.append(createElement("h3", "section-title", "本集任务"));
-    taskHead.append(createElement("span", "section-meta", `${data.tasks.length} 个`));
-    viewRoot.append(taskHead);
-    if (data.tasks.length === 0) {
-        viewRoot.append(emptyNode("还没有任务", "拍摄本集后，task 会出现在这里。"));
-    } else {
-        const list = createElement("div", "task-list");
-        for (const task of data.tasks.slice(0, 10)) {
-            const row = createElement("div", "task-row");
-            row.append(createElement("span", "mono", task.task_id));
-            row.append(createElement("span", "", task.command));
-            row.append(statusBadge(task.status));
-            list.append(row);
+    if (episodeSection === "shots") {
+        const shots = data.shots;
+        const shotsHead = createElement("div", "section-head");
+        shotsHead.append(createElement("h3", "section-title", "分镜"));
+        shotsHead.append(
+            createElement("span", "section-meta", shots === null ? "缺失" : `${shots.summary.shots_total} 镜`),
+        );
+        viewRoot.append(shotsHead);
+        if (shots === null || shots.shots.length === 0) {
+            viewRoot.append(emptyNode("还没有分镜", "使用 daoyan story shots set 写入本集分镜。"));
+        } else {
+            const grid = createElement("div", "shot-grid");
+            for (const shot of shots.shots) grid.append(renderShotCard(shot));
+            viewRoot.append(grid);
         }
-        viewRoot.append(list);
     }
-    // 成片
-    const finalHead = createElement("div", "section-head");
-    finalHead.append(createElement("h3", "section-title", "成片"));
-    finalHead.append(createElement("span", "section-meta", `${data.finals.length} 个`));
-    viewRoot.append(finalHead);
-    if (data.finals.length === 0) {
-        viewRoot.append(emptyNode("还没有成片", "运行 daoyan wrap --episode <id> 后出现。"));
-    } else {
-        const list = createElement("div", "task-list");
-        for (const item of data.finals) {
-            const row = createElement("div", "task-row");
-            row.append(createElement("span", "mono", item.name));
-            row.append(createElement("span", "", formatTime(item.created_at ?? "")));
-            const play = createElement("button", "button", "播放");
-            play.type = "button";
-            play.addEventListener("click", () => {
-                openPlayer([{ title: item.name, url: item.media_url, kind: "video" }], 0);
-            });
-            row.append(play);
-            list.append(row);
+    if (episodeSection === "activity") {
+        // 任务
+        const taskHead = createElement("div", "section-head");
+        taskHead.append(createElement("h3", "section-title", "本集任务"));
+        taskHead.append(createElement("span", "section-meta", `${data.tasks.length} 个`));
+        viewRoot.append(taskHead);
+        if (data.tasks.length === 0) {
+            viewRoot.append(emptyNode("还没有任务", "拍摄本集后，task 会出现在这里。"));
+        } else {
+            const list = createElement("div", "task-list");
+            for (const task of data.tasks.slice(0, 10)) {
+                const row = createElement("div", "task-row");
+                row.append(createElement("span", "mono", task.task_id));
+                row.append(createElement("span", "", task.command));
+                row.append(statusBadge(task.status));
+                list.append(row);
+            }
+            viewRoot.append(list);
         }
-        viewRoot.append(list);
+        // 成片
+        const finalHead = createElement("div", "section-head");
+        finalHead.append(createElement("h3", "section-title", "成片"));
+        finalHead.append(createElement("span", "section-meta", `${data.finals.length} 个`));
+        viewRoot.append(finalHead);
+        if (data.finals.length === 0) {
+            viewRoot.append(emptyNode("还没有成片", "运行 daoyan wrap --episode <id> 后出现。"));
+        } else {
+            const list = createElement("div", "task-list");
+            for (const item of data.finals) {
+                const row = createElement("div", "task-row");
+                row.append(createElement("span", "mono", item.name));
+                row.append(createElement("span", "", formatTime(item.created_at ?? "")));
+                const play = createElement("button", "button", "播放");
+                play.type = "button";
+                play.addEventListener("click", () => {
+                    openPlayer([{ title: item.name, url: item.media_url, kind: "video" }], 0);
+                });
+                row.append(play);
+                list.append(row);
+            }
+            viewRoot.append(list);
+        }
     }
 }
 
@@ -2215,6 +2337,12 @@ function renderProject(data) {
     head.append(headText);
     viewRoot.append(head);
 
+    const settingsLayout = createElement("div", "settings-layout");
+    const settingsMain = createElement("div", "settings-main");
+    const settingsAside = createElement("aside", "settings-aside");
+    settingsLayout.append(settingsMain, settingsAside);
+    viewRoot.append(settingsLayout);
+
     // 基本信息
     const info = createElement("div", "panel settings-panel");
     info.append(createElement("h3", "panel-title", "项目信息"));
@@ -2223,7 +2351,7 @@ function renderProject(data) {
     infoList.append(settingsRow("当前剧集", `${data.episode_count ?? 0} 集`));
     infoList.append(settingsRow("音频", data.audio ? "需要音频" : "不需要音频"));
     info.append(infoList);
-    viewRoot.append(info);
+    settingsAside.append(info);
 
     // 视频模式
     const modePanel = createElement("div", "panel settings-panel");
@@ -2260,7 +2388,7 @@ function renderProject(data) {
             ),
         );
     }
-    viewRoot.append(modePanel);
+    settingsMain.append(modePanel);
 
     // 音频
     const audioPanel = createElement("div", "panel settings-panel");
@@ -2277,7 +2405,7 @@ function renderProject(data) {
     );
     audioOption.append(audioCopy);
     audioPanel.append(audioOption);
-    viewRoot.append(audioPanel);
+    settingsMain.append(audioPanel);
 
     // 保存
     const actions = createElement("div", "card-actions");
@@ -2303,7 +2431,9 @@ function renderProject(data) {
         }
     });
     actions.append(save);
-    viewRoot.append(actions);
+    save.classList.add("primary");
+    actions.classList.add("settings-save");
+    settingsAside.append(actions);
 }
 
 /**
@@ -2349,17 +2479,36 @@ function renderCharacters(data) {
     viewRoot.append(head);
     // 角色
     const items = Array.isArray(data.items) ? data.items : [];
+    const formCount = items.reduce((total, character) => total + character.forms.length, 0);
+    const assetCount = items.reduce(
+        (total, character) => total + character.forms.reduce((count, form) => count + form.assets.length, 0),
+        0,
+    );
+    const summary = createElement("div", "collection-summary");
+    summary.append(
+        summaryItem("角色", items.length, "跨集共享"),
+        summaryItem("形态", formCount, "服装与状态"),
+        summaryItem("参考资产", assetCount, "图片与音频"),
+    );
+    viewRoot.append(summary);
     if (items.length === 0) {
         viewRoot.append(emptyNode("还没有角色", "使用 daoyan story characters set 写入全局角色。"));
         return;
     }
-    const grid = createElement("div", "grid");
+    const grid = createElement("div", "grid entity-library character-library");
     for (const character of items) {
         // 卡片
         const card = createElement("article", "card entity-card");
         const body = createElement("div", "card-body");
-        body.append(createElement("h3", "card-title", `${character.name} · ${character.id}`));
-        body.append(createElement("p", "muted", character.summary ?? ""));
+        const title = createElement("div", "entity-card-title");
+        title.append(createElement("span", "entity-avatar", character.name.slice(0, 1)));
+        const titleCopy = createElement("div");
+        titleCopy.append(createElement("h3", "card-title", character.name));
+        titleCopy.append(createElement("p", "entity-id mono", character.id));
+        title.append(titleCopy);
+        title.append(badge(`${character.forms.length} 种形态`, ""));
+        body.append(title);
+        body.append(createElement("p", "entity-description", character.summary ?? "暂无角色描述"));
         for (const form of character.forms) {
             // 形态
             const block = createElement("div", "form-block");
@@ -2398,21 +2547,35 @@ function renderScenes(data) {
     viewRoot.append(head);
     // 场景
     const items = Array.isArray(data.items) ? data.items : [];
+    const assetCount = items.reduce((total, scene) => total + scene.assets.length, 0);
+    const referenced = items.filter((scene) => scene.reference_asset).length;
+    const summary = createElement("div", "collection-summary");
+    summary.append(
+        summaryItem("场景", items.length, "跨集共享"),
+        summaryItem("主参考", `${referenced}/${items.length}`, "已明确指定"),
+        summaryItem("参考资产", assetCount, "全部场景图片"),
+    );
+    viewRoot.append(summary);
     if (items.length === 0) {
         viewRoot.append(emptyNode("还没有场景", "使用 daoyan story scenes set 写入全局场景。"));
         return;
     }
-    const grid = createElement("div", "grid");
+    const grid = createElement("div", "grid entity-library scene-library");
     for (const scene of items) {
-        // 卡片
-        const card = createElement("article", "card entity-card");
-        const body = createElement("div", "card-body");
-        body.append(createElement("h3", "card-title", `${scene.name} · ${scene.id}`));
-        body.append(createElement("p", "muted", scene.description ?? ""));
+        const card = createElement("article", "card entity-card media-entity-card");
         const reference = scene.reference_asset
             ? scene.assets.find((asset) => asset.id === scene.reference_asset)
             : null;
-        body.append(assetNode(reference, false));
+        const media = createElement("div", "entity-media");
+        media.append(assetNode(reference, false));
+        card.append(media);
+        const body = createElement("div", "card-body");
+        const title = createElement("div", "entity-title-row");
+        title.append(createElement("h3", "card-title", scene.name));
+        title.append(badge(`${scene.assets.length} 项资产`, "kind-image"));
+        body.append(title);
+        body.append(createElement("p", "entity-id mono", scene.id));
+        body.append(createElement("p", "entity-description", scene.description ?? "暂无场景描述"));
         const more = createElement("div", "asset-row");
         for (const asset of scene.assets) {
             if (reference !== null && asset.id === reference.id) continue;
@@ -2439,24 +2602,37 @@ function renderVoices(data) {
     viewRoot.append(head);
     // 音色
     const items = Array.isArray(data.items) ? data.items : [];
+    const referenced = items.filter((voice) => voice.reference_asset).length;
+    const summary = createElement("div", "collection-summary");
+    summary.append(
+        summaryItem("音色", items.length, "角色声音档案"),
+        summaryItem("参考音频", `${referenced}/${items.length}`, "已明确指定"),
+        summaryItem("试听文本", items.filter((voice) => voice.sample_text).length, "可用于试音"),
+    );
+    viewRoot.append(summary);
     if (items.length === 0) {
         viewRoot.append(emptyNode("还没有音色", "使用 daoyan story voices set 写入音色。"));
         return;
     }
-    const grid = createElement("div", "grid");
+    const grid = createElement("div", "voice-list");
     for (const voice of items) {
-        // 卡片
-        const card = createElement("article", "card entity-card");
-        const body = createElement("div", "card-body");
-        body.append(createElement("h3", "card-title", `${voice.name} · ${voice.id}`));
-        body.append(createElement("p", "muted", `${voice.character_id} · ${voice.mode}`));
-        body.append(createElement("p", "", voice.description ?? ""));
+        const card = createElement("article", "card voice-card");
+        const info = createElement("div", "voice-info");
+        const title = createElement("div", "entity-title-row");
+        title.append(createElement("h3", "card-title", voice.name));
+        title.append(badge(voice.mode ?? "未设置", "kind-audio"));
+        info.append(title);
+        info.append(createElement("p", "entity-id mono", [voice.id, voice.character_id].filter(Boolean).join(" · ")));
+        info.append(createElement("p", "entity-description", voice.description ?? "暂无音色描述"));
+        if (voice.sample_text) info.append(createElement("blockquote", "quote", voice.sample_text));
+        card.append(info);
         const reference = voice.reference_asset
             ? voice.assets.find((asset) => asset.id === voice.reference_asset)
             : null;
-        body.append(assetNode(reference, false));
-        if (voice.sample_text) body.append(createElement("blockquote", "quote", voice.sample_text));
-        card.append(body);
+        const referencePanel = createElement("div", "voice-reference");
+        referencePanel.append(createElement("span", "field-label", "参考音频"));
+        referencePanel.append(assetNode(reference, false));
+        card.append(referencePanel);
         grid.append(card);
     }
     viewRoot.append(grid);
@@ -2478,19 +2654,29 @@ function renderAssets(data) {
     const items = (Array.isArray(data.items) ? data.items : []).filter(
         (item) => projectSettings.audio || item.owner_kind !== "voice",
     );
+    const summary = createElement("div", "collection-summary");
+    summary.append(
+        summaryItem("全部资产", items.length, "跨集共享"),
+        summaryItem("图片", items.filter((item) => item.asset.kind === "image").length, "视觉参考"),
+        summaryItem("主参考", items.filter((item) => item.reference).length, "当前生效"),
+    );
+    viewRoot.append(summary);
     if (items.length === 0) {
         viewRoot.append(emptyNode("还没有设定资产", "使用 daoyan story asset add 入库参考图。"));
         return;
     }
-    const grid = createElement("div", "grid");
+    const grid = createElement("div", "grid asset-gallery");
     for (const item of items) {
-        // 卡片
-        const card = createElement("article", "card entity-card");
+        const card = createElement("article", "card entity-card media-entity-card");
+        const media = createElement("div", "entity-media asset-gallery-media");
+        media.append(assetNode(item.asset, false));
+        if (item.reference) media.append(createElement("span", "asset-primary-badge", "主参考"));
+        card.append(media);
         const body = createElement("div", "card-body");
+        body.append(createElement("h3", "card-title", item.asset.id));
         const owner = `${item.owner_kind}:${item.owner_id}${item.form_id !== null ? `/${item.form_id}` : ""}`;
-        body.append(createElement("h3", "card-title", `${item.reference ? "* " : ""}${item.asset.id}`));
-        body.append(createElement("p", "muted", `${owner} · ${item.owner_name}`));
-        body.append(assetNode(item.asset, false));
+        body.append(createElement("p", "entity-description", item.owner_name));
+        body.append(createElement("p", "entity-id mono", owner));
         card.append(body);
         grid.append(card);
     }
@@ -2522,6 +2708,18 @@ function renderOverview(data) {
     }
     headText.append(createElement("p", "page-subtitle", subtitle.join(" · ")));
     head.append(headText);
+    const headActions = createElement("div", "view-actions");
+    const openEpisodes = createElement(
+        "button",
+        "button primary",
+        projectSettings.mode === "single" ? "进入视频制作" : "进入剧集制作",
+    );
+    openEpisodes.type = "button";
+    openEpisodes.addEventListener("click", () => {
+        window.location.hash = `${HASH_PREFIX}episodes`;
+    });
+    headActions.append(openEpisodes);
+    head.append(headActions);
     viewRoot.append(head);
 
     if (data.machine === null) {
@@ -2565,11 +2763,13 @@ function renderOverview(data) {
     }
     viewRoot.append(statsGrid);
 
-    // 引擎与机器运行环境
-    const layout = createElement("div", "layout-two");
-    layout.append(renderEnginePanel(data));
-    layout.append(renderEnvironmentPanel(data));
-    viewRoot.append(layout);
+    const overviewLayout = createElement("div", "overview-layout");
+    const overviewMain = createElement("div", "overview-main");
+    const overviewSide = createElement("aside", "overview-side");
+    overviewSide.append(renderEnginePanel(data));
+    overviewSide.append(renderEnvironmentPanel(data));
+    overviewLayout.append(overviewMain, overviewSide);
+    viewRoot.append(overviewLayout);
 
     // 兼容旧数据：没有 story 时展示分镜档案
     if (story === null && storyboard !== null) {
@@ -2581,32 +2781,43 @@ function renderOverview(data) {
 
     // 最近产物
     const artifacts = Array.isArray(data.recent_artifacts) ? data.recent_artifacts : [];
-    // 产物区块头
+    const artifactSection = createElement("section", "overview-section");
     const artifactHead = createElement("div", "section-head");
     artifactHead.append(createElement("h3", "section-title", "最近产出物"));
-    artifactHead.append(createElement("span", "section-meta", `${artifacts.length} 个`));
-    viewRoot.append(artifactHead);
+    const artifactMore = createElement("button", "button ghost", `查看全部 · ${artifacts.length}`);
+    artifactMore.type = "button";
+    artifactMore.addEventListener("click", () => {
+        window.location.hash = `${HASH_PREFIX}artifacts`;
+    });
+    artifactHead.append(artifactMore);
+    artifactSection.append(artifactHead);
     if (artifacts.length === 0) {
-        viewRoot.append(emptyNode("还没有产出物", "执行 shot / run 后，视频与图片会出现在这里。"));
+        artifactSection.append(emptyNode("还没有产出物", "执行 shot / run 后，视频与图片会出现在这里。"));
     } else {
-        // 产物网格
-        const grid = createElement("div", "grid");
+        const grid = createElement("div", "grid overview-artifact-grid");
         renderArtifactCards(grid, artifacts);
-        viewRoot.append(grid);
+        artifactSection.append(grid);
     }
+    overviewMain.append(artifactSection);
 
     // 最近任务
     const tasks = Array.isArray(data.recent_tasks) ? data.recent_tasks : [];
-    // 任务区块头
+    const taskSection = createElement("section", "overview-section");
     const taskHead = createElement("div", "section-head");
     taskHead.append(createElement("h3", "section-title", "最近任务"));
-    taskHead.append(createElement("span", "section-meta", `${tasks.length} 个`));
-    viewRoot.append(taskHead);
+    const taskMore = createElement("button", "button ghost", `查看全部 · ${tasks.length}`);
+    taskMore.type = "button";
+    taskMore.addEventListener("click", () => {
+        window.location.hash = `${HASH_PREFIX}tasks`;
+    });
+    taskHead.append(taskMore);
+    taskSection.append(taskHead);
     if (tasks.length === 0) {
-        viewRoot.append(emptyNode("还没有任务", "daoyan shot / batch 创建的任务会在这里出现。"));
+        taskSection.append(emptyNode("还没有任务", "daoyan shot / batch 创建的任务会在这里出现。"));
     } else {
-        viewRoot.append(renderTaskList(tasks));
+        taskSection.append(renderTaskList(tasks));
     }
+    overviewMain.append(taskSection);
 }
 
 /**
@@ -3386,6 +3597,18 @@ function renderArtifacts(data) {
     head.append(headText);
     viewRoot.append(head);
 
+    const summaryBar = createElement("div", "collection-summary");
+    summaryBar.append(
+        summaryItem("全部产物", total, "生成结果"),
+        summaryItem("视频", items.filter((item) => item.output.kind === "video").length, "可播放与定稿"),
+        summaryItem(
+            "占用空间",
+            formatBytes(items.reduce((bytes, item) => bytes + (item.output.bytes ?? 0), 0)),
+            "当前工作区",
+        ),
+    );
+    viewRoot.append(summaryBar);
+
     // 筛选栏
     const filters = createElement("div", "filter-bar");
     filters.append(
@@ -3439,7 +3662,7 @@ function renderArtifacts(data) {
     viewRoot.append(filters);
 
     // 结果摘要
-    const summaryHead = createElement("div", "section-head");
+    const summaryHead = createElement("div", "section-head results-head");
     summaryHead.append(createElement("h3", "section-title", "全部产出物"));
     // 摘要
     const summary = createElement("span", "section-meta", "");
@@ -3447,7 +3670,7 @@ function renderArtifacts(data) {
     viewRoot.append(summaryHead);
 
     // 网格
-    const grid = createElement("div", "grid");
+    const grid = createElement("div", "grid artifact-grid");
     viewRoot.append(grid);
 
     /**
@@ -3670,11 +3893,25 @@ function renderTasks(data) {
     );
     head.append(headText);
     viewRoot.append(head);
+    const summary = createElement("div", "collection-summary task-summary");
+    summary.append(
+        summaryItem("全部任务", data.total ?? tasks.length, "当前项目"),
+        summaryItem("进行中", tasks.filter((task) => task.active).length, "排队与运行"),
+        summaryItem("已完成", tasks.filter((task) => task.status === "succeeded").length, "成功任务"),
+        summaryItem(
+            "需关注",
+            tasks.filter((task) => task.status === "failed" || task.status === "interrupted").length,
+            "失败或中断",
+        ),
+    );
+    viewRoot.append(summary);
     if (tasks.length === 0) {
         viewRoot.append(emptyNode("还没有任务", "daoyan run / shot / batch 创建的任务会在这里出现。"));
         return;
     }
-    viewRoot.append(renderTaskList(tasks));
+    const list = renderTaskList(tasks);
+    list.classList.add("task-page-list");
+    viewRoot.append(list);
     tickTaskElapsed();
 }
 
@@ -3702,7 +3939,8 @@ function renderTaskList(tasks) {
  */
 function renderTaskCard(task) {
     // 卡片
-    const card = createElement("article", "task-card");
+    const card = createElement("article", `task-card${task.active ? " active-task" : ""}`);
+    card.dataset.status = task.status;
     // 头部
     const head = createElement("div", "task-head");
     // 标题区
@@ -3955,12 +4193,23 @@ function renderFinals(data) {
     headText.append(createElement("p", "page-subtitle", "daoyan wrap 生成的 final/cut-* 文件。"));
     head.append(headText);
     viewRoot.append(head);
+    const summary = createElement("div", "collection-summary");
+    summary.append(
+        summaryItem("成片版本", items.length, "按时间保留"),
+        summaryItem(
+            "合片段数",
+            items.reduce((total, item) => total + item.clips.length, 0),
+            "已合成镜头",
+        ),
+        summaryItem("总大小", formatBytes(items.reduce((total, item) => total + (item.bytes ?? 0), 0)), "全部版本"),
+    );
+    viewRoot.append(summary);
     if (items.length === 0) {
         viewRoot.append(emptyNode("还没有成片", "完成至少两个镜头后运行 daoyan wrap。"));
         return;
     }
     // 网格
-    const grid = createElement("div", "grid");
+    const grid = createElement("div", "grid final-grid");
     for (const item of items) {
         // 卡片
         const card = createElement("article", "card final-card");
@@ -4038,6 +4287,17 @@ function renderWorkflows(data) {
     headText.append(createElement("p", "page-subtitle", "workflows/ 下的 ComfyUI API 图与 bindings。"));
     head.append(headText);
     viewRoot.append(head);
+    const summary = createElement("div", "collection-summary");
+    summary.append(
+        summaryItem("工作流", items.length, "ComfyUI API 图"),
+        summaryItem(
+            "节点",
+            items.reduce((total, item) => total + item.nodes, 0),
+            "全部图节点",
+        ),
+        summaryItem("默认工作流", items.find((item) => item.default)?.name ?? "未设置", "生成时优先使用"),
+    );
+    viewRoot.append(summary);
     if (items.length === 0) {
         viewRoot.append(emptyNode("还没有工作流", "运行 daoyan workflow new / import 创建工作流。"));
         return;
@@ -4156,11 +4416,13 @@ async function openText(item) {
  * 设置模态框内容。
  */
 function setModal(title, content, counter) {
+    if (modalRoot.hidden) modalPreviousFocus = document.activeElement;
     modalTitle.textContent = title;
     clearNode(modalContent);
     modalContent.append(content);
     modalCounter.textContent = counter ?? "";
     modalRoot.hidden = false;
+    modalClose.focus();
 }
 
 /**
@@ -4173,6 +4435,8 @@ function closeModal() {
     modalCounter.textContent = "";
     playerItems = [];
     playerIndex = 0;
+    if (modalPreviousFocus?.isConnected) modalPreviousFocus.focus();
+    modalPreviousFocus = null;
 }
 
 /**
@@ -4201,6 +4465,18 @@ function handleKeydown(event) {
     if (event.key === "Escape") closeModal();
     else if (event.key === "ArrowLeft") modalPrevStep();
     else if (event.key === "ArrowRight") modalNextStep();
+    else if (event.key === "Tab") {
+        const focusable = [...modalRoot.querySelectorAll("button:not(:disabled), video[controls], audio[controls]")];
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last?.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first?.focus();
+        }
+    }
 }
 
 /**

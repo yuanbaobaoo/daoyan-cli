@@ -2755,6 +2755,216 @@ function filterShots(shots) {
 }
 
 /**
+ * 参考项类型文案。
+ */
+const SHOT_REF_KIND_LABEL = { character: "角色", scene: "场景", voice: "音色" };
+
+/**
+ * 参考项展示名。
+ */
+function shotRefLabel(ref) {
+    // 类型
+    const kind = SHOT_REF_KIND_LABEL[ref.kind] ?? "参考";
+    // 形态
+    const form = ref.kind === "character" && ref.form_name ? ` · ${ref.form_name}` : "";
+    return `${kind} · ${ref.name}${form}`;
+}
+
+/**
+ * 参考项注入说明。
+ */
+function shotRefWireLabel(ref) {
+    if (ref.status === "ready") {
+        return ref.slot !== null && ref.target !== null ? `${ref.slot} → ${ref.target}` : "已注入";
+    }
+    if (ref.status === "missing") return "缺主参考";
+    return "未接入 workflow";
+}
+
+/**
+ * 参考项是否可预览。
+ */
+function shotRefAvailable(ref) {
+    return ref.asset !== null && ref.asset.present === true && ref.asset.lfs_pointer !== true;
+}
+
+/**
+ * 打开参考图 / 参考音频。
+ */
+function previewShotRef(ref) {
+    // 展示名
+    const label = shotRefLabel(ref);
+    if (ref.asset === null) {
+        showToast(`${label} 缺少主参考`, true);
+        return;
+    }
+    if (ref.asset.present !== true) {
+        showToast(`${label} 参考文件不存在：${ref.asset.path}`, true);
+        return;
+    }
+    if (ref.asset.lfs_pointer === true) {
+        showToast(`${label} 仍是 Git LFS pointer，先执行 git lfs pull`, true);
+        return;
+    }
+    if (ref.asset.kind === "image") {
+        openImageUrl(ref.asset.media_url, ref.asset.path);
+        return;
+    }
+    if (ref.asset.kind === "audio") {
+        openPlayer([{ title: ref.asset.path, url: ref.asset.media_url, kind: "audio" }], 0);
+        return;
+    }
+    window.open(ref.asset.media_url, "_blank", "noopener");
+}
+
+/**
+ * 单个参考项。
+ */
+function renderShotRef(ref) {
+    // 可预览
+    const available = shotRefAvailable(ref);
+    // 容器（可预览时用 button）
+    const item = createElement(available ? "button" : "span", `shot-ref shot-ref-${ref.kind} shot-ref-${ref.status}`);
+    if (available) {
+        item.type = "button";
+        item.title = `预览 ${shotRefLabel(ref)} · ${ref.asset.path}`;
+        item.setAttribute("aria-label", `预览 ${shotRefLabel(ref)}`);
+        item.addEventListener("click", () => previewShotRef(ref));
+    } else {
+        item.title = ref.asset === null ? `${shotRefLabel(ref)} 缺少主参考` : `${shotRefLabel(ref)} 参考文件不可用`;
+    }
+    // 缩略图
+    const thumb = createElement("span", "shot-ref-thumb");
+    if (available && ref.asset.kind === "image") {
+        const image = document.createElement("img");
+        image.src = ref.asset.media_url;
+        image.alt = shotRefLabel(ref);
+        image.loading = "lazy";
+        thumb.append(image);
+    } else if (available && ref.asset.kind === "audio") {
+        thumb.append(createElement("span", "shot-ref-glyph", "♪"));
+    } else if (ref.asset !== null && ref.asset.lfs_pointer === true) {
+        thumb.append(createElement("span", "shot-ref-glyph", "LFS"));
+    } else {
+        thumb.append(createElement("span", "shot-ref-glyph", "缺图"));
+    }
+    item.append(thumb);
+    // 文本
+    const copy = createElement("span", "shot-ref-copy");
+    copy.append(createElement("span", "shot-ref-name", shotRefLabel(ref)));
+    copy.append(createElement("span", "shot-ref-wire mono", shotRefWireLabel(ref)));
+    item.append(copy);
+    return item;
+}
+
+/**
+ * 镜头参考图行。
+ */
+function renderShotReferences(shot) {
+    // 仅 story 模式有解析结果
+    if (!Array.isArray(shot.references)) return null;
+    // 容器
+    const row = createElement("div", "shot-line shot-refs");
+    row.append(createElement("span", "shot-line-label", "参考图"));
+    // 内容
+    const body = createElement("div", "shot-refs-body");
+    if (shot.references.length === 0) {
+        body.append(createElement("span", "muted", "本镜没有角色 / 场景参考图。"));
+        row.append(body);
+        return row;
+    }
+    // 列表
+    const list = createElement("div", "shot-ref-list");
+    for (const ref of shot.references) list.append(renderShotRef(ref));
+    body.append(list);
+    // 未接入提示
+    const unwired = shot.references.filter((ref) => ref.status === "unwired");
+    if (unwired.length > 0) {
+        body.append(
+            createElement(
+                "p",
+                "shot-ref-warning",
+                `未接入当前 workflow：${unwired.map((ref) => ref.name).join("、")}。在 workflows/<name>.assets.json 增加槽位后才会参与生成。`,
+            ),
+        );
+    }
+    row.append(body);
+    return row;
+}
+
+/**
+ * 正则转义。
+ */
+function escapeRegExp(value) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * 提示词内联参考项按钮。
+ */
+function promptRefButton(text, ref) {
+    // 按钮
+    const button = createElement(
+        "button",
+        `prompt-ref prompt-ref-${ref.kind}${shotRefAvailable(ref) ? "" : " prompt-ref-missing"}`,
+        text,
+    );
+    button.type = "button";
+    button.title = shotRefAvailable(ref) ? `预览 ${shotRefLabel(ref)}` : `${shotRefLabel(ref)} 参考图不可用`;
+    button.addEventListener("click", () => previewShotRef(ref));
+    return button;
+}
+
+/**
+ * 提示词文本（角色 / 场景名高亮为参考项）。
+ */
+function renderPromptText(shot) {
+    // 段落
+    const paragraph = createElement("p", "");
+    // 提示词
+    const prompt = typeof shot.prompt === "string" ? shot.prompt : "";
+    // 参与高亮的参考项（角色 / 场景）
+    const refs = Array.isArray(shot.references)
+        ? shot.references.filter(
+              (ref) =>
+                  (ref.kind === "character" || ref.kind === "scene") && typeof ref.name === "string" && ref.name !== "",
+          )
+        : [];
+    if (prompt === "" || refs.length === 0) {
+        paragraph.textContent = prompt;
+        return paragraph;
+    }
+    // 名称 -> 参考项（优先可用资产）
+    const byName = new Map();
+    for (const ref of refs) {
+        // 已有项
+        const existing = byName.get(ref.name);
+        if (existing === undefined || (!shotRefAvailable(existing) && shotRefAvailable(ref))) byName.set(ref.name, ref);
+    }
+    // 最长名称优先，避免短名截断长名
+    const names = Array.from(byName.keys()).sort((a, b) => b.length - a.length);
+    // 匹配模式
+    const pattern = new RegExp(`(${names.map(escapeRegExp).join("|")})`, "g");
+    // 游标
+    let cursor = 0;
+    for (const match of prompt.matchAll(pattern)) {
+        // 命中位置
+        const index = match.index ?? 0;
+        if (index > cursor) paragraph.append(document.createTextNode(prompt.slice(cursor, index)));
+        // 参考项
+        const ref = byName.get(match[0]);
+        paragraph.append(promptRefButton(match[0], ref));
+        cursor = index + match[0].length;
+    }
+    if (cursor === 0) {
+        paragraph.textContent = prompt;
+        return paragraph;
+    }
+    if (cursor < prompt.length) paragraph.append(document.createTextNode(prompt.slice(cursor)));
+    return paragraph;
+}
+
+/**
  * 单个分镜卡片。
  */
 function renderShotCard(shot) {
@@ -2791,6 +3001,10 @@ function renderShotCard(shot) {
     cast.append(entityChips(shot.characters, "chip-character"));
     card.append(cast);
 
+    // 参考图
+    const references = renderShotReferences(shot);
+    if (references !== null) card.append(references);
+
     // 制作参数
     const meta = createElement("div", "shot-meta-grid");
     meta.append(createElement("span", "", `seed ${shot.seed}`));
@@ -2808,8 +3022,11 @@ function renderShotCard(shot) {
 
     // 完整提示词
     const promptDetails = createElement("details", "shot-prompt");
-    promptDetails.append(createElement("summary", "", "完整提示词"));
-    promptDetails.append(createElement("p", "", shot.prompt));
+    const referenceCount = Array.isArray(shot.references) ? shot.references.length : 0;
+    promptDetails.append(
+        createElement("summary", "", referenceCount > 0 ? `完整提示词 · 参考图 ${referenceCount}` : "完整提示词"),
+    );
+    promptDetails.append(renderPromptText(shot));
     card.append(promptDetails);
 
     if (shot.notes) card.append(createElement("p", "shot-notes", `备注：${shot.notes}`));

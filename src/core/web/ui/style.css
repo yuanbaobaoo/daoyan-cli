@@ -1301,6 +1301,141 @@ a:hover {
     font-weight: 600;
 }
 
+.shot-refs-body {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+}
+
+.shot-ref-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.shot-ref {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 100%;
+    padding: 5px 8px 5px 5px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-soft);
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.shot-ref:hover {
+    border-color: var(--border-strong);
+}
+
+.shot-ref-thumb {
+    display: flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg);
+}
+
+.shot-ref-thumb img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.shot-ref-glyph {
+    color: var(--text-muted);
+    font-size: 10px;
+}
+
+.shot-ref-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.shot-ref-name {
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.shot-ref-wire {
+    color: var(--text-muted);
+    font-size: 10px;
+    white-space: nowrap;
+}
+
+.shot-ref-character .shot-ref-name {
+    color: var(--green);
+}
+
+.shot-ref-scene .shot-ref-name {
+    color: var(--violet);
+}
+
+.shot-ref-unwired {
+    border-color: color-mix(in srgb, var(--amber) 45%, var(--border));
+    border-style: dashed;
+}
+
+.shot-ref-unwired .shot-ref-wire {
+    color: var(--amber);
+}
+
+.shot-ref-missing {
+    border-color: color-mix(in srgb, var(--red) 35%, var(--border));
+    opacity: 0.85;
+}
+
+.shot-ref-missing .shot-ref-wire {
+    color: var(--red);
+}
+
+.shot-ref-warning {
+    margin: 0;
+    color: var(--amber);
+    font-size: 11px;
+    line-height: 1.6;
+}
+
+.prompt-ref {
+    display: inline;
+    padding: 0 2px;
+    border: none;
+    border-bottom: 1px dashed currentColor;
+    background: transparent;
+    color: var(--green);
+    font: inherit;
+    cursor: pointer;
+}
+
+.prompt-ref-scene {
+    color: var(--violet);
+}
+
+.prompt-ref-missing {
+    border-bottom-style: dotted;
+    color: var(--red);
+}
+
+.prompt-ref:hover {
+    background: var(--bg-soft);
+}
+
 .shot-meta-grid {
     display: flex;
     flex-wrap: wrap;

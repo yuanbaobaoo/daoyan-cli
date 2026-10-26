@@ -3,7 +3,17 @@
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { ProjectConfig, ShotsFile, StoryEntityRef } from "../project/types.mts";
-import { classifyArtifact, buildShotsView, listArtifacts, listFinals, listRunsView, listTasksView } from "./data.mts";
+import {
+    classifyArtifact,
+    buildShotsView,
+    listArtifacts,
+    listFinals,
+    listRunsView,
+    listTasksView,
+    type WebShotAssetRef,
+    type WebShotItem,
+    type WebShotReference,
+} from "./data.mts";
 import { isLfsPointerFile, listAssets, storyMediaUrl } from "../story/assets.mts";
 import { episodeDir, listEpisodeMetas, readEpisodeMeta, readSeries, resolveEpisodeContext } from "../story/paths.mts";
 import {
@@ -16,7 +26,7 @@ import {
     loadVoices,
 } from "../story/store.mts";
 import { computeEpisodeStoryStatus, computeSeriesStoryStatus } from "../story/validate.mts";
-import { buildStoryMap } from "../story/map.mts";
+import { buildStoryMap, type StoryMapAssetRef, type StoryMapResolved } from "../story/map.mts";
 import type { StoryAsset } from "../story/types.mts";
 
 export { storyMediaUrl } from "../story/assets.mts";
@@ -205,6 +215,160 @@ function buildEpisodeShotsView(root: string, episodeId: string): ReturnType<type
 }
 
 /**
+ * 地图资产转 Web 资产。
+ */
+function webAssetOf(asset: StoryMapAssetRef): WebShotAssetRef {
+    return {
+        id: asset.id,
+        path: asset.path,
+        media_url: asset.media_url,
+        kind: classifyArtifact(asset.path),
+        content_type: asset.content_type,
+        present: asset.present,
+        lfs_pointer: asset.lfs_pointer,
+        width: asset.width,
+        height: asset.height,
+    };
+}
+
+/**
+ * 解析角色 owner（id/form）。
+ */
+function splitCharacterOwner(owner: string | null): { id: string; form: string | null } {
+    if (owner === null || owner === "") return { id: "", form: null };
+    // 第一个斜杠
+    const slash = owner.indexOf("/");
+    if (slash > 0 && slash < owner.length - 1) return { id: owner.slice(0, slash), form: owner.slice(slash + 1) };
+    return { id: owner, form: null };
+}
+
+/**
+ * 把 workflow 槽位与 catalog 参考资产写回镜头卡。
+ */
+function attachShotReferences(items: WebShotItem[], map: StoryMapResolved): void {
+    // 事件索引
+    const events = new Map(map.generation.events.map((event) => [event.shot_id, event]));
+    // 角色索引
+    const characters = new Map(map.catalog.characters.map((character) => [character.id, character]));
+    // 场景索引
+    const scenes = new Map(map.catalog.scenes.map((scene) => [scene.id, scene]));
+    // 音色索引
+    const voices = new Map(map.catalog.voices.map((voice) => [voice.id, voice]));
+    for (const item of items) {
+        // 事件
+        const event = events.get(item.id);
+        if (event === undefined) {
+            item.references = [];
+            continue;
+        }
+        // 结果
+        const references: WebShotReference[] = [];
+        // 已被槽位覆盖的 owner（cast 兜底时跳过）
+        const wired = new Set<string>();
+        for (const slot of event.workflow?.slots ?? []) {
+            if (slot.kind === "character") {
+                // 角色 / 形态
+                const parsed = splitCharacterOwner(slot.owner);
+                const character = characters.get(parsed.id);
+                const form = character?.forms.find((entry) => entry.id === (parsed.form ?? character.default_form));
+                wired.add(`character:${parsed.id}`);
+                references.push({
+                    kind: "character",
+                    owner: slot.owner,
+                    name: character?.name ?? parsed.id,
+                    form: parsed.form ?? form?.id ?? null,
+                    form_name: form?.name ?? null,
+                    asset: slot.asset !== null ? webAssetOf(slot.asset) : null,
+                    slot: slot.slot,
+                    target: slot.target,
+                    required: slot.required,
+                    mapping_source: slot.mapping_source,
+                    status: slot.asset !== null ? "ready" : "missing",
+                });
+            } else if (slot.kind === "scene") {
+                // 场景
+                const scene = slot.owner !== null ? scenes.get(slot.owner) : undefined;
+                if (slot.owner !== null) wired.add(`scene:${slot.owner}`);
+                references.push({
+                    kind: "scene",
+                    owner: slot.owner,
+                    name: scene?.name ?? slot.owner ?? "未指定场景",
+                    form: null,
+                    form_name: null,
+                    asset: slot.asset !== null ? webAssetOf(slot.asset) : null,
+                    slot: slot.slot,
+                    target: slot.target,
+                    required: slot.required,
+                    mapping_source: slot.mapping_source,
+                    status: slot.asset !== null ? "ready" : "missing",
+                });
+            } else {
+                // 音色
+                const voice = slot.owner !== null ? voices.get(slot.owner) : undefined;
+                if (slot.owner !== null) wired.add(`voice:${slot.owner}`);
+                references.push({
+                    kind: "voice",
+                    owner: slot.owner,
+                    name: voice?.name ?? slot.owner ?? "未指定音色",
+                    form: null,
+                    form_name: null,
+                    asset: slot.asset !== null ? webAssetOf(slot.asset) : null,
+                    slot: slot.slot,
+                    target: slot.target,
+                    required: slot.required,
+                    mapping_source: slot.mapping_source,
+                    status: slot.asset !== null ? "ready" : "missing",
+                });
+            }
+        }
+        // 未被槽位消费的角色参考图
+        for (const cast of event.cast) {
+            if (wired.has(`character:${cast.id}`)) continue;
+            // 角色 / 形态
+            const character = characters.get(cast.id);
+            const form = character?.forms.find((entry) => entry.id === cast.form);
+            references.push({
+                kind: "character",
+                owner: `${cast.id}/${cast.form}`,
+                name: cast.name,
+                form: cast.form !== "" ? cast.form : null,
+                form_name: cast.form_name !== "" ? cast.form_name : null,
+                asset:
+                    form?.reference_asset !== null && form?.reference_asset !== undefined
+                        ? webAssetOf(form.reference_asset)
+                        : null,
+                slot: null,
+                target: null,
+                required: null,
+                mapping_source: null,
+                status: form?.reference_asset !== null && form?.reference_asset !== undefined ? "unwired" : "missing",
+            });
+        }
+        // 未被槽位消费的场景参考图
+        if (event.scene !== null && !wired.has(`scene:${event.scene.id}`)) {
+            const scene = scenes.get(event.scene.id);
+            references.push({
+                kind: "scene",
+                owner: event.scene.id,
+                name: event.scene.name,
+                form: null,
+                form_name: null,
+                asset:
+                    scene?.reference_asset !== null && scene?.reference_asset !== undefined
+                        ? webAssetOf(scene.reference_asset)
+                        : null,
+                slot: null,
+                target: null,
+                required: null,
+                mapping_source: null,
+                status: scene?.reference_asset !== null && scene?.reference_asset !== undefined ? "unwired" : "missing",
+            });
+        }
+        item.references = references;
+    }
+}
+
+/**
  * 剧集视图。
  */
 export function buildStoryEpisodeView(
@@ -223,8 +387,12 @@ export function buildStoryEpisodeView(
     const content = loadScriptText(root, episodeId);
     // 拆解
     const breakdown = loadBreakdown(root, episodeId);
+    // 剧情图谱与生成上下文（一次推导，供分镜参考图复用）
+    const map = buildStoryMap(root, episodeId, project);
     // 分镜
     const shots = buildEpisodeShotsView(root, episodeId);
+    // 每镜参考图 / 注入槽位
+    if (shots !== null && map !== null) attachShotReferences(shots.shots, map);
     // 任务 / run / 产物 / 成片
     const tasks = listTasksView(root, episodeId);
     // 局部值
@@ -241,7 +409,7 @@ export function buildStoryEpisodeView(
         script: { meta: script, content },
         breakdown,
         shots,
-        map: buildStoryMap(root, episodeId, project),
+        map,
         tasks: tasks.items,
         runs,
         artifacts: artifacts.items,

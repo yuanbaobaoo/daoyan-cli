@@ -445,6 +445,98 @@ export interface WebShotRun {
 }
 
 /**
+ * 镜头参考资产。
+ */
+export interface WebShotAssetRef {
+    /**
+     * 资产 id。
+     */
+    id: string;
+    /**
+     * 项目内相对路径。
+     */
+    path: string;
+    /**
+     * 同源媒体地址。
+     */
+    media_url: string;
+    /**
+     * 展示类型。
+     */
+    kind: ArtifactKind;
+    /**
+     * MIME 类型。
+     */
+    content_type: string;
+    /**
+     * 文件是否存在。
+     */
+    present: boolean;
+    /**
+     * 是否仍是 Git LFS pointer。
+     */
+    lfs_pointer: boolean;
+    /**
+     * 宽度（已知时）。
+     */
+    width: number | null;
+    /**
+     * 高度（已知时）。
+     */
+    height: number | null;
+}
+
+/**
+ * 镜头参考图 / 参考音频。
+ */
+export interface WebShotReference {
+    /**
+     * 资产类型。
+     */
+    kind: "character" | "scene" | "voice";
+    /**
+     * owner 引用（角色为 id/form）。
+     */
+    owner: string | null;
+    /**
+     * 展示名。
+     */
+    name: string;
+    /**
+     * 形态 id。
+     */
+    form: string | null;
+    /**
+     * 形态名。
+     */
+    form_name: string | null;
+    /**
+     * 解析到的资产（缺主参考时为 null）。
+     */
+    asset: WebShotAssetRef | null;
+    /**
+     * 工作流槽位名（未接入时为 null）。
+     */
+    slot: string | null;
+    /**
+     * 注入的节点输入（未接入时为 null）。
+     */
+    target: string | null;
+    /**
+     * 槽位是否必填（未接入时为 null）。
+     */
+    required: boolean | null;
+    /**
+     * 槽位映射来源（未接入时为 null）。
+     */
+    mapping_source: string | null;
+    /**
+     * ready = 已注入；unwired = 有图但 workflow 未声明槽位；missing = 缺主参考。
+     */
+    status: "ready" | "unwired" | "missing";
+}
+
+/**
  * 镜头展示项。
  */
 export interface WebShotItem {
@@ -572,6 +664,10 @@ export interface WebShotItem {
      * 镜头额外参数。
      */
     params: Record<string, unknown> | null;
+    /**
+     * 参考图 / 参考音频（story 模式解析 workflow 槽位后填充）。
+     */
+    references?: WebShotReference[];
 }
 
 /**

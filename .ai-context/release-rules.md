@@ -12,8 +12,16 @@
 1. `package.json` 的 `version`
 2. `src/shared/version.mts` 的 `VERSION`（`--version` / `help --json` / update 检测都用它）
 
-版本格式：`X.Y.Z`（semver）。0.x 阶段约定：minor = 新功能，patch = 修复。
+版本格式：`X.Y.Z`（semver）。
 tag 格式：`v` + 版本号，如 `v0.2.0`——**必须是这个格式**，`update` 命令只识别 `vX.Y.Z`。
+
+### 版本递增规则（默认 patch）
+
+1. **用户没有显式指定版本号时，只递增第三位**：`X.Y.Z → X.Y.(Z+1)`；
+2. minor / major **不自动递增**，即使本次包含新功能或破坏性变更；
+3. **只有用户显式指定版本号时，才使用用户指定的版本号**（如“发 v1.2.0” / “版本用 0.5.0”）；
+4. minor = 新功能、patch = 修复只是语义说明，**不改变默认递增规则**；
+5. 用户指定版本仍需满足 `X.Y.Z` 格式，并同步修改两处版本号。
 
 ## 2. dist 随仓库分发（强制）
 
@@ -33,7 +41,10 @@ CI 在发版时会执行 `git diff --exit-code dist/` 校验 dist 与源码一�
 # 1. 确认要发布的改动已全部提交（工作区干净）
 git status
 
-# 2. 同步修改两处版本号（package.json + src/shared/version.mts）
+# 2. 确定版本号：
+#    - 用户未指定 → 当前版本 patch + 1（只改第三位）
+#    - 用户显式指定 → 严格使用用户给出的 X.Y.Z
+#    然后同步修改两处版本号（package.json + src/shared/version.mts）
 
 # 3. 重新构建并提交 dist
 npm run typecheck && npm run build

@@ -847,8 +847,8 @@ export const COMMANDS: CommandMeta[] = [
             {
                 name: "--host",
                 type: "string",
-                default: "127.0.0.1",
-                description: "监听地址；默认仅本机访问",
+                default: "0.0.0.0",
+                description: "监听地址；默认监听全部网卡（0.0.0.0），仅本机访问请传 127.0.0.1",
             },
             {
                 name: "--open",

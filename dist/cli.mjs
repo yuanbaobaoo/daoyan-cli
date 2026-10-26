@@ -21133,7 +21133,7 @@ var init_web = __esm({
     init_ui();
     init_app();
     init_style();
-    DEFAULT_HOST2 = "127.0.0.1";
+    DEFAULT_HOST2 = "0.0.0.0";
     DEFAULT_PORT = 0;
     MAX_PORT = 65535;
     START_FAILED_HINT = "\u68C0\u67E5\u76D1\u542C\u5730\u5740\u4E0E\u7AEF\u53E3\u5360\u7528\uFF1B\u7AEF\u53E3\u51B2\u7A81\u65F6\u7701\u7565 --port \u8BA9\u7CFB\u7EDF\u5206\u914D\uFF0C\u6216\u6539\u7528 --port <n>\u3002";
@@ -22670,8 +22670,8 @@ var init_registry = __esm({
           {
             name: "--host",
             type: "string",
-            default: "127.0.0.1",
-            description: "\u76D1\u542C\u5730\u5740\uFF1B\u9ED8\u8BA4\u4EC5\u672C\u673A\u8BBF\u95EE"
+            default: "0.0.0.0",
+            description: "\u76D1\u542C\u5730\u5740\uFF1B\u9ED8\u8BA4\u76D1\u542C\u5168\u90E8\u7F51\u5361\uFF080.0.0.0\uFF09\uFF0C\u4EC5\u672C\u673A\u8BBF\u95EE\u8BF7\u4F20 127.0.0.1"
           },
           {
             name: "--open",

@@ -9,7 +9,6 @@ const VIEWS = [
     { id: "scenes", label: "场景", hint: "场景与参考图" },
     { id: "voices", label: "音色", hint: "音色与参考音频" },
     { id: "assets", label: "设定资产", hint: "全部参考资产" },
-    { id: "shots", label: "分镜", hint: "镜头进度与提示词" },
     { id: "artifacts", label: "产出物", hint: "播放与下载" },
     { id: "tasks", label: "任务", hint: "任务与事件" },
     { id: "finals", label: "成片", hint: "合片结果" },
@@ -26,7 +25,8 @@ const API = {
     scenes: "/api/story/scenes",
     voices: "/api/story/voices",
     assets: "/api/story/assets",
-    shots: "/api/shots",
+    project: "/api/project",
+    projectSettings: "/api/project/settings",
     artifacts: "/api/artifacts?limit=500",
     tasks: "/api/tasks",
     finals: "/api/finals",
@@ -42,7 +42,7 @@ const POLL_MS = {
     voices: 10000,
     assets: 10000,
     episode: 4000,
-    shots: 5000,
+    project: 10000,
     artifacts: 5000,
     tasks: 3000,
     finals: 8000,
@@ -179,8 +179,6 @@ let projectRevision = null;
 let revisionRefreshTimer = null;
 // 当前产物筛选
 let artifactFilters = { label: "", status: "", kind: "", search: "" };
-// 当前分镜筛选
-let shotFilters = { character: "", scene: "", status: "", search: "" };
 // 图谱 Tab（graph | timeline）
 let mapTab = "graph";
 // 图谱聚合模式（character | form）
@@ -205,6 +203,10 @@ let playerIndex = 0;
 let toastTimer = null;
 // 最后更新时间
 let lastUpdatedAt = "";
+// 项目生产设置
+let projectSettings = { name: "", mode: "series", audio: true, episode_count: 0, episodes: [] };
+// 底部项目管理导航
+let navBottomRoot = null;
 
 // 侧边导航容器
 let navRoot = null;
@@ -449,9 +451,8 @@ function renderShell() {
                     <p id="brand-project" class="brand-sub" hidden></p>
                 </div>
                 <nav id="nav" class="nav" aria-label="页面导航"></nav>
-                <div class="sidebar-foot">
-                    <code>Ctrl+C</code> 停止服务<br />
-                    数据来自当前项目目录；可确认剧本、生成镜头与定稿。
+                <div class="sidebar-bottom">
+                    <nav id="nav-bottom" class="nav" aria-label="项目管理"></nav>
                 </div>
             </aside>
             <main class="main">
@@ -473,6 +474,7 @@ function renderShell() {
         </div>
     `;
     navRoot = document.querySelector("#nav");
+    navBottomRoot = document.querySelector("#nav-bottom");
     viewRoot = document.querySelector("#view");
     projectNameEl = document.querySelector("#project-name");
     brandProjectEl = document.querySelector("#brand-project");
@@ -487,6 +489,7 @@ function renderShell() {
 function renderNav() {
     clearNode(navRoot);
     for (const view of VIEWS) {
+        if (view.id === "voices" && !projectSettings.audio) continue;
         // 导航按钮
         const button = createElement("button", "nav-item");
         button.type = "button";
@@ -498,6 +501,19 @@ function renderNav() {
         });
         navRoot.append(button);
     }
+    // 底部项目管理
+    if (navBottomRoot !== null) {
+        clearNode(navBottomRoot);
+        const project = createElement("button", "nav-item");
+        project.type = "button";
+        project.dataset.view = "project";
+        project.append(createElement("span", "nav-label", "项目管理"));
+        project.append(createElement("span", "nav-hint", "模式、音频与项目设置"));
+        project.addEventListener("click", () => {
+            window.location.hash = `${HASH_PREFIX}project`;
+        });
+        navBottomRoot.append(project);
+    }
 }
 
 /**
@@ -507,7 +523,7 @@ function setActiveNav() {
     if (navRoot === null) return;
     // 剧集详情归属概览
     const activeView = currentView === "episode" ? "overview" : currentView;
-    for (const button of navRoot.querySelectorAll(".nav-item")) {
+    for (const button of document.querySelectorAll(".nav-item")) {
         button.classList.toggle("active", button.dataset.view === activeView);
     }
 }
@@ -539,6 +555,39 @@ function setProjectName(name) {
 }
 
 /**
+ * 应用项目设置并刷新导航。
+ */
+function applyProjectSettings(data) {
+    projectSettings = {
+        name: typeof data.name === "string" ? data.name : projectSettings.name,
+        mode: data.mode === "single" ? "single" : "series",
+        audio: data.audio !== false,
+        episode_count: typeof data.episode_count === "number" ? data.episode_count : 0,
+        episodes: Array.isArray(data.episodes) ? data.episodes : [],
+    };
+    // 音频关闭时离开音色页
+    if (!projectSettings.audio && currentView === "voices") {
+        currentView = "overview";
+        window.location.hash = `${HASH_PREFIX}overview`;
+    }
+    renderNav();
+    setActiveNav();
+}
+
+/**
+ * 读取项目设置（失败保持旧值）。
+ */
+async function loadProjectSettings() {
+    try {
+        const data = await requestJson(API.project);
+        applyProjectSettings(data);
+        return data;
+    } catch {
+        return null;
+    }
+}
+
+/**
  * 加载顶栏项目信息（不探测引擎）。
  */
 async function loadHeader() {
@@ -551,6 +600,7 @@ async function loadHeader() {
     } catch {
         // 顶栏失败不影响页面主体
     }
+    await loadProjectSettings();
 }
 
 /**
@@ -727,9 +777,12 @@ function onHashChange() {
         } catch {
             view = DEFAULT_VIEW;
         }
+    } else if (raw === "project") {
+        view = "project";
     } else {
         view = VIEW_IDS.has(raw) ? raw : DEFAULT_VIEW;
     }
+    if (view === "voices" && !projectSettings.audio) view = DEFAULT_VIEW;
     currentView = view;
     currentEpisodeId = episodeId;
     mapTab = "graph";
@@ -813,11 +866,11 @@ function renderView(view, data) {
     clearNode(viewRoot);
     if (view === "overview") renderOverview(data);
     else if (view === "episode") renderEpisode(data);
+    else if (view === "project") renderProject(data);
     else if (view === "characters") renderCharacters(data);
     else if (view === "scenes") renderScenes(data);
     else if (view === "voices") renderVoices(data);
     else if (view === "assets") renderAssets(data);
-    else if (view === "shots") renderShots(data);
     else if (view === "artifacts") renderArtifacts(data);
     else if (view === "tasks") renderTasks(data);
     else if (view === "finals") renderFinals(data);
@@ -835,16 +888,6 @@ function statCard(label, value, hint) {
     card.append(createElement("p", "stat-value", value));
     if (hint !== undefined) card.append(createElement("p", "stat-hint", hint));
     return card;
-}
-
-/**
- * story 模式隐藏 legacy 分镜入口。
- */
-function hideLegacyShotsNav() {
-    if (navRoot === null) return;
-    // 分镜导航
-    const button = navRoot.querySelector('.nav-item[data-view="shots"]');
-    if (button !== null) button.remove();
 }
 
 /**
@@ -902,20 +945,20 @@ function assetNode(asset, compact) {
  * 系列概览。
  */
 function renderStorySeries(story) {
-    hideLegacyShotsNav();
     // 区块头
+    const single = projectSettings.mode === "single";
     const head = createElement("div", "section-head");
-    head.append(createElement("h3", "section-title", "剧集"));
-    head.append(createElement("span", "section-meta", `${story.series.episodes_total} 集`));
+    head.append(createElement("h3", "section-title", single ? "视频" : "剧集"));
+    head.append(createElement("span", "section-meta", single ? "单视频项目" : `${story.series.episodes_total} 集`));
     viewRoot.append(head);
     // 剧集网格
     const grid = createElement("div", "grid");
-    for (const episode of story.episodes) {
+    for (const episode of single ? story.episodes.slice(0, 1) : story.episodes) {
         // 卡片
         const card = createElement("article", "card episode-card");
         // 内容
         const body = createElement("div", "card-body");
-        body.append(createElement("p", "eyebrow", `第 ${episode.number} 集`));
+        body.append(createElement("p", "eyebrow", single ? "单视频" : `第 ${episode.number} 集`));
         body.append(createElement("h3", "card-title", episode.title));
         // 元信息
         const meta = createElement("div", "card-meta");
@@ -935,7 +978,7 @@ function renderStorySeries(story) {
         }
         // 操作
         const actions = createElement("div", "card-actions");
-        const open = createElement("button", "button", "查看剧集");
+        const open = createElement("button", "button", single ? "打开视频" : "查看剧集");
         open.type = "button";
         open.addEventListener("click", () => {
             window.location.hash = `${HASH_PREFIX}episode/${encodeURIComponent(episode.id)}`;
@@ -961,15 +1004,17 @@ function renderStorySeries(story) {
  * 剧集详情。
  */
 function renderEpisode(data) {
-    hideLegacyShotsNav();
     // 剧集 / 状态
     const episode = data.episode;
     const status = data.status;
     // 页头
     const head = createElement("div", "view-head");
     const headText = createElement("div");
-    headText.append(createElement("p", "eyebrow", `Episode ${episode.id}`));
-    headText.append(createElement("h2", "page-title", `第 ${episode.number} 集 · ${episode.title}`));
+    const single = projectSettings.mode === "single";
+    headText.append(createElement("p", "eyebrow", single ? "VIDEO" : `Episode ${episode.id}`));
+    headText.append(
+        createElement("h2", "page-title", single ? episode.title : `第 ${episode.number} 集 · ${episode.title}`),
+    );
     headText.append(createElement("p", "page-subtitle", episode.summary ?? ""));
     head.append(headText);
     // 返回
@@ -997,8 +1042,8 @@ function renderEpisode(data) {
         callout.append(list);
         viewRoot.append(callout);
     }
-    // 剧情图谱
-    viewRoot.append(renderStoryMap(data.map));
+    // 剧情图谱（单视频模式隐藏）
+    if (!single) viewRoot.append(renderStoryMap(data.map));
     // 剧本
     const scriptMeta = data.script.meta ?? {};
     const scriptApproved = scriptMeta.status === "approved";
@@ -1049,7 +1094,7 @@ function renderEpisode(data) {
     );
     viewRoot.append(breakdownHead);
     if (breakdown === null) {
-        viewRoot.append(emptyNode("还没有拆解", "使用 daoyan story breakdown set 写入本集角色、形态、场景与音色。"));
+        viewRoot.append(emptyNode("还没有拆解", "使用 daoyan story breakdown set 写入本集角色、形态与场景。"));
     } else {
         const list = createElement("div", "layout-two");
         // 角色
@@ -1062,9 +1107,11 @@ function renderEpisode(data) {
         cast.append(castList);
         // 场景 / 音色 / beat
         const other = createElement("div", "panel");
-        other.append(createElement("h4", "panel-title", "场景 / 音色 / Beat"));
+        other.append(createElement("h4", "panel-title", projectSettings.audio ? "场景 / 音色 / Beat" : "场景 / Beat"));
         other.append(createElement("p", "", `场景：${breakdown.scenes.join("、") || "无"}`));
-        other.append(createElement("p", "", `音色：${breakdown.voices.join("、") || "无"}`));
+        if (projectSettings.audio) {
+            other.append(createElement("p", "", `音色：${breakdown.voices.join("、") || "无"}`));
+        }
         other.append(createElement("p", "", `Beat：${(breakdown.beats ?? []).map((b) => b.id).join("、") || "无"}`));
         list.append(cast);
         list.append(other);
@@ -2128,6 +2175,139 @@ function renderMapToolbar(map, refresh) {
 }
 
 /**
+ * 项目管理页。
+ */
+function renderProject(data) {
+    // 页头
+    const head = createElement("div", "view-head");
+    const headText = createElement("div");
+    headText.append(createElement("p", "eyebrow", "Project"));
+    headText.append(createElement("h2", "page-title", "项目管理"));
+    headText.append(createElement("p", "page-subtitle", "配置视频模式与音频；保存后立即生效。"));
+    head.append(headText);
+    viewRoot.append(head);
+
+    // 基本信息
+    const info = createElement("div", "panel settings-panel");
+    info.append(createElement("h3", "panel-title", "项目信息"));
+    const infoList = createElement("div", "settings-rows");
+    infoList.append(settingsRow("项目名", data.name ?? "—"));
+    infoList.append(settingsRow("当前剧集", `${data.episode_count ?? 0} 集`));
+    infoList.append(settingsRow("音频", data.audio ? "需要音频" : "不需要音频"));
+    info.append(infoList);
+    viewRoot.append(info);
+
+    // 视频模式
+    const modePanel = createElement("div", "panel settings-panel");
+    modePanel.append(createElement("h3", "panel-title", "视频模式"));
+    const singleDisabled = (data.episode_count ?? 0) > 1;
+    const modeGroup = createElement("div", "settings-options");
+    modeGroup.append(
+        modeOption(
+            "production-mode",
+            "single",
+            "单视频",
+            "只有一集；隐藏剧集列表与剧情图谱。",
+            data.mode === "single",
+            singleDisabled,
+        ),
+    );
+    modeGroup.append(
+        modeOption(
+            "production-mode",
+            "series",
+            "多集",
+            "可新增剧集；显示系列、剧集与剧情图谱。",
+            data.mode === "series",
+            false,
+        ),
+    );
+    modePanel.append(modeGroup);
+    if (singleDisabled) {
+        modePanel.append(
+            createElement(
+                "p",
+                "settings-hint text-warn",
+                `当前有 ${data.episode_count} 集，只有一集时才能切换为单视频。请先删除多余剧集。`,
+            ),
+        );
+    }
+    viewRoot.append(modePanel);
+
+    // 音频
+    const audioPanel = createElement("div", "panel settings-panel");
+    audioPanel.append(createElement("h3", "panel-title", "音频"));
+    const audioOption = createElement("label", "settings-check");
+    const audioInput = document.createElement("input");
+    audioInput.type = "checkbox";
+    audioInput.checked = data.audio !== false;
+    audioOption.append(audioInput);
+    const audioCopy = createElement("span");
+    audioCopy.append(createElement("strong", "", "需要音频"));
+    audioCopy.append(
+        createElement("span", "settings-hint", "关闭后隐藏音色页面与台词选项，生成时忽略音色槽位；已有数据保留。"),
+    );
+    audioOption.append(audioCopy);
+    audioPanel.append(audioOption);
+    viewRoot.append(audioPanel);
+
+    // 保存
+    const actions = createElement("div", "card-actions");
+    const save = createElement("button", "button", "保存设置");
+    save.type = "button";
+    save.addEventListener("click", async () => {
+        if (save.disabled) return;
+        save.disabled = true;
+        save.textContent = "保存中…";
+        // 目标模式
+        const checked = viewRoot.querySelector('input[name="production-mode"]:checked');
+        const mode = checked !== null && checked.value === "single" ? "single" : "series";
+        try {
+            const updated = await postJson(API.projectSettings, { mode, audio: audioInput.checked });
+            applyProjectSettings({ ...data, ...updated });
+            showToast("项目设置已保存");
+            await reloadView();
+            void loadHeader();
+        } catch (error) {
+            showToast(error instanceof Error ? error.message : "保存失败", true);
+            save.disabled = false;
+            save.textContent = "保存设置";
+        }
+    });
+    actions.append(save);
+    viewRoot.append(actions);
+}
+
+/**
+ * 设置行。
+ */
+function settingsRow(label, value) {
+    const row = createElement("div", "settings-row");
+    row.append(createElement("span", "settings-label", label));
+    row.append(createElement("span", "settings-value", value));
+    return row;
+}
+
+/**
+ * 模式单选项。
+ */
+function modeOption(name, value, label, hint, checked, disabled) {
+    const option = createElement("label", `settings-option${disabled ? " disabled" : ""}`);
+    const input = document.createElement("input");
+    input.type = "radio";
+    input.name = name;
+    input.value = value;
+    input.checked = checked;
+    input.disabled = disabled;
+    option.append(input);
+    const copy = createElement("span");
+    copy.append(createElement("strong", "", label));
+    copy.append(createElement("span", "settings-hint", hint));
+    option.append(copy);
+    return option;
+}
+
+/**
  * 角色页。
  */
 function renderCharacters(data) {
@@ -2266,10 +2446,12 @@ function renderAssets(data) {
     headText.append(createElement("p", "page-subtitle", "参考图与参考音频；* 表示当前主参考。"));
     head.append(headText);
     viewRoot.append(head);
-    // 资产
-    const items = Array.isArray(data.items) ? data.items : [];
+    // 资产（音频关闭时隐藏音色资产）
+    const items = (Array.isArray(data.items) ? data.items : []).filter(
+        (item) => projectSettings.audio || item.owner_kind !== "voice",
+    );
     if (items.length === 0) {
-        viewRoot.append(emptyNode("还没有设定资产", "使用 daoyan story asset add 入库参考图 / 音频。"));
+        viewRoot.append(emptyNode("还没有设定资产", "使用 daoyan story asset add 入库参考图。"));
         return;
     }
     const grid = createElement("div", "grid");
@@ -2329,14 +2511,14 @@ function renderOverview(data) {
     if (story !== null) {
         statsGrid.append(
             statCard(
-                "剧集",
+                projectSettings.mode === "single" ? "视频" : "剧集",
                 `${story.series.episodes_ready ?? 0}/${story.series.episodes_total ?? 0}`,
-                "可拍 / 总集数",
+                projectSettings.mode === "single" ? "可拍 / 总数" : "可拍 / 总集数",
             ),
         );
         statsGrid.append(statCard("角色", stats.characters_total ?? 0, `${stats.forms_total ?? 0} 个形态`));
         statsGrid.append(statCard("场景", stats.scenes_total ?? 0, "全局场景"));
-        statsGrid.append(statCard("音色", stats.voices_total ?? 0, "全局音色"));
+        if (projectSettings.audio) statsGrid.append(statCard("音色", stats.voices_total ?? 0, "全局音色"));
         statsGrid.append(statCard("设定资产", stats.assets_total ?? 0, "参考图 / 音频"));
         statsGrid.append(statCard("镜头", stats.shots_total ?? 0, `成功 run ${stats.runs_succeeded ?? 0}`));
     } else {
@@ -2671,428 +2853,6 @@ function renderEnvironmentPanel(data) {
         panel.append(next);
     }
     return panel;
-}
-
-/**
- * 分镜页。
- */
-function renderShots(data) {
-    if (data === null) {
-        // 页头
-        const head = createElement("div", "view-head");
-        head.append(createElement("h2", "page-title", "分镜"));
-        viewRoot.append(head);
-        viewRoot.append(emptyNode("未配置 shots.json", "在项目根创建 shots.json 后刷新。"));
-        return;
-    }
-    // 页面标题
-    const title = data.title !== null && data.title !== undefined ? data.title : "分镜";
-    // 统计
-    const stats = data.summary ?? {};
-    // 页头
-    const head = createElement("div", "view-head");
-    // 页头文本
-    const headText = createElement("div");
-    headText.append(createElement("p", "eyebrow", "Storyboard"));
-    headText.append(createElement("h2", "page-title", title));
-    // 页头副标题
-    const subtitle = [];
-    if (data.style_prefix) subtitle.push(`风格 ${data.style_prefix}`);
-    if (data.workflow) subtitle.push(`workflow ${data.workflow}`);
-    if (stats.resolution) subtitle.push(stats.resolution);
-    if (stats.fps) subtitle.push(`${stats.fps} fps`);
-    headText.append(createElement("p", "page-subtitle", subtitle.join(" · ") || "按镜头查看内容、人物、场景与产出"));
-    head.append(headText);
-    viewRoot.append(head);
-
-    if (data.synopsis !== null && data.synopsis !== undefined) {
-        viewRoot.append(createElement("p", "profile-synopsis", data.synopsis));
-    }
-
-    // 统计卡片
-    const statsGrid = createElement("div", "stats-grid");
-    statsGrid.append(statCard("镜头", `${stats.shots_done ?? 0}/${stats.shots_total ?? 0}`, "已完成 / 总数"));
-    statsGrid.append(statCard("人物", stats.characters_total ?? 0, "全片角色"));
-    statsGrid.append(statCard("场景", stats.scenes_total ?? 0, "全片场景"));
-    statsGrid.append(
-        statCard(
-            "产出物",
-            stats.artifacts_total ?? 0,
-            `${stats.total_frames ?? 0} 帧 · ${
-                stats.total_duration_seconds !== null && stats.total_duration_seconds !== undefined
-                    ? formatSeconds(stats.total_duration_seconds)
-                    : "部分镜头未知"
-            }`,
-        ),
-    );
-    viewRoot.append(statsGrid);
-
-    // 镜头列表
-    const shots = Array.isArray(data.shots) ? data.shots : [];
-    if (shots.length === 0) {
-        viewRoot.append(emptyNode("还没有镜头", "在 shots.json 的 shots 数组里添加镜头。"));
-        return;
-    }
-
-    // 人物筛选值 -> 名称
-    const characterOptions = {};
-    for (const entity of Array.isArray(data.characters) ? data.characters : []) {
-        characterOptions[entityKey(entity)] = entity.name;
-    }
-    // 场景筛选值 -> 名称
-    const sceneOptions = {};
-    for (const entity of Array.isArray(data.scenes) ? data.scenes : []) {
-        sceneOptions[entityKey(entity)] = entity.name;
-    }
-    // 状态文案
-    const statusLabels = { done: "已完成", pending: "未完成", failed: "失败", running: "运行中" };
-
-    // 筛选栏
-    const filters = createElement("div", "filter-bar");
-    filters.append(
-        buildSelect(
-            "人物",
-            Object.keys(characterOptions),
-            shotFilters.character,
-            (value) => {
-                shotFilters.character = value;
-                refresh();
-            },
-            "全部人物",
-            characterOptions,
-        ),
-    );
-    filters.append(
-        buildSelect(
-            "场景",
-            Object.keys(sceneOptions),
-            shotFilters.scene,
-            (value) => {
-                shotFilters.scene = value;
-                refresh();
-            },
-            "全部场景",
-            sceneOptions,
-        ),
-    );
-    filters.append(
-        buildSelect(
-            "状态",
-            ["done", "pending", "failed", "running"],
-            shotFilters.status,
-            (value) => {
-                shotFilters.status = value;
-                refresh();
-            },
-            "全部状态",
-            statusLabels,
-        ),
-    );
-    // 搜索框
-    const search = createElement("input", "input search");
-    search.type = "search";
-    search.placeholder = "搜索镜号 / 内容 / 人物 / 场景";
-    search.value = shotFilters.search;
-    search.addEventListener("input", () => {
-        shotFilters.search = search.value;
-        refresh();
-    });
-    filters.append(search);
-    viewRoot.append(filters);
-
-    // 结果头
-    const listHead = createElement("div", "section-head");
-    listHead.append(createElement("h3", "section-title", "分镜列表"));
-    // 结果摘要
-    const resultMeta = createElement("span", "section-meta", "");
-    listHead.append(resultMeta);
-    viewRoot.append(listHead);
-
-    // 镜头网格
-    const grid = createElement("div", "grid shot-grid");
-    viewRoot.append(grid);
-
-    /**
-     * 按筛选条件刷新镜头卡片。
-     */
-    function refresh() {
-        // 过滤结果
-        const filtered = filterShots(shots);
-        resultMeta.textContent = `显示 ${filtered.length} / ${shots.length}`;
-        clearNode(grid);
-        if (filtered.length === 0) {
-            grid.append(emptyNode("没有匹配的镜头", "调整人物、场景、状态或搜索条件。"));
-            return;
-        }
-        for (const shot of filtered) grid.append(renderShotCard(shot));
-    }
-
-    refresh();
-}
-
-/**
- * 按当前筛选条件过滤镜头。
- */
-function filterShots(shots) {
-    // 搜索词
-    const search = shotFilters.search.trim().toLowerCase();
-    return shots.filter((shot) => {
-        if (
-            shotFilters.character !== "" &&
-            !(
-                Array.isArray(shot.characters) &&
-                shot.characters.some((entity) => entityKey(entity) === shotFilters.character)
-            )
-        ) {
-            return false;
-        }
-        if (
-            shotFilters.scene !== "" &&
-            (shot.scene === null || shot.scene === undefined || entityKey(shot.scene) !== shotFilters.scene)
-        ) {
-            return false;
-        }
-        if (shotFilters.status === "done" && shot.done !== true) return false;
-        if (shotFilters.status === "pending" && shot.done === true) return false;
-        if (shotFilters.status === "failed" && shot.latest_status !== "failed") return false;
-        if (shotFilters.status === "running" && shot.latest_status !== "running" && shot.latest_status !== "queued") {
-            return false;
-        }
-        if (search !== "") {
-            // 搜索文本
-            const haystack = `${shot.id} ${shot.title ?? ""} ${shot.slug ?? ""} ${shot.summary} ${shot.prompt} ${(
-                shot.characters ?? []
-            )
-                .map((entity) => entity.name)
-                .join(" ")} ${shot.scene !== null && shot.scene !== undefined ? shot.scene.name : ""}`.toLowerCase();
-            if (!haystack.includes(search)) return false;
-        }
-        return true;
-    });
-}
-
-/**
- * 参考项类型文案。
- */
-const SHOT_REF_KIND_LABEL = { character: "角色", scene: "场景", voice: "音色" };
-
-/**
- * 参考项展示名。
- */
-function shotRefLabel(ref) {
-    // 类型
-    const kind = SHOT_REF_KIND_LABEL[ref.kind] ?? "参考";
-    // 形态
-    const form = ref.kind === "character" && ref.form_name ? ` · ${ref.form_name}` : "";
-    return `${kind} · ${ref.name}${form}`;
-}
-
-/**
- * 参考项注入说明。
- */
-function shotRefWireLabel(ref) {
-    if (ref.status === "ready") {
-        return ref.slot !== null && ref.target !== null ? `${ref.slot} → ${ref.target}` : "已注入";
-    }
-    if (ref.status === "missing") return "缺主参考";
-    return "未接入 workflow";
-}
-
-/**
- * 参考项是否可预览。
- */
-function shotRefAvailable(ref) {
-    return ref.asset !== null && ref.asset.present === true && ref.asset.lfs_pointer !== true;
-}
-
-/**
- * 打开参考图 / 参考音频。
- */
-function previewShotRef(ref) {
-    // 展示名
-    const label = shotRefLabel(ref);
-    if (ref.asset === null) {
-        showToast(`${label} 缺少主参考`, true);
-        return;
-    }
-    if (ref.asset.present !== true) {
-        showToast(`${label} 参考文件不存在：${ref.asset.path}`, true);
-        return;
-    }
-    if (ref.asset.lfs_pointer === true) {
-        showToast(`${label} 仍是 Git LFS pointer，先执行 git lfs pull`, true);
-        return;
-    }
-    if (ref.asset.kind === "image") {
-        openImageUrl(ref.asset.media_url, ref.asset.path);
-        return;
-    }
-    if (ref.asset.kind === "audio") {
-        openPlayer([{ title: ref.asset.path, url: ref.asset.media_url, kind: "audio" }], 0);
-        return;
-    }
-    window.open(ref.asset.media_url, "_blank", "noopener");
-}
-
-/**
- * 单个参考项。
- */
-function renderShotRef(ref) {
-    // 可预览
-    const available = shotRefAvailable(ref);
-    // 容器（可预览时用 button）
-    const item = createElement(available ? "button" : "span", `shot-ref shot-ref-${ref.kind} shot-ref-${ref.status}`);
-    if (available) {
-        item.type = "button";
-        item.title = `预览 ${shotRefLabel(ref)} · ${ref.asset.path}`;
-        item.setAttribute("aria-label", `预览 ${shotRefLabel(ref)}`);
-        item.addEventListener("click", () => previewShotRef(ref));
-    } else {
-        item.title = ref.asset === null ? `${shotRefLabel(ref)} 缺少主参考` : `${shotRefLabel(ref)} 参考文件不可用`;
-    }
-    // 缩略图
-    const thumb = createElement("span", "shot-ref-thumb");
-    if (available && ref.asset.kind === "image") {
-        const image = document.createElement("img");
-        image.src = ref.asset.media_url;
-        image.alt = shotRefLabel(ref);
-        image.loading = "lazy";
-        thumb.append(image);
-    } else if (available && ref.asset.kind === "audio") {
-        thumb.append(createElement("span", "shot-ref-glyph", "♪"));
-    } else if (ref.asset !== null && ref.asset.lfs_pointer === true) {
-        thumb.append(createElement("span", "shot-ref-glyph", "LFS"));
-    } else {
-        thumb.append(createElement("span", "shot-ref-glyph", "缺图"));
-    }
-    item.append(thumb);
-    // 文本
-    const copy = createElement("span", "shot-ref-copy");
-    copy.append(createElement("span", "shot-ref-name", shotRefLabel(ref)));
-    copy.append(createElement("span", "shot-ref-wire mono", shotRefWireLabel(ref)));
-    item.append(copy);
-    return item;
-}
-
-/**
- * 镜头参考图行。
- */
-function renderShotReferences(shot) {
-    // 仅 story 模式有解析结果
-    if (!Array.isArray(shot.references)) return null;
-    // 容器
-    const row = createElement("div", "shot-line shot-refs");
-    row.append(createElement("span", "shot-line-label", "参考图"));
-    // 内容
-    const body = createElement("div", "shot-refs-body");
-    if (shot.references.length === 0) {
-        body.append(createElement("span", "muted", "本镜没有角色 / 场景参考图。"));
-        row.append(body);
-        return row;
-    }
-    // 列表
-    const list = createElement("div", "shot-ref-list");
-    for (const ref of shot.references) list.append(renderShotRef(ref));
-    body.append(list);
-    // 未接入提示
-    const unwired = shot.references.filter((ref) => ref.status === "unwired");
-    if (unwired.length > 0) {
-        body.append(
-            createElement(
-                "p",
-                "shot-ref-warning",
-                `未接入当前 workflow：${unwired.map((ref) => ref.name).join("、")}。在 workflows/<name>.assets.json 增加槽位后才会参与生成。`,
-            ),
-        );
-    }
-    row.append(body);
-    return row;
-}
-
-/**
- * 正则转义。
- */
-function escapeRegExp(value) {
-    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-/**
- * 提示词内联参考项按钮。
- */
-function promptRefButton(text, ref) {
-    // 按钮
-    const button = createElement(
-        "button",
-        `prompt-ref prompt-ref-${ref.kind}${shotRefAvailable(ref) ? "" : " prompt-ref-missing"}`,
-        text,
-    );
-    button.type = "button";
-    button.title = shotRefAvailable(ref) ? `预览 ${shotRefLabel(ref)}` : `${shotRefLabel(ref)} 参考图不可用`;
-    button.addEventListener("click", () => previewShotRef(ref));
-    return button;
-}
-
-/**
- * 提示词文本（角色 / 场景名高亮为参考项）。
- */
-function renderPromptText(shot) {
-    // 段落
-    const paragraph = createElement("p", "");
-    // 提示词
-    const prompt = typeof shot.prompt === "string" ? shot.prompt : "";
-    // 参与高亮的参考项（角色 / 场景）
-    const refs = Array.isArray(shot.references)
-        ? shot.references.filter(
-              (ref) =>
-                  (ref.kind === "character" || ref.kind === "scene") && typeof ref.name === "string" && ref.name !== "",
-          )
-        : [];
-    if (prompt === "" || refs.length === 0) {
-        paragraph.textContent = prompt;
-        return paragraph;
-    }
-    // 名称 -> 参考项（优先可用资产）
-    const byName = new Map();
-    for (const ref of refs) {
-        // 已有项
-        const existing = byName.get(ref.name);
-        if (existing === undefined || (!shotRefAvailable(existing) && shotRefAvailable(ref))) byName.set(ref.name, ref);
-    }
-    // 最长名称优先，避免短名截断长名
-    const names = Array.from(byName.keys()).sort((a, b) => b.length - a.length);
-    // 匹配模式
-    const pattern = new RegExp(`(${names.map(escapeRegExp).join("|")})`, "g");
-    // 游标
-    let cursor = 0;
-    for (const match of prompt.matchAll(pattern)) {
-        // 命中位置
-        const index = match.index ?? 0;
-        if (index > cursor) paragraph.append(document.createTextNode(prompt.slice(cursor, index)));
-        // 参考项
-        const ref = byName.get(match[0]);
-        paragraph.append(promptRefButton(match[0], ref));
-        cursor = index + match[0].length;
-    }
-    if (cursor === 0) {
-        paragraph.textContent = prompt;
-        return paragraph;
-    }
-    if (cursor < prompt.length) paragraph.append(document.createTextNode(prompt.slice(cursor)));
-    return paragraph;
-}
-
-/**
- * 请求生成 / 重新生成镜头。
- */
-async function requestShotGeneration(shot, regenerate) {
-    // story 模式按集提交；legacy 走根分镜
-    if (currentEpisodeId !== null) {
-        return postJson(
-            `/api/episodes/${encodeURIComponent(currentEpisodeId)}/shots/${encodeURIComponent(shot.id)}/generate`,
-            { regenerate },
-        );
-    }
-    return postJson("/api/shots/generate", { shot_id: shot.id, regenerate });
 }
 
 /**
@@ -4198,8 +3958,9 @@ function handleKeydown(event) {
 /**
  * 启动应用。
  */
-function start() {
+async function start() {
     renderShell();
+    await loadProjectSettings();
     renderNav();
     setActiveNav();
     modalClose.addEventListener("click", closeModal);
@@ -4219,4 +3980,4 @@ function start() {
     onHashChange();
 }
 
-start();
+void start();

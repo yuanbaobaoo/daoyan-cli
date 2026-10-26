@@ -157,9 +157,9 @@ export const COMMANDS: CommandMeta[] = [
         group: "project",
         summary: "在当前目录立项：local 部署项目专属 ComfyUI，remote 绑定外部服务",
         usage:
-            "daoyan init --mode=local [--modelpath <路径>] [--version <tag>] [--mirror <镜像>] " +
-            "[--fallback-mirror <镜像|none>] [--torch-index <url>] [--torch-cuda <cuXXX>] [--torch-cpu] [--no-cache] [--no-skill] [--no-git]\n" +
-            "daoyan init --mode=remote --url <url> [--no-skill] [--no-git]",
+            "daoyan init --mode=local|remote [--production single|series] [--modelpath <路径>] [--version <tag>] " +
+            "[--mirror <镜像>] [--fallback-mirror <镜像|none>] [--torch-index <url>] [--torch-cuda <cuXXX>] [--torch-cpu] [--no-cache] [--no-skill] [--no-git]\n" +
+            "daoyan init --mode=remote --url <url> [--production single|series] [--no-skill] [--no-git]",
         flags: [
             {
                 name: "--mode",
@@ -167,6 +167,13 @@ export const COMMANDS: CommandMeta[] = [
                 required: true,
                 enum: ["local", "remote"],
                 description: "执行模式（必填，无默认值）",
+            },
+            {
+                name: "--production",
+                type: "single|series",
+                default: "single",
+                enum: ["single", "series"],
+                description: "生产模式：单视频 / 多集（默认 single）",
             },
             { name: "--modelpath", type: "path", description: "local：外部模型根目录（已存在）" },
             { name: "--url", type: "url", description: "remote：外部 ComfyUI base URL（必填）" },
@@ -256,15 +263,6 @@ export const COMMANDS: CommandMeta[] = [
 
     // ---- 剧本与设定 ----
     {
-        name: "story init",
-        group: "story",
-        summary: "启用多集短剧模式：创建 story/、episodes/ep01、资产目录与 LFS 规则",
-        usage: "daoyan story init [--json]",
-        implemented: true,
-        jsonShape: { created: "string[]", episodes: "string[]" },
-        run: (ctx, args) => runStory(ctx, ["init", ...args]),
-    },
-    {
         name: "story series",
         group: "story",
         summary: "查看 / 修改系列标题、简介与类型",
@@ -278,7 +276,7 @@ export const COMMANDS: CommandMeta[] = [
         summary: "新增 / 列出 / 查看 / 修改剧集（id 不可变，number 全系列唯一）",
         usage:
             "daoyan story episode add --id <id> --number <n> --title <t> [--summary <s>] [--json]\n" +
-            "daoyan story episode list|show|set ...",
+            "daoyan story episode list|show|set|remove ...",
         implemented: true,
         run: (ctx, args) => runStory(ctx, ["episode", ...args]),
     },

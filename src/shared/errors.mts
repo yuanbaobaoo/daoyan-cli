@@ -27,6 +27,8 @@ export const ERROR_CODES = [
     "story_invalid",
     "story_stale",
     "story_gate_failed",
+    "mode_conflict",
+    "feature_disabled",
     "asset_not_found",
     "asset_invalid",
     // 引擎
@@ -126,8 +128,8 @@ export const ERROR_META: Record<ErrCode, ErrorMeta> = {
 
     story_not_found: {
         retryable: false,
-        hint: "先运行 daoyan story init 启用多集剧本与设定集。",
-        nextActions: ["story init"],
+        hint: "请在新目录重新执行 daoyan init --mode=local|remote。",
+        nextActions: ["init --mode=local"],
     },
     episode_not_found: {
         retryable: false,
@@ -156,6 +158,14 @@ export const ERROR_META: Record<ErrCode, ErrorMeta> = {
         retryable: false,
         hint: "按 details.blockers 修复剧本、拆解、资产或工作流后再拍摄。",
         nextActions: ["story status --episode <id> --json"],
+    },
+    mode_conflict: {
+        retryable: false,
+        hint: "切换为单视频前先删除多余剧集；用 story episode list 查看。",
+    },
+    feature_disabled: {
+        retryable: false,
+        hint: "该项目已关闭音频；在 Web 项目管理开启音频后重试。",
     },
     asset_not_found: {
         retryable: false,

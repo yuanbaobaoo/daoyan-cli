@@ -8,7 +8,8 @@ import { emitData } from "../shared/json.mts";
 import { say, warn } from "../shared/log.mts";
 import type { CliContext } from "../shared/context.mts";
 import { splitInlineFlag, takeValue, usageError } from "../shared/args.mts";
-import { loadMachineIfExists, loadShotsIfExists, requireProject } from "../core/project/config.mts";
+import { loadMachineIfExists, requireProject } from "../core/project/config.mts";
+import { storyEnabled } from "../core/story/paths.mts";
 import { onSignal } from "../shared/signals.mts";
 import { startWebServer } from "../core/web/server.mts";
 import { isLoopbackHost } from "../core/web/addresses.mts";
@@ -115,10 +116,15 @@ export async function runWeb(ctx: CliContext, args: string[]): Promise<number> {
     const flags = parseArgs(args);
     // 项目根与配置
     const { root, config: project } = requireProject(ctx);
+    if (!storyEnabled(root)) {
+        throw new DaoyanCliError({
+            code: "story_not_found",
+            message: "旧项目结构不再支持（缺少 story/series.json）",
+            hint: "请在新目录重新执行 daoyan init --mode=local|remote。",
+        });
+    }
     // 本机配置（缺失时只读展示共享数据）
     const machine = loadMachineIfExists(root);
-    // 分镜
-    const shots = loadShotsIfExists(root);
     // 当前命令注册表（Skill stale 判定）
     const { COMMANDS } = await import("./registry.mts");
     // 实际监听地址
@@ -134,7 +140,6 @@ export async function runWeb(ctx: CliContext, args: string[]): Promise<number> {
             root,
             project,
             machine,
-            shots,
             commands: COMMANDS,
             assets: { index_html: indexHtml, app_js: appJs, style_css: styleCss },
             host,
@@ -162,7 +167,7 @@ export async function runWeb(ctx: CliContext, args: string[]): Promise<number> {
         say(`daoyan web · ${project.name} · ${machine?.engine.mode ?? "未绑定本机"}`);
         for (const url of handle.urls.local) say(`  Local:   ${url}`);
         for (const url of handle.urls.network) say(`  Network: ${url}`);
-        say("  分镜页可直接定稿镜头稿件；不启动引擎、不占机器锁、不触发任何生成");
+        say("  可确认剧本、生成镜头与定稿；不启动引擎、不占机器锁");
         say("  Ctrl+C 停止");
     }
     // 自动打开

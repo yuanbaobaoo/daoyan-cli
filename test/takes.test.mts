@@ -17,7 +17,7 @@ import {
     takesRelPath,
 } from "../src/core/story/takes.mts";
 import { resolveEpisodeContext } from "../src/core/story/paths.mts";
-import { loadShotsFile } from "../src/core/project/config.mts";
+import { initStory, loadEpisodeShots } from "../src/core/story/store.mts";
 import { runWrap } from "../src/commands/wrap.mts";
 import { planShotRuns } from "../src/core/task/plans.mts";
 import { DaoyanCliError } from "../src/shared/errors.mts";
@@ -91,7 +91,7 @@ function seedRun(
         run_id: opts.runId,
         task_id: "t_seed",
         machine_id: "take-machine",
-        episode_id: opts.episodeId ?? null,
+        episode_id: opts.episodeId ?? "ep01",
         request_id: null,
         label: opts.label,
         workflow: { path: "workflows/t2v.json", sha256: "seed" },
@@ -124,20 +124,25 @@ function machineConfig(): MachineConfig {
 }
 
 /**
- * legacy 项目骨架（两镜，02 接力 01）。
+ * story 项目骨架（两镜，02 接力 01）。
  */
-function setupLegacy(project: ProjectConfig): string {
+function setupStory(project: ProjectConfig): string {
     // 项目根
     const root = mkdtempSync(join(tmpdir(), "dycli-takes-"));
     mkdirSync(join(root, ".dycli"), { recursive: true });
-    writeFileSync(join(root, "project.json"), JSON.stringify(project, null, 2));
-    writeFileSync(join(root, ".dycli", "machine.json"), JSON.stringify(machineConfig(), null, 2));
     writeFileSync(
-        join(root, "shots.json"),
+        join(root, "project.json"),
+        JSON.stringify({ ...project, production: { mode: "single", audio: true } }, null, 2),
+    );
+    writeFileSync(join(root, ".dycli", "machine.json"), JSON.stringify(machineConfig(), null, 2));
+    // story 骨架
+    initStory(root, "takes");
+    writeFileSync(
+        join(root, "episodes", "ep01", "shots.json"),
         JSON.stringify(
             {
                 workflow: "t2v",
-                meta: { title: "测试", width: 64, height: 64, anchors: {} },
+                meta: { episode_id: "ep01", title: "测试", width: 64, height: 64, anchors: {} },
                 defaults: {},
                 shots: [
                     { id: "01", title: "开场", seed: 1, prompt: "a" },
@@ -200,7 +205,7 @@ interface CutManifest {
  */
 function lastManifest(root: string): CutManifest {
     // 成片目录
-    const dir = join(root, "final");
+    const dir = join(root, "final", "ep01");
     // 清单文件
     const files = readdirSync(dir)
         .filter((f) => f.endsWith(".json"))
@@ -211,21 +216,21 @@ function lastManifest(root: string): CutManifest {
 
 test("定稿稿件优先于最新成功 run，台账只存决定", () => {
     // 项目根
-    const root = setupLegacy({ name: "takes", version: 2 });
+    const root = setupStory({ name: "takes", version: 2 });
     try {
         // 上下文
         const context = resolveEpisodeContext(root);
         // 旧 run（将被定稿）
         seedRun(root, {
             runId: "r_old",
-            label: "shot:01",
+            label: "ep:ep01:shot:01",
             startedAt: "2026-10-20T10:00:00.000Z",
             outputs: [{ name: "01_old.mp4", bytes: new Uint8Array([1]) }],
         });
         // 新 run（最新成功）
         seedRun(root, {
             runId: "r_new",
-            label: "shot:01",
+            label: "ep:ep01:shot:01",
             startedAt: "2026-10-22T10:00:00.000Z",
             outputs: [{ name: "01_new.mp4", bytes: new Uint8Array([2]) }],
         });
@@ -243,8 +248,8 @@ test("定稿稿件优先于最新成功 run，台账只存决定", () => {
         assert.equal(after.run?.run_id, "r_old");
         assert.equal(after.output?.name, "01_old.mp4");
         // 台账位置
-        assert.equal(takesRelPath(root, context), "takes.json");
-        assert.equal(existsSync(join(root, "takes.json")), true);
+        assert.equal(takesRelPath(root, context), "episodes/ep01/takes.json");
+        assert.equal(existsSync(join(root, "episodes", "ep01", "takes.json")), true);
         // 重复定稿同一稿件 = 幂等
         const again = finalizeTake({ root, context, shotId: "01", runId: "r_old", source: "user" });
         assert.equal(again.changed, false);
@@ -263,14 +268,14 @@ test("定稿稿件优先于最新成功 run，台账只存决定", () => {
 
 test("定稿校验：状态、归属与稿件类型", () => {
     // 项目根
-    const root = setupLegacy({ name: "takes", version: 2 });
+    const root = setupStory({ name: "takes", version: 2 });
     try {
         // 上下文
         const context = resolveEpisodeContext(root);
         // 成功 run（视频 + 图片）
         seedRun(root, {
             runId: "r_ok",
-            label: "shot:01",
+            label: "ep:ep01:shot:01",
             startedAt: "2026-10-20T10:00:00.000Z",
             outputs: [
                 { name: "01.mp4", bytes: new Uint8Array([1]) },
@@ -280,14 +285,14 @@ test("定稿校验：状态、归属与稿件类型", () => {
         // 失败 run
         seedRun(root, {
             runId: "r_bad",
-            label: "shot:01",
+            label: "ep:ep01:shot:01",
             startedAt: "2026-10-20T11:00:00.000Z",
             status: "failed",
         });
         // 别的镜头
         seedRun(root, {
             runId: "r_other",
-            label: "shot:02",
+            label: "ep:ep01:shot:02",
             startedAt: "2026-10-20T12:00:00.000Z",
             outputs: [{ name: "02.mp4", bytes: new Uint8Array([3]) }],
         });
@@ -325,19 +330,19 @@ test("定稿校验：状态、归属与稿件类型", () => {
 
 test("定稿记录失效时降级回退并给出原因", () => {
     // 项目根
-    const root = setupLegacy({ name: "takes", version: 2 });
+    const root = setupStory({ name: "takes", version: 2 });
     try {
         // 上下文
         const context = resolveEpisodeContext(root);
         seedRun(root, {
             runId: "r_keep",
-            label: "shot:01",
+            label: "ep:ep01:shot:01",
             startedAt: "2026-10-20T10:00:00.000Z",
             outputs: [{ name: "01.mp4", bytes: new Uint8Array([1]) }],
         });
         seedRun(root, {
             runId: "r_drop",
-            label: "shot:01",
+            label: "ep:ep01:shot:01",
             startedAt: "2026-10-22T10:00:00.000Z",
             outputs: [{ name: "01.mp4", bytes: new Uint8Array([2]) }],
         });
@@ -364,18 +369,18 @@ test("定稿记录失效时降级回退并给出原因", () => {
 
 test("定稿进度区分有产出未定稿与待拍摄", () => {
     // 项目根
-    const root = setupLegacy({ name: "takes", version: 2 });
+    const root = setupStory({ name: "takes", version: 2 });
     try {
         // 上下文
         const context = resolveEpisodeContext(root);
         seedRun(root, {
             runId: "r_01",
-            label: "shot:01",
+            label: "ep:ep01:shot:01",
             startedAt: "2026-10-20T10:00:00.000Z",
             outputs: [{ name: "01.mp4", bytes: new Uint8Array([1]) }],
         });
         // 进度
-        const counts = takeCounts(root, context, loadShotsFile(root));
+        const counts = takeCounts(root, context, loadEpisodeShots(root, "ep01"));
         assert.equal(counts.total, 2);
         assert.deepEqual(counts.pending, ["01"]);
         assert.deepEqual(counts.unshot, ["02"]);
@@ -392,7 +397,7 @@ test("定稿进度区分有产出未定稿与待拍摄", () => {
 
 test("story 模式：定稿台账落在剧集目录", () => {
     // 项目根
-    const root = setupLegacy({ name: "takes", version: 2 });
+    const root = setupStory({ name: "takes", version: 2 });
     try {
         // 系列与剧集
         mkdirSync(join(root, "story"), { recursive: true });
@@ -458,25 +463,25 @@ test("合片：strict 下未定稿阻断，绕过时回退并警告", async (t) 
         return;
     }
     // 项目根（默认 strict）
-    const root = setupLegacy({ name: "takes", version: 2 });
+    const root = setupStory({ name: "takes", version: 2 });
     try {
         // 上下文
         const context = resolveEpisodeContext(root);
         seedRun(root, {
             runId: "w_01_old",
-            label: "shot:01",
+            label: "ep:ep01:shot:01",
             startedAt: "2026-10-20T10:00:00.000Z",
             outputs: [{ name: "01.mp4", bytes: makeClipBytes("red") }],
         });
         seedRun(root, {
             runId: "w_01_new",
-            label: "shot:01",
+            label: "ep:ep01:shot:01",
             startedAt: "2026-10-22T10:00:00.000Z",
             outputs: [{ name: "01.mp4", bytes: makeClipBytes("blue") }],
         });
         seedRun(root, {
             runId: "w_02",
-            label: "shot:02",
+            label: "ep:ep01:shot:02",
             startedAt: "2026-10-20T10:00:00.000Z",
             outputs: [{ name: "02.mp4", bytes: makeClipBytes("green") }],
         });
@@ -529,17 +534,17 @@ test("warn 模式不阻断合片，只用最新成功 run 并警告", async (t) 
         return;
     }
     // 项目根（warn）
-    const root = setupLegacy({ name: "takes", version: 2, story: { enforce: "warn" } });
+    const root = setupStory({ name: "takes", version: 2, story: { enforce: "warn" } });
     try {
         seedRun(root, {
             runId: "l_01",
-            label: "shot:01",
+            label: "ep:ep01:shot:01",
             startedAt: "2026-10-20T10:00:00.000Z",
             outputs: [{ name: "01.mp4", bytes: makeClipBytes("red") }],
         });
         seedRun(root, {
             runId: "l_02",
-            label: "shot:02",
+            label: "ep:ep01:shot:02",
             startedAt: "2026-10-20T10:00:00.000Z",
             outputs: [{ name: "02.mp4", bytes: makeClipBytes("green") }],
         });
@@ -560,7 +565,7 @@ test("接力首帧使用上游定稿稿件；strict 未定稿时阻断", async (
         return;
     }
     // 项目根
-    const root = setupLegacy({ name: "takes", version: 2 });
+    const root = setupStory({ name: "takes", version: 2 });
     try {
         // workflow 与 bindings
         mkdirSync(join(root, "workflows"), { recursive: true });
@@ -582,16 +587,16 @@ test("接力首帧使用上游定稿稿件；strict 未定稿时阻断", async (
         // 上下文与分镜
         const context = resolveEpisodeContext(root);
         // 分镜
-        const shots: ShotsFile = loadShotsFile(root);
+        const shots: ShotsFile = loadEpisodeShots(root, "ep01");
         seedRun(root, {
             runId: "relay_old",
-            label: "shot:01",
+            label: "ep:ep01:shot:01",
             startedAt: "2026-10-20T10:00:00.000Z",
             outputs: [{ name: "01.mp4", bytes: makeClipBytes("red") }],
         });
         seedRun(root, {
             runId: "relay_new",
-            label: "shot:01",
+            label: "ep:ep01:shot:01",
             startedAt: "2026-10-22T10:00:00.000Z",
             outputs: [{ name: "01.mp4", bytes: makeClipBytes("blue") }],
         });

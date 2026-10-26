@@ -72,6 +72,8 @@ var init_errors = __esm({
       "story_invalid",
       "story_stale",
       "story_gate_failed",
+      "mode_conflict",
+      "feature_disabled",
       "asset_not_found",
       "asset_invalid",
       // 引擎
@@ -139,8 +141,8 @@ var init_errors = __esm({
       },
       story_not_found: {
         retryable: false,
-        hint: "\u5148\u8FD0\u884C daoyan story init \u542F\u7528\u591A\u96C6\u5267\u672C\u4E0E\u8BBE\u5B9A\u96C6\u3002",
-        nextActions: ["story init"]
+        hint: "\u8BF7\u5728\u65B0\u76EE\u5F55\u91CD\u65B0\u6267\u884C daoyan init --mode=local|remote\u3002",
+        nextActions: ["init --mode=local"]
       },
       episode_not_found: {
         retryable: false,
@@ -169,6 +171,14 @@ var init_errors = __esm({
         retryable: false,
         hint: "\u6309 details.blockers \u4FEE\u590D\u5267\u672C\u3001\u62C6\u89E3\u3001\u8D44\u4EA7\u6216\u5DE5\u4F5C\u6D41\u540E\u518D\u62CD\u6444\u3002",
         nextActions: ["story status --episode <id> --json"]
+      },
+      mode_conflict: {
+        retryable: false,
+        hint: "\u5207\u6362\u4E3A\u5355\u89C6\u9891\u524D\u5148\u5220\u9664\u591A\u4F59\u5267\u96C6\uFF1B\u7528 story episode list \u67E5\u770B\u3002"
+      },
+      feature_disabled: {
+        retryable: false,
+        hint: "\u8BE5\u9879\u76EE\u5DF2\u5173\u95ED\u97F3\u9891\uFF1B\u5728 Web \u9879\u76EE\u7BA1\u7406\u5F00\u542F\u97F3\u9891\u540E\u91CD\u8BD5\u3002"
       },
       asset_not_found: {
         retryable: false,
@@ -533,6 +543,9 @@ function readProjectAt(root) {
   if (!existsSync2(file)) return null;
   return readProject(file);
 }
+function saveProjectAt(root, project) {
+  writeJsonAtomic(join(root, PROJECT_FILE), project);
+}
 function readProject(file) {
   let raw;
   try {
@@ -557,6 +570,12 @@ function isProjectConfig(v) {
   if (typeof o.name !== "string" || o.name.trim() === "") return false;
   if (o.version !== 2) return false;
   if (o.default_workflow !== void 0 && typeof o.default_workflow !== "string") return false;
+  if (o.production !== void 0) {
+    if (typeof o.production !== "object" || o.production === null) return false;
+    const p = o.production;
+    if (p.mode !== void 0 && p.mode !== "single" && p.mode !== "series") return false;
+    if (p.audio !== void 0 && typeof p.audio !== "boolean") return false;
+  }
   if (o.story !== void 0) {
     if (typeof o.story !== "object" || o.story === null) return false;
     const s = o.story;
@@ -662,31 +681,6 @@ function requireProject(ctx2) {
     });
   }
   return found;
-}
-function loadShotsFile(root) {
-  const file = join(root, SHOTS_FILE);
-  if (!existsSync2(file)) {
-    throw new DaoyanCliError({
-      code: "config_invalid",
-      message: `\u7F3A\u5C11 ${file}\uFF08init \u751F\u6210\u6216\u624B\u5DE5\u521B\u5EFA\uFF09`
-    });
-  }
-  try {
-    const raw = JSON.parse(readFileSync2(file, "utf8"));
-    if (typeof raw !== "object" || raw === null) throw new Error("\u9876\u5C42\u4E0D\u662F\u5BF9\u8C61");
-    const o = raw;
-    if (typeof o.meta !== "object" || o.meta === null) throw new Error("\u7F3A\u5C11 meta");
-    if (!Array.isArray(o.shots)) throw new Error("\u7F3A\u5C11 shots \u6570\u7EC4");
-    return raw;
-  } catch (e) {
-    throw new DaoyanCliError({
-      code: "config_invalid",
-      message: `${file} \u4E0D\u662F\u5408\u6CD5\u7684 shots.json\uFF1A${e instanceof Error ? e.message : String(e)}`
-    });
-  }
-}
-function loadShotsIfExists(root) {
-  return existsSync2(join(root, SHOTS_FILE)) ? loadShotsFile(root) : null;
 }
 function resolveWorkflowRef(root, ref) {
   const clean = ref.trim();
@@ -1149,9 +1143,9 @@ function skillMd(version, commands) {
     "",
     "```bash",
     "# \u65B0\u9879\u76EE\uFF08\u5F53\u524D\u76EE\u5F55\uFF09",
-    "daoyan init --mode=local --modelpath /data/models",
+    "daoyan init --mode=local --production single --modelpath /data/models",
     "# \u6216\u8FDE\u63A5\u5DF2\u6709 ComfyUI",
-    "daoyan init --mode=remote --url http://gpu-box:8188",
+    "daoyan init --mode=remote --production series --url http://gpu-box:8188",
     "",
     "# \u67E5\u8282\u70B9",
     "daoyan workflow nodes --filter KSampler --json",
@@ -1171,16 +1165,19 @@ function skillMd(version, commands) {
     "daoyan workflow import ./from-comfyui.json --name t2v",
     "daoyan workflow apply t2v --ops ./ops.json --json",
     "daoyan workflow validate t2v --json",
-    "daoyan run t2v --set seed=42 --label shot:01 --request-id shot-01 --json",
+    "daoyan run t2v --set seed=42 --label ep:ep01:shot:01 --json",
     "daoyan status --task <task_id> --wait --json",
     "```",
     "",
     "## \u591A\u96C6\u77ED\u5267\u751F\u547D\u5468\u671F",
     "",
     "```text",
-    "story init \u2192 \u5168\u5C40\u89D2\u8272/\u573A\u666F/\u97F3\u8272 \u2192 \u5355\u96C6\u5267\u672C sync/approve \u2192 \u5355\u96C6 breakdown \u2192 \u53C2\u8003\u8D44\u4EA7 \u2192 \u5355\u96C6 shots \u2192 \u5206\u955C\u5DE5\u4F5C\u6D41 \u2192 shot/batch --episode \u2192 take finalize \u2192 wrap --episode",
+    "init --production single|series \u2192 \u5168\u5C40\u89D2\u8272/\u573A\u666F/\u97F3\u8272 \u2192 \u5355\u96C6\u5267\u672C sync/approve \u2192 \u5355\u96C6 breakdown \u2192 \u53C2\u8003\u8D44\u4EA7 \u2192 \u5355\u96C6 shots \u2192 \u5206\u955C\u5DE5\u4F5C\u6D41 \u2192 shot/batch --episode \u2192 take finalize \u2192 wrap --episode",
     "```",
     "",
+    "- \u6240\u6709\u9879\u76EE\u7EDF\u4E00\u4F7F\u7528 story \u5E03\u5C40\uFF1B`project.json.production.mode` \u4E3A `single` \u6216 `series`\uFF1B",
+    "- `single` \u53EA\u80FD\u6709\u4E00\u96C6\uFF0C\u7981\u6B62 `story episode add`\uFF1B`series` \u53EF\u52A0\u96C6\uFF1B\u52A0\u96C6\u524D\u786E\u8BA4\u6A21\u5F0F\uFF1B",
+    "- `production.audio=false` \u65F6\u4E0D\u8981\u5199\u97F3\u8272 / voice \u8D44\u4EA7\uFF0C\u97F3\u8272\u547D\u4EE4\u4F1A\u8FD4\u56DE `feature_disabled`\uFF1B",
     "- \u5168\u5C40\u8BBE\u5B9A\u96C6\u5728 `story/`\uFF0C\u8DE8\u96C6\u5171\u4EAB\uFF1B\u6BCF\u96C6\u6570\u636E\u5728 `episodes/<id>/`\uFF1B",
     "- \u6BCF\u96C6\u5267\u672C\u72EC\u7ACB revision\uFF1B\u5267\u672C\u53D8\u66F4\u53EA\u8BA9\u8BE5\u96C6 breakdown/shots stale\uFF1B",
     "- \u591A\u96C6\u9879\u76EE\u5199\u5165 / \u751F\u4EA7 / \u5355\u96C6 show \u5FC5\u987B\u663E\u5F0F `--episode`\uFF1B\u53EA\u8BFB\u7CFB\u5217\u6982\u89C8\u53EF\u7701\u7565\uFF1B",
@@ -1892,12 +1889,16 @@ function storyMd() {
     "16. \u6709 blocker \u7EA7 gaps \u65F6\u5148\u8865\u8D44\u4EA7 / \u4FEE workflow \u69FD\u4F4D\uFF0C\u4E0D\u8981\u7528\u300C\u6362\u4E00\u5F20\u56FE\u51D1\u300D\u7ED5\u8FC7\u3002",
     "17. `story-map.json` \u53EA\u653E\u53D9\u4E8B\u6807\u6CE8\uFF1B\u751F\u6210\u51B3\u7B56\uFF08workflow / asset_slots / first_frame / prompt\uFF09\u53EA\u5199 shots.json\u3002",
     "18. \u955C\u5934\u6709\u591A\u6761\u4EA7\u51FA\u65F6\u5FC5\u987B `take finalize` \u5B9A\u7A3F\u4E00\u4EFD\u518D\u62CD\u4E0B\u6E38\u63A5\u529B\u955C\u5934\u4E0E\u5408\u7247\uFF1B\u4E0D\u8981\u7528 `--allow-incomplete` \u62FF\u672A\u5B9A\u7A3F\u7684\u4EA7\u51FA\u51D1\u7247\u3002",
+    "19. `production.mode=single` \u53EA\u6709\u4E00\u4E2A\u89C6\u9891\uFF0C\u7981\u6B62 `story episode add`\uFF1B`series` \u624D\u53EF\u52A0\u96C6\u3002\u5207\u6362\u4E3A single \u524D\u5FC5\u987B\u5148\u5220\u5230\u53EA\u5269\u4E00\u96C6\u3002",
+    "20. `production.audio=false` \u65F6\u4E0D\u8981\u521B\u5EFA\u97F3\u8272\u6216 voice \u8D44\u4EA7\uFF1B\u97F3\u8272\u547D\u4EE4\u4F1A\u8FD4\u56DE feature_disabled\uFF0C\u97F3\u8272\u69FD\u4F4D\u4F1A\u88AB\u5FFD\u7565\u3002",
+    "21. \u53C2\u8003\u56FE\u4E0D\u4F1A\u81EA\u52A8\u6CE8\u5165\uFF1A\u5FC5\u987B\u5728 `<workflow>.assets.json` \u58F0\u660E\u69FD\u4F4D\uFF0C`target` \u6307\u5411\u771F\u6B63\u63A5\u5165\u91C7\u6837\u94FE\u7684\u8282\u70B9\u8F93\u5165\uFF1B\u5B64\u7ACB LoadImage \u4E0D\u4F1A\u751F\u6548\u3002",
+    "22. \u6BCF\u4E2A\u53C2\u8003\u56FE\u4F7F\u7528\u72EC\u7ACB\u8282\u70B9\u4E0E\u69FD\u4F4D\uFF1B\u4E0D\u8981\u4E0E `first_frame` \u5171\u7528\u540C\u4E00\u4E2A `node.input`\u3002",
     "",
     "## \u6807\u51C6\u987A\u5E8F",
     "",
     "```text",
-    "story init",
-    "\u2192 \u5168\u5C40 characters / scenes / voices",
+    "init --production single|series",
+    "\u2192 \u5168\u5C40 characters / scenes / voices\uFF08audio=false \u65F6\u8DF3\u8FC7 voices\uFF09",
     "\u2192 \u6BCF\u96C6 script sync \u2192 approve",
     "\u2192 \u6BCF\u96C6 breakdown set",
     "\u2192 story asset add\uFF08\u53C2\u8003\u56FE / \u97F3\u9891\uFF0C\u663E\u5F0F set-reference\uFF09",
@@ -1914,8 +1915,10 @@ function storyMd() {
     "## \u5E38\u7528\u547D\u4EE4",
     "",
     "```bash",
-    "daoyan story init",
+    "daoyan init --mode=local --production single",
+    "daoyan init --mode=remote --url <url> --production series",
     'daoyan story episode add --id ep02 --number 2 --title "\u7B2C\u4E8C\u96C6" --json',
+    "daoyan story episode remove ep02 --json",
     'daoyan story script sync --episode ep01 --file ./ep01.md --summary "\u521D\u7A3F" --source ai --json',
     "daoyan story script approve --episode ep01 --json",
     "daoyan story characters set --file ./characters.json --json",
@@ -1983,6 +1986,9 @@ function storyMd() {
     "```",
     "",
     '\u5206\u955C\u53EF\u7528 asset_slots \u8986\u76D6\uFF1A`"hero": "lin-mo/night@front"`\uFF08owner@asset-id\uFF09\uFF1B`reference` \u8868\u793A\u4F7F\u7528\u663E\u5F0F\u4E3B\u53C2\u8003\u3002',
+    "",
+    "\u69FD\u4F4D `target` \u5FC5\u987B\u662F `nodeId.input`\uFF0C\u4E14\u8BE5\u8282\u70B9\u8981\u771F\u6B63\u63A5\u5165\u91C7\u6837\u94FE\uFF1B\u6BCF\u79CD\u53C2\u8003\u56FE\u5404\u7528\u4E00\u4E2A\u8282\u70B9\u3002`first_frame` \u8D70 bindings.first_frame\uFF0C\u4E0D\u8981\u4E0E\u53C2\u8003\u56FE\u69FD\u4F4D\u6307\u5411\u540C\u4E00\u4E2A\u8F93\u5165\u3002",
+    "\u97F3\u9891\u5173\u95ED\u65F6 kind=voice \u7684\u69FD\u4F4D\u4F1A\u88AB\u5FFD\u7565\uFF1B\u4E0D\u8981\u4E3A\u4E86\u8FC7\u6821\u9A8C\u4F2A\u9020\u97F3\u8272\u3002",
     "",
     "## \u751F\u6210\u4E0A\u4E0B\u6587\uFF08story map\uFF09",
     "",
@@ -3482,6 +3488,172 @@ var init_update = __esm({
   }
 });
 
+// src/core/project/production.mts
+function productionOf(project) {
+  return {
+    mode: project.production?.mode ?? DEFAULT_PRODUCTION_MODE,
+    audio: project.production?.audio ?? DEFAULT_AUDIO_ENABLED
+  };
+}
+function audioEnabledOf(project) {
+  if (project === null || project === void 0) return DEFAULT_AUDIO_ENABLED;
+  return productionOf(project).audio;
+}
+var DEFAULT_PRODUCTION_MODE, DEFAULT_AUDIO_ENABLED;
+var init_production = __esm({
+  "src/core/project/production.mts"() {
+    "use strict";
+    DEFAULT_PRODUCTION_MODE = "series";
+    DEFAULT_AUDIO_ENABLED = true;
+  }
+});
+
+// src/core/story/paths.mts
+import { existsSync as existsSync6, readdirSync as readdirSync2 } from "fs";
+import { join as join4 } from "path";
+function seriesPath(root) {
+  return join4(root, STORY_SERIES_FILE);
+}
+function charactersPath(root) {
+  return join4(root, STORY_CHARACTERS_FILE);
+}
+function scenesPath(root) {
+  return join4(root, STORY_SCENES_FILE);
+}
+function voicesPath(root) {
+  return join4(root, STORY_VOICES_FILE);
+}
+function episodesRoot(root) {
+  return join4(root, EPISODES_DIR);
+}
+function episodeDir(root, episodeId) {
+  return join4(root, EPISODES_DIR, episodeId);
+}
+function storyMapPath(root, episodeId) {
+  return join4(episodeDir(root, episodeId), STORY_MAP_FILE);
+}
+function takesPath(root, episodeId) {
+  if (!STORY_ID_RE.test(episodeId)) {
+    throw new DaoyanCliError({
+      code: "story_invalid",
+      message: `\u5267\u96C6 id \u975E\u6CD5\uFF1A${episodeId}`,
+      details: { episode_id: episodeId }
+    });
+  }
+  return join4(episodeDir(root, episodeId), TAKES_FILE);
+}
+function storyEnabled(root) {
+  return existsSync6(seriesPath(root));
+}
+function requireStory(root) {
+  if (storyEnabled(root)) return;
+  throw new DaoyanCliError({
+    code: "story_not_found",
+    message: "\u9879\u76EE\u7F3A\u5C11 story/series.json\uFF1A\u65E7\u9879\u76EE\u7ED3\u6784\u4E0D\u518D\u652F\u6301",
+    hint: "\u8BF7\u5728\u65B0\u76EE\u5F55\u91CD\u65B0\u6267\u884C daoyan init --mode=local|remote\u3002"
+  });
+}
+function readSeries(root) {
+  const file = seriesPath(root);
+  if (!existsSync6(file)) return null;
+  return readJson(file);
+}
+function readEpisodeMeta(root, episodeId) {
+  if (!STORY_ID_RE.test(episodeId)) return null;
+  const file = join4(episodeDir(root, episodeId), EPISODE_META_FILE);
+  if (!existsSync6(file)) return null;
+  return readJson(file);
+}
+function listEpisodeMetas(root) {
+  const dir = episodesRoot(root);
+  if (!existsSync6(dir)) return [];
+  const out = [];
+  for (const entry of readdirSync2(dir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    if (!STORY_ID_RE.test(entry.name)) continue;
+    try {
+      const meta = readEpisodeMeta(root, entry.name);
+      if (meta !== null && meta.id === entry.name) out.push(meta);
+    } catch {
+    }
+  }
+  return out.sort((a, b) => a.number - b.number || a.id.localeCompare(b.id));
+}
+function storyContext(root, meta) {
+  const dir = episodeDir(root, meta.id);
+  const relDir = `${EPISODES_DIR}/${meta.id}`;
+  const finalRel = `${FINAL_DIR}/${meta.id}`;
+  return {
+    episode_id: meta.id,
+    dir,
+    rel_dir: relDir,
+    shots_path: join4(dir, SHOTS_FILE),
+    final_dir: join4(root, finalRel),
+    final_rel: finalRel,
+    label_prefix: `ep:${meta.id}:shot:`,
+    script_meta_path: join4(dir, SCRIPT_FILE),
+    script_text_path: join4(dir, SCRIPT_TEXT_FILE),
+    breakdown_path: join4(dir, BREAKDOWN_FILE),
+    episode_meta_path: join4(dir, EPISODE_META_FILE)
+  };
+}
+function resolveEpisodeContext(root, episodeId) {
+  requireStory(root);
+  const project = readProjectAt(root);
+  if (project === null) {
+    throw new DaoyanCliError({ code: "project_not_found", message: "\u672A\u627E\u5230 project.json" });
+  }
+  const production = productionOf(project);
+  const metas = listEpisodeMetas(root);
+  if (metas.length === 0) {
+    throw new DaoyanCliError({
+      code: "story_invalid",
+      message: "\u9879\u76EE\u6CA1\u6709\u6709\u6548\u5267\u96C6",
+      hint: "\u8FD0\u884C daoyan init \u521D\u59CB\u5316\u7B2C\u4E00\u96C6\u3002"
+    });
+  }
+  if (production.mode === "single" && metas.length > 1) {
+    throw new DaoyanCliError({
+      code: "mode_conflict",
+      message: `\u5355\u89C6\u9891\u9879\u76EE\u53EA\u80FD\u6709\u4E00\u96C6\uFF0C\u5F53\u524D\u6709 ${metas.length} \u96C6`,
+      details: { episodes: metas.map((m) => m.id) },
+      hint: "\u5220\u9664\u591A\u4F59\u5267\u96C6\uFF0C\u6216\u5728\u9879\u76EE\u7BA1\u7406\u5207\u6362\u4E3A\u591A\u96C6\u6A21\u5F0F\u3002"
+    });
+  }
+  if (episodeId !== void 0 && episodeId !== "") {
+    const target = metas.find((m) => m.id === episodeId);
+    if (target === void 0) {
+      throw new DaoyanCliError({
+        code: "episode_not_found",
+        message: `\u672A\u627E\u5230\u5267\u96C6 ${episodeId}`,
+        details: { episode_id: episodeId, episodes: metas.map((m) => m.id) }
+      });
+    }
+    return storyContext(root, target);
+  }
+  if (metas.length > 1) {
+    throw new DaoyanCliError({
+      code: "episode_required",
+      message: `\u5F53\u524D\u9879\u76EE\u6709 ${metas.length} \u96C6\uFF0C\u8BF7\u7528 --episode <id> \u6307\u5B9A\u5267\u96C6`,
+      details: { episodes: metas.map((m) => m.id) }
+    });
+  }
+  return storyContext(root, metas[0]);
+}
+var STORY_ID_RE, REFERENCE_ASSET_RESERVED;
+var init_paths = __esm({
+  "src/core/story/paths.mts"() {
+    "use strict";
+    init_errors();
+    init_fs();
+    init_types();
+    init_config();
+    init_production();
+    STORY_ID_RE = /^[a-z][a-z0-9-]{1,63}$/;
+    REFERENCE_ASSET_RESERVED = "reference";
+  }
+});
+
 // src/shared/net.mts
 import { Socket, createServer } from "net";
 function freePort(host = "127.0.0.1") {
@@ -3543,9 +3715,349 @@ var init_net = __esm({
   }
 });
 
+// src/core/story/store.mts
+import { existsSync as existsSync7, readFileSync as readFileSync6, rmSync as rmSync4 } from "fs";
+import { join as join5 } from "path";
+function emptyCharactersFile() {
+  return { version: 1, updated_at: nowIso(), characters: [] };
+}
+function emptyScenesFile() {
+  return { version: 1, updated_at: nowIso(), scenes: [] };
+}
+function emptyVoicesFile() {
+  return { version: 1, updated_at: nowIso(), voices: [] };
+}
+function emptyScriptMeta() {
+  return {
+    version: 1,
+    revision: EMPTY_REVISION,
+    sha256: "",
+    status: "draft",
+    source: "ai",
+    synced_by: "agent",
+    synced_at: "",
+    approved_at: null,
+    changelog: []
+  };
+}
+function emptyBreakdown(episodeId) {
+  return {
+    version: 1,
+    episode_id: episodeId,
+    source_revision: EMPTY_REVISION,
+    source_sha256: "",
+    beats: [],
+    characters: [],
+    scenes: [],
+    voices: [],
+    notes: ""
+  };
+}
+function emptyShots(episodeId) {
+  return {
+    workflow: "t2v",
+    meta: {
+      episode_id: episodeId,
+      title: "",
+      synopsis: "",
+      script_revision: EMPTY_REVISION,
+      script_sha256: "",
+      width: 768,
+      height: 1344,
+      fps: 24,
+      anchors: {}
+    },
+    defaults: {
+      length: 48,
+      steps: 30,
+      cfg: 4,
+      negative: "\u4F4E\u8D28\u91CF\uFF0C\u6A21\u7CCA\uFF0C\u566A\u70B9\uFF0C\u53D8\u5F62\uFF0C\u6C34\u5370"
+    },
+    style_prefix: "",
+    shots: []
+  };
+}
+function loadCharacters(root) {
+  return readJsonIfExists(charactersPath(root)) ?? emptyCharactersFile();
+}
+function loadScenes(root) {
+  return readJsonIfExists(scenesPath(root)) ?? emptyScenesFile();
+}
+function loadVoices(root) {
+  return readJsonIfExists(voicesPath(root)) ?? emptyVoicesFile();
+}
+function loadScriptMeta(root, episodeId) {
+  const file = join5(episodeDir(root, episodeId), SCRIPT_FILE);
+  const raw = readJsonIfExists(file);
+  return raw ?? emptyScriptMeta();
+}
+function loadScriptText(root, episodeId) {
+  const file = join5(episodeDir(root, episodeId), SCRIPT_TEXT_FILE);
+  if (!existsSync7(file)) return "";
+  return readFileSync6(file, "utf8");
+}
+function loadBreakdown(root, episodeId) {
+  return readJsonIfExists(join5(episodeDir(root, episodeId), BREAKDOWN_FILE));
+}
+function loadEpisodeShots(root, episodeId) {
+  return readJsonIfExists(join5(episodeDir(root, episodeId), SHOTS_FILE));
+}
+function loadStoryMap(root, episodeId) {
+  return readJsonIfExists(storyMapPath(root, episodeId));
+}
+function saveCharacters(root, doc) {
+  writeJsonAtomic(charactersPath(root), { ...doc, version: 1, updated_at: nowIso() });
+}
+function saveScenes(root, doc) {
+  writeJsonAtomic(scenesPath(root), { ...doc, version: 1, updated_at: nowIso() });
+}
+function saveVoices(root, doc) {
+  writeJsonAtomic(voicesPath(root), { ...doc, version: 1, updated_at: nowIso() });
+}
+function saveScriptMeta(root, episodeId, meta) {
+  writeJsonAtomic(join5(episodeDir(root, episodeId), SCRIPT_FILE), meta);
+}
+function saveBreakdown(root, episodeId, doc) {
+  writeJsonAtomic(join5(episodeDir(root, episodeId), BREAKDOWN_FILE), doc);
+}
+function saveEpisodeShots(root, episodeId, shots) {
+  writeJsonAtomic(join5(episodeDir(root, episodeId), SHOTS_FILE), shots);
+}
+function saveStoryMap(root, episodeId, doc) {
+  writeJsonAtomic(storyMapPath(root, episodeId), doc);
+}
+function removeStoryMap(root, episodeId) {
+  const file = storyMapPath(root, episodeId);
+  if (!existsSync7(file)) return false;
+  rmSync4(file, { force: true });
+  return true;
+}
+function normalizeScriptText(text) {
+  return text.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+}
+function appendStoryLfsRules(root) {
+  const file = join5(root, ".gitattributes");
+  const current = existsSync7(file) ? readFileSync6(file, "utf8") : "";
+  const required = [
+    "story/assets/**        filter=lfs diff=lfs merge=lfs -text",
+    "episodes/**/anchors/** filter=lfs diff=lfs merge=lfs -text"
+  ];
+  const lines = current.split("\n").filter((line) => line !== "");
+  const missing = required.filter((rule) => !lines.some((line) => line.trim() === rule.trim()));
+  if (missing.length === 0) return false;
+  const next = [...lines, ...missing].join("\n") + "\n";
+  writeFileAtomic(file, next);
+  return true;
+}
+function initStory(root, projectName) {
+  const created = [];
+  for (const dir of [
+    STORY_DIR,
+    STORY_ASSETS_DIR,
+    join5(STORY_ASSETS_DIR, "characters"),
+    join5(STORY_ASSETS_DIR, "scenes"),
+    join5(STORY_ASSETS_DIR, "voices"),
+    EPISODES_DIR,
+    LOG_DIR,
+    WORKFLOWS_DIR
+  ]) {
+    ensureDir(join5(root, dir));
+  }
+  if (!existsSync7(seriesPath(root))) {
+    const now = nowIso();
+    const series = {
+      version: 1,
+      title: projectName,
+      created_at: now,
+      updated_at: now
+    };
+    writeJsonAtomic(seriesPath(root), series);
+    created.push("story/series.json");
+  }
+  if (!existsSync7(charactersPath(root))) {
+    writeJsonAtomic(charactersPath(root), emptyCharactersFile());
+    created.push("story/characters.json");
+  }
+  if (!existsSync7(scenesPath(root))) {
+    writeJsonAtomic(scenesPath(root), emptyScenesFile());
+    created.push("story/scenes.json");
+  }
+  if (!existsSync7(voicesPath(root))) {
+    writeJsonAtomic(voicesPath(root), emptyVoicesFile());
+    created.push("story/voices.json");
+  }
+  if (appendStoryLfsRules(root)) created.push(".gitattributes");
+  if (listEpisodeMetas(root).length === 0) {
+    const series = readSeries(root);
+    const title = series?.title !== void 0 && series.title !== "" ? series.title : "\u7B2C 1 \u96C6";
+    addEpisode(root, { id: "ep01", number: 1, title });
+    created.push("episodes/ep01");
+  }
+  for (const meta of listEpisodeMetas(root)) {
+    const dir = episodeDir(root, meta.id);
+    if (!existsSync7(join5(dir, SCRIPT_FILE))) {
+      writeJsonAtomic(join5(dir, SCRIPT_FILE), emptyScriptMeta());
+      created.push(`episodes/${meta.id}/script.json`);
+    }
+    if (!existsSync7(join5(dir, BREAKDOWN_FILE))) {
+      writeJsonAtomic(join5(dir, BREAKDOWN_FILE), emptyBreakdown(meta.id));
+      created.push(`episodes/${meta.id}/breakdown.json`);
+    }
+    if (!existsSync7(join5(dir, SHOTS_FILE))) {
+      writeJsonAtomic(join5(dir, SHOTS_FILE), emptyShots(meta.id));
+      created.push(`episodes/${meta.id}/shots.json`);
+    }
+  }
+  return { created };
+}
+function addEpisode(root, init) {
+  if (!STORY_ID_RE.test(init.id)) {
+    throw new DaoyanCliError({
+      code: "story_invalid",
+      message: `\u5267\u96C6 id \u975E\u6CD5\uFF1A${init.id}`,
+      hint: "\u4F7F\u7528\u5C0F\u5199\u5B57\u6BCD / \u6570\u5B57 / -\uFF0C\u4F8B\u5982 ep02\u3002"
+    });
+  }
+  if (!Number.isInteger(init.number) || init.number <= 0) {
+    throw new DaoyanCliError({ code: "story_invalid", message: "\u5267\u96C6 number \u5FC5\u987B\u662F\u6B63\u6574\u6570" });
+  }
+  if (init.title.trim() === "") {
+    throw new DaoyanCliError({ code: "story_invalid", message: "\u5267\u96C6\u6807\u9898\u4E0D\u80FD\u4E3A\u7A7A" });
+  }
+  const metas = listEpisodeMetas(root);
+  if (metas.some((m) => m.id === init.id)) {
+    throw new DaoyanCliError({ code: "story_invalid", message: `\u5267\u96C6 ${init.id} \u5DF2\u5B58\u5728` });
+  }
+  if (metas.some((m) => m.number === init.number)) {
+    throw new DaoyanCliError({ code: "story_invalid", message: `\u96C6\u6570 ${init.number} \u5DF2\u88AB\u5360\u7528` });
+  }
+  const dir = episodeDir(root, init.id);
+  ensureDir(dir);
+  const now = nowIso();
+  const meta = {
+    version: 1,
+    id: init.id,
+    number: init.number,
+    title: init.title.trim(),
+    ...init.summary !== void 0 && init.summary !== "" ? { summary: init.summary } : {},
+    created_at: now,
+    updated_at: now
+  };
+  if (!existsSync7(join5(dir, EPISODE_META_FILE))) writeJsonAtomic(join5(dir, EPISODE_META_FILE), meta);
+  if (!existsSync7(join5(dir, SCRIPT_FILE))) writeJsonAtomic(join5(dir, SCRIPT_FILE), emptyScriptMeta());
+  if (!existsSync7(join5(dir, BREAKDOWN_FILE))) writeJsonAtomic(join5(dir, BREAKDOWN_FILE), emptyBreakdown(init.id));
+  if (!existsSync7(join5(dir, SHOTS_FILE))) writeJsonAtomic(join5(dir, SHOTS_FILE), emptyShots(init.id));
+  ensureDir(join5(root, LOG_DIR));
+  return meta;
+}
+function updateEpisode(root, episodeId, patch) {
+  const cur = readEpisodeMeta(root, episodeId);
+  if (cur === null) {
+    throw new DaoyanCliError({ code: "episode_not_found", message: `\u672A\u627E\u5230\u5267\u96C6 ${episodeId}` });
+  }
+  const metas = listEpisodeMetas(root);
+  if (patch.number !== void 0) {
+    if (!Number.isInteger(patch.number) || patch.number <= 0) {
+      throw new DaoyanCliError({ code: "story_invalid", message: "\u5267\u96C6 number \u5FC5\u987B\u662F\u6B63\u6574\u6570" });
+    }
+    if (metas.some((m) => m.id !== episodeId && m.number === patch.number)) {
+      throw new DaoyanCliError({ code: "story_invalid", message: `\u96C6\u6570 ${patch.number} \u5DF2\u88AB\u5360\u7528` });
+    }
+  }
+  if (patch.title !== void 0 && patch.title.trim() === "") {
+    throw new DaoyanCliError({ code: "story_invalid", message: "\u5267\u96C6\u6807\u9898\u4E0D\u80FD\u4E3A\u7A7A" });
+  }
+  const next = {
+    ...cur,
+    ...patch.number !== void 0 ? { number: patch.number } : {},
+    ...patch.title !== void 0 ? { title: patch.title.trim() } : {},
+    ...patch.summary !== void 0 ? { summary: patch.summary } : {},
+    updated_at: nowIso()
+  };
+  writeJsonAtomic(join5(episodeDir(root, episodeId), EPISODE_META_FILE), next);
+  return next;
+}
+function syncScript(opts) {
+  if (readEpisodeMeta(opts.root, opts.episodeId) === null) {
+    throw new DaoyanCliError({ code: "episode_not_found", message: `\u672A\u627E\u5230\u5267\u96C6 ${opts.episodeId}` });
+  }
+  const text = normalizeScriptText(opts.text);
+  if (text.trim() === "") {
+    throw new DaoyanCliError({ code: "story_invalid", message: "\u5267\u672C\u6B63\u6587\u4E3A\u7A7A" });
+  }
+  const bytes = Buffer.byteLength(text, "utf8");
+  if (bytes > MAX_SCRIPT_BYTES) {
+    throw new DaoyanCliError({
+      code: "story_invalid",
+      message: `\u5267\u672C\u8D85\u8FC7 ${MAX_SCRIPT_BYTES} \u5B57\u8282\u4E0A\u9650`,
+      details: { bytes, limit: MAX_SCRIPT_BYTES }
+    });
+  }
+  const cur = loadScriptMeta(opts.root, opts.episodeId);
+  if (opts.baseRevision !== void 0 && cur.revision !== opts.baseRevision) {
+    throw new DaoyanCliError({
+      code: "story_conflict",
+      message: `\u5267\u672C revision \u5DF2\u53D8\u4E3A ${cur.revision}\uFF08\u671F\u671B ${opts.baseRevision}\uFF09`,
+      details: { current: cur.revision, expected: opts.baseRevision }
+    });
+  }
+  const hash = sha256(text);
+  if (cur.revision > 0 && cur.sha256 === hash) {
+    return { meta: cur, changed: false };
+  }
+  const revision = cur.revision + 1;
+  const entry = {
+    revision,
+    at: nowIso(),
+    source: opts.source,
+    summary: opts.summary.trim() === "" ? "\u540C\u6B65\u5267\u672C" : opts.summary.trim()
+  };
+  const meta = {
+    version: 1,
+    revision,
+    sha256: hash,
+    status: "draft",
+    source: opts.source,
+    synced_by: opts.syncedBy ?? "agent",
+    synced_at: entry.at,
+    approved_at: null,
+    changelog: [...cur.changelog, entry].slice(-SCRIPT_CHANGELOG_LIMIT)
+  };
+  writeFileAtomic(join5(episodeDir(opts.root, opts.episodeId), SCRIPT_TEXT_FILE), text);
+  saveScriptMeta(opts.root, opts.episodeId, meta);
+  return { meta, changed: true };
+}
+function approveScript(root, episodeId) {
+  const cur = loadScriptMeta(root, episodeId);
+  if (cur.revision <= 0) {
+    throw new DaoyanCliError({ code: "story_invalid", message: "\u5267\u672C\u5C1A\u672A\u540C\u6B65\uFF0C\u4E0D\u80FD\u786E\u8BA4" });
+  }
+  const textFile = join5(episodeDir(root, episodeId), SCRIPT_TEXT_FILE);
+  if (!existsSync7(textFile)) {
+    throw new DaoyanCliError({ code: "story_invalid", message: "\u5267\u672C\u6B63\u6587\u4E0D\u5B58\u5728\uFF0C\u4E0D\u80FD\u786E\u8BA4" });
+  }
+  if (cur.status === "approved") return cur;
+  const next = { ...cur, status: "approved", approved_at: nowIso() };
+  saveScriptMeta(root, episodeId, next);
+  return next;
+}
+var MAX_SCRIPT_BYTES, SCRIPT_CHANGELOG_LIMIT, EMPTY_REVISION;
+var init_store = __esm({
+  "src/core/story/store.mts"() {
+    "use strict";
+    init_errors();
+    init_fs();
+    init_types();
+    init_paths();
+    MAX_SCRIPT_BYTES = 2 * 1024 * 1024;
+    SCRIPT_CHANGELOG_LIMIT = 20;
+    EMPTY_REVISION = 0;
+  }
+});
+
 // src/core/provision/toolchain.mts
-import { existsSync as existsSync6, readFileSync as readFileSync6 } from "fs";
-import { join as join4 } from "path";
+import { existsSync as existsSync8, readFileSync as readFileSync7 } from "fs";
+import { join as join6 } from "path";
 function parsePythonVersion(raw) {
   const m = /(\d+)\.(\d+)(?:\.(\d+))?/.exec(raw.trim());
   if (m === null) return null;
@@ -4092,11 +4604,11 @@ function asOptionalString(v) {
   return typeof v === "string" && v !== "" ? v : null;
 }
 function readToolchainMarker(venvDir) {
-  const file = join4(venvDir, TOOLCHAIN_MARKER_FILE);
-  if (!existsSync6(file)) return null;
+  const file = join6(venvDir, TOOLCHAIN_MARKER_FILE);
+  if (!existsSync8(file)) return null;
   let raw;
   try {
-    raw = JSON.parse(readFileSync6(file, "utf8"));
+    raw = JSON.parse(readFileSync7(file, "utf8"));
   } catch {
     return null;
   }
@@ -4135,7 +4647,7 @@ function readToolchainMarker(venvDir) {
   };
 }
 function writeToolchainMarker(venvDir, marker) {
-  writeJsonAtomic(join4(venvDir, TOOLCHAIN_MARKER_FILE), marker);
+  writeJsonAtomic(join6(venvDir, TOOLCHAIN_MARKER_FILE), marker);
 }
 function buildToolchainMarker(input) {
   const plan = input.plan;
@@ -4191,7 +4703,7 @@ function markerMismatchReason(marker, expected) {
   return null;
 }
 async function runPipCheck(venvDir) {
-  const pip = join4(venvDir, "bin", "pip");
+  const pip = join6(venvDir, "bin", "pip");
   const r = await execCapture(pip, ["check"], { timeoutMs: PIP_CHECK_TIMEOUT_MS });
   const output2 = `${r.stdout}${r.stderr}`.trim().slice(-4e3);
   return { ok: r.code === 0, output: output2 };
@@ -4252,7 +4764,7 @@ function classifyCudaError(text) {
   return "unknown";
 }
 async function runSmokeTest(venvDir, backend) {
-  const python = join4(venvDir, "bin", "python");
+  const python = join6(venvDir, "bin", "python");
   const r = await execCapture(python, ["-c", buildSmokeScript(backend)], { timeoutMs: SMOKE_TIMEOUT_MS });
   const line = r.stdout.split("\n").map((l) => l.trim()).find((l) => l.startsWith(SMOKE_PREFIX));
   if (line === void 0) {
@@ -4411,44 +4923,53 @@ var init_options = __esm({
 });
 
 // src/core/provision/init-flow.mts
-import { existsSync as existsSync7, readFileSync as readFileSync7, readdirSync as readdirSync2, renameSync as renameSync2, rmSync as rmSync4, writeFileSync as writeFileSync3 } from "fs";
-import { join as join5 } from "path";
+import { existsSync as existsSync9, readFileSync as readFileSync8, readdirSync as readdirSync3, renameSync as renameSync2, rmSync as rmSync5, writeFileSync as writeFileSync3 } from "fs";
+import { join as join7 } from "path";
 function pipIndexArgs(mirror) {
   const index = mirror !== void 0 && mirror.trim() !== "" ? mirror.trim() : DEFAULT_PIP_MIRROR;
   return ["--index-url", index];
 }
-function projectTemplate(name) {
+function projectTemplate(name, mode) {
   return {
     name,
     version: 2,
+    production: { mode, audio: true },
     gpu: { takeover: false },
     comfyui: {
       custom_nodes: []
     }
   };
 }
-function scaffoldProject(root, name) {
+function scaffoldProject(root, name, mode) {
   const created = [];
   for (const d of [WORKFLOWS_DIR, INPUTS_DIR, FINAL_DIR, LOG_DIR, RELAY_DIR]) {
-    ensureDir(join5(root, d));
+    ensureDir(join7(root, d));
   }
-  const projectFile = join5(root, PROJECT_FILE);
-  if (!existsSync7(projectFile)) {
-    writeFileAtomically(projectFile, JSON.stringify(projectTemplate(name), null, 2) + "\n");
+  const projectFile = join7(root, PROJECT_FILE);
+  if (!existsSync9(projectFile)) {
+    writeFileAtomically(projectFile, JSON.stringify(projectTemplate(name, mode), null, 2) + "\n");
     created.push(PROJECT_FILE);
   }
-  const shotsFile = join5(root, SHOTS_FILE);
-  if (!existsSync7(shotsFile)) {
-    writeFileAtomically(shotsFile, JSON.stringify(shotsTemplate(), null, 2) + "\n");
-    created.push(SHOTS_FILE);
+  const story = initStory(root, name);
+  created.push(...story.created);
+  const firstShots = join7(episodeDir(root, "ep01"), SHOTS_FILE);
+  if (existsSync9(firstShots)) {
+    try {
+      const current = JSON.parse(readFileSync8(firstShots, "utf8"));
+      if (!Array.isArray(current.shots) || current.shots.length === 0) {
+        writeFileAtomically(firstShots, JSON.stringify(shotsTemplate(), null, 2) + "\n");
+        created.push(`episodes/ep01/${SHOTS_FILE}`);
+      }
+    } catch {
+    }
   }
-  const wf = join5(root, WORKFLOWS_DIR, "t2v.json");
-  if (!existsSync7(wf)) {
+  const wf = join7(root, WORKFLOWS_DIR, "t2v.json");
+  if (!existsSync9(wf)) {
     writeFileAtomically(wf, "{}\n");
     created.push(`${WORKFLOWS_DIR}/t2v.json`);
   }
-  const attrs = join5(root, ".gitattributes");
-  if (!existsSync7(attrs)) {
+  const attrs = join7(root, ".gitattributes");
+  if (!existsSync9(attrs)) {
     writeFileAtomically(
       attrs,
       [
@@ -4605,8 +5126,8 @@ ${platformHint}
   });
 }
 async function venvPythonInfo(venvDir) {
-  const python = join5(venvDir, "bin", "python");
-  if (!existsSync7(python)) return null;
+  const python = join7(venvDir, "bin", "python");
+  if (!existsSync9(python)) return null;
   const r = await execCapture(python, ["-c", "import sys; print('%d.%d.%d' % sys.version_info[:3])"], {
     timeoutMs: 15e3
   });
@@ -4616,26 +5137,26 @@ async function venvPythonInfo(venvDir) {
 async function venvReady(venvDir) {
   const info = await venvPythonInfo(venvDir);
   if (info === null) return false;
-  if (!existsSync7(join5(venvDir, "bin", "pip"))) return false;
-  const r = await execCapture(join5(venvDir, "bin", "python"), ["-m", "pip", "--version"], { timeoutMs: 6e4 });
+  if (!existsSync9(join7(venvDir, "bin", "pip"))) return false;
+  const r = await execCapture(join7(venvDir, "bin", "python"), ["-m", "pip", "--version"], { timeoutMs: 6e4 });
   return r.code === 0;
 }
 async function createVenv(root, venvDir, log) {
-  if (existsSync7(join5(venvDir, "bin", "python"))) {
+  if (existsSync9(join7(venvDir, "bin", "python"))) {
     const existing = await venvPythonInfo(venvDir);
     let pipOk = false;
     if (existing !== null) {
-      const pip = await execCapture(join5(venvDir, "bin", "python"), ["-m", "pip", "--version"], {
+      const pip = await execCapture(join7(venvDir, "bin", "python"), ["-m", "pip", "--version"], {
         timeoutMs: 6e4
       });
-      pipOk = pip.code === 0 && existsSync7(join5(venvDir, "bin", "pip"));
+      pipOk = pip.code === 0 && existsSync9(join7(venvDir, "bin", "pip"));
     }
     if (existing !== null && pipOk) {
       log(`\u590D\u7528\u5DF2\u6709 venv\uFF1A${venvDir}\uFF08Python ${existing.version}\uFF09`);
       return existing;
     }
     log(`\u68C0\u6D4B\u5230\u4E0D\u5B8C\u6574\u7684 venv\uFF08\u7F3A\u5C11\u53EF\u7528 pip\uFF09\uFF0C\u5220\u9664\u540E\u91CD\u5EFA\uFF1A${venvDir}`);
-    rmSync4(venvDir, { recursive: true, force: true });
+    rmSync5(venvDir, { recursive: true, force: true });
   }
   const system = await detectPython(log);
   await ensurepipPreflight(system, venvDir);
@@ -4645,7 +5166,7 @@ async function createVenv(root, venvDir, log) {
     timeoutMs: VENV_TIMEOUT_MS
   });
   if (r.code !== 0) {
-    rmSync4(venvDir, { recursive: true, force: true });
+    rmSync5(venvDir, { recursive: true, force: true });
     throw new DaoyanCliError({
       code: "provision_failed",
       message: `python3 -m venv \u5931\u8D25\uFF08\u9000\u51FA\u7801 ${r.code}\uFF09\u3002Ubuntu \u9700 python3-venv \u5305`,
@@ -4658,8 +5179,8 @@ async function createVenv(root, venvDir, log) {
     });
   }
   const info = await venvPythonInfo(venvDir);
-  if (info === null || !existsSync7(join5(venvDir, "bin", "pip"))) {
-    rmSync4(venvDir, { recursive: true, force: true });
+  if (info === null || !existsSync9(join7(venvDir, "bin", "pip"))) {
+    rmSync5(venvDir, { recursive: true, force: true });
     throw new DaoyanCliError({
       code: "provision_failed",
       message: `venv \u521B\u5EFA\u5B8C\u6210\u4F46\u7F3A\u5C11 python/pip\uFF1A${venvDir}`,
@@ -4670,13 +5191,13 @@ async function createVenv(root, venvDir, log) {
   return info;
 }
 async function cloneRepo(root, repo, target, ref, log) {
-  if (existsSync7(join5(target, ".git"))) {
+  if (existsSync9(join7(target, ".git"))) {
     log(`\u590D\u7528\u5DF2\u6709\u4ED3\u5E93\uFF1A${target}`);
     return;
   }
-  if (existsSync7(target)) {
-    if (readdirSync2(target).length === 0) {
-      rmSync4(target, { recursive: true, force: true });
+  if (existsSync9(target)) {
+    if (readdirSync3(target).length === 0) {
+      rmSync5(target, { recursive: true, force: true });
     } else {
       log(`\u76EE\u5F55\u5DF2\u5B58\u5728\u4E14\u4E0D\u662F git \u68C0\u51FA\uFF0C\u4FDD\u7559\u73B0\u6709\u5185\u5BB9\uFF1A${target}`);
       return;
@@ -4695,7 +5216,7 @@ async function cloneRepo(root, repo, target, ref, log) {
   }
 }
 async function runPipAttempt(opts) {
-  const pip = join5(opts.venvDir, "bin", "pip");
+  const pip = join7(opts.venvDir, "bin", "pip");
   const args = [
     "install",
     ...opts.packageArgs,
@@ -4744,8 +5265,8 @@ async function pipInstallWithFallback(opts) {
   });
 }
 async function pipInstall(root, venvDir, options, log, requirements) {
-  const req = requirements ?? join5(root, "engine", "ComfyUI", "requirements.txt");
-  if (!existsSync7(req)) {
+  const req = requirements ?? join7(root, "engine", "ComfyUI", "requirements.txt");
+  if (!existsSync9(req)) {
     throw new DaoyanCliError({ code: "provision_failed", message: `\u7F3A\u5C11 ${req}\uFF08clone \u672A\u5B8C\u6210\uFF1F\uFF09` });
   }
   log(`\u5B89\u88C5 ComfyUI \u4F9D\u8D56\uFF08pip install -r ${req}\uFF0C\u53EF\u80FD\u9700\u8981\u4E0B\u8F7D torch\uFF0C\u8017\u65F6\u8F83\u957F\uFF09...`);
@@ -4761,15 +5282,15 @@ async function pipInstall(root, venvDir, options, log, requirements) {
   log(`ComfyUI \u4F9D\u8D56\u5B89\u88C5\u5B8C\u6210\uFF08\u6E90\uFF1A${used}\uFF09`);
   return used;
 }
-async function installCustomNodes(root, venvDir, nodes, options, log, comfyDir = join5(root, "engine", "ComfyUI")) {
+async function installCustomNodes(root, venvDir, nodes, options, log, comfyDir = join7(root, "engine", "ComfyUI")) {
   if (nodes.length === 0) return;
-  const base = join5(comfyDir, "custom_nodes");
+  const base = join7(comfyDir, "custom_nodes");
   ensureDir(base);
   for (const node of nodes) {
-    const target = join5(base, node.name);
+    const target = join7(base, node.name);
     await cloneRepo(root, node.repo, target, node.ref, log);
-    const req = join5(target, "requirements.txt");
-    if (existsSync7(req)) {
+    const req = join7(target, "requirements.txt");
+    if (existsSync9(req)) {
       log(`\u5B89\u88C5 ${node.name} \u4F9D\u8D56...`);
       const used = await pipInstallWithFallback({
         root,
@@ -4816,28 +5337,28 @@ function customNodesHash(nodes, comfyDir) {
   return sha256(
     JSON.stringify(
       nodes.map((n) => {
-        const dir = join5(comfyDir, "custom_nodes", n.name);
-        const req = join5(dir, "requirements.txt");
+        const dir = join7(comfyDir, "custom_nodes", n.name);
+        const req = join7(dir, "requirements.txt");
         return {
           name: n.name,
           repo: n.repo,
           ref: n.ref ?? null,
-          present: existsSync7(dir),
-          requirements_sha256: existsSync7(req) ? sha256File(req) : null
+          present: existsSync9(dir),
+          requirements_sha256: existsSync9(req) ? sha256File(req) : null
         };
       })
     )
   );
 }
 async function pipShowVersion(venvDir, pkg) {
-  const r = await execCapture(join5(venvDir, "bin", "pip"), ["show", pkg], { timeoutMs: 6e4 });
+  const r = await execCapture(join7(venvDir, "bin", "pip"), ["show", pkg], { timeoutMs: 6e4 });
   if (r.code !== 0) return null;
   const m = /^Version:\s*(.+)$/m.exec(r.stdout);
   return m !== null ? m[1].trim() : null;
 }
 function torchPinsInFile(file) {
   const out = [];
-  for (const line of readFileSync7(file, "utf8").split("\n")) {
+  for (const line of readFileSync8(file, "utf8").split("\n")) {
     const trimmed = (line.split("#")[0] ?? "").trim();
     const m = /^(torch|torchvision)\s*==\s*([^\s;]+)/.exec(trimmed);
     if (m !== null) {
@@ -4985,8 +5506,8 @@ function offendingNodes(nodes, comfyDir, installedTorch) {
   const installedBase = installedTorch.split("+")[0] ?? installedTorch;
   const out = [];
   for (const node of nodes) {
-    const req = join5(comfyDir, "custom_nodes", node.name, "requirements.txt");
-    if (!existsSync7(req)) continue;
+    const req = join7(comfyDir, "custom_nodes", node.name, "requirements.txt");
+    if (!existsSync9(req)) continue;
     const conflicts = torchPinsInFile(req).some(
       (p) => p.package === "torch" && (p.version.split("+")[0] ?? p.version) !== installedBase
     );
@@ -5019,13 +5540,13 @@ function summarizeToolchain(marker, reused) {
   };
 }
 async function provisionEngine(opts) {
-  const venvDir = join5(opts.baseDir, ".venv");
-  const comfyDir = join5(opts.baseDir, "ComfyUI");
+  const venvDir = join7(opts.baseDir, ".venv");
+  const comfyDir = join7(opts.baseDir, "ComfyUI");
   await cloneRepo(opts.root, COMFY_REPO, comfyDir, opts.version, opts.log);
   let switched = false;
-  if (existsSync7(join5(comfyDir, ".git"))) {
+  if (existsSync9(join7(comfyDir, ".git"))) {
     switched = await checkoutComfyVersion(comfyDir, opts.version, opts.log);
-  } else if (!existsSync7(join5(comfyDir, "main.py"))) {
+  } else if (!existsSync9(join7(comfyDir, "main.py"))) {
     throw new DaoyanCliError({
       code: "provision_failed",
       message: `ComfyUI \u76EE\u5F55\u65E0\u6548\uFF1A${comfyDir}\uFF08\u7F3A\u5C11 main.py\uFF09`
@@ -5033,8 +5554,8 @@ async function provisionEngine(opts) {
   } else {
     opts.log("ComfyUI \u76EE\u5F55\u4E0D\u662F git \u68C0\u51FA\uFF0C\u8DF3\u8FC7\u7248\u672C\u5207\u6362\uFF08\u53EF\u7528 engine use \u6307\u5411\u5176\u4ED6\u76EE\u5F55\uFF09");
   }
-  const reqFile = join5(comfyDir, "requirements.txt");
-  if (!existsSync7(reqFile)) {
+  const reqFile = join7(comfyDir, "requirements.txt");
+  if (!existsSync9(reqFile)) {
     throw new DaoyanCliError({ code: "provision_failed", message: `\u7F3A\u5C11 ${reqFile}\uFF08clone \u672A\u5B8C\u6210\uFF1F\uFF09` });
   }
   const requirementsSha = sha256File(reqFile);
@@ -5102,7 +5623,7 @@ async function provisionEngine(opts) {
   if (plan.tag !== null && plan.tag !== context.tag) {
     opts.log(`\u5DE5\u5177\u94FE\uFF1A\u9009\u62E9 ${plan.tag}\uFF08\u5019\u9009 ${plan.candidates.join(" / ")}\uFF09`);
   }
-  rmSync4(join5(venvDir, TOOLCHAIN_MARKER_FILE), { force: true });
+  rmSync5(join7(venvDir, TOOLCHAIN_MARKER_FILE), { force: true });
   const torchResult = await installTorchAndVerify({
     root: opts.root,
     venvDir,
@@ -5149,7 +5670,7 @@ async function provisionEngine(opts) {
 async function deployLocalEngine(opts) {
   const result = await provisionEngine({
     root: opts.root,
-    baseDir: join5(opts.root, "engine"),
+    baseDir: join7(opts.root, "engine"),
     version: opts.version,
     project: opts.project,
     ...opts.toolchain !== void 0 ? { toolchain: opts.toolchain } : {},
@@ -5167,8 +5688,8 @@ async function installEngineAt(opts) {
     log: opts.log
   });
   return {
-    comfyDir: join5(opts.baseDir, "ComfyUI"),
-    venvDir: join5(opts.baseDir, ".venv"),
+    comfyDir: join7(opts.baseDir, "ComfyUI"),
+    venvDir: join7(opts.baseDir, ".venv"),
     toolchain: result.summary
   };
 }
@@ -5195,8 +5716,8 @@ function writeExtraModelPaths(root, modelpath) {
     "  vae: vae",
     ""
   ].join("\n");
-  const file = join5(root, EXTRA_MODELS_FILE);
-  ensureDir(join5(root, ".dycli"));
+  const file = join7(root, EXTRA_MODELS_FILE);
+  ensureDir(join7(root, ".dycli"));
   writeFileAtomically(file, yaml);
   return file;
 }
@@ -5218,6 +5739,8 @@ var init_init_flow = __esm({
     init_fs();
     init_net();
     init_types();
+    init_store();
+    init_paths();
     init_options();
     init_toolchain();
     init_options();
@@ -5232,9 +5755,9 @@ var init_init_flow = __esm({
 });
 
 // src/core/project/git.mts
-import { existsSync as existsSync8, readFileSync as readFileSync8 } from "fs";
+import { existsSync as existsSync10, readFileSync as readFileSync9 } from "fs";
 import { homedir as homedir2 } from "os";
-import { dirname as dirname5, join as join6, resolve as resolve3 } from "path";
+import { dirname as dirname5, join as join8, resolve as resolve3 } from "path";
 function gitignoreBlock() {
   return [GITIGNORE_BLOCK_START, GITIGNORE_BLOCK_NOTE, "", ...GITIGNORE_DEFAULTS, "", GITIGNORE_BLOCK_END].join("\n");
 }
@@ -5253,9 +5776,9 @@ ${block}
 `;
 }
 function ensureGitignore(root) {
-  const file = join6(root, GITIGNORE_FILE);
-  const existed = existsSync8(file);
-  const current = existed ? readFileSync8(file, "utf8") : "";
+  const file = join8(root, GITIGNORE_FILE);
+  const existed = existsSync10(file);
+  const current = existed ? readFileSync9(file, "utf8") : "";
   const next = upsertGitignoreContent(current);
   if (existed && next === current) {
     return { path: file, status: "unchanged" };
@@ -5321,7 +5844,7 @@ async function ensureGitRepo(root) {
 function findGitRoot(start) {
   let dir = start;
   for (; ; ) {
-    if (existsSync8(join6(dir, ".git"))) return dir;
+    if (existsSync10(join8(dir, ".git"))) return dir;
     const parent = dirname5(dir);
     if (parent === dir) return null;
     dir = parent;
@@ -5420,27 +5943,27 @@ __export(store_exports, {
   taskSummary: () => taskSummary,
   updateTask: () => updateTask
 });
-import { existsSync as existsSync9, readdirSync as readdirSync3, rmSync as rmSync5 } from "fs";
-import { join as join7 } from "path";
+import { existsSync as existsSync11, readdirSync as readdirSync4, rmSync as rmSync6 } from "fs";
+import { join as join9 } from "path";
 function newTaskId(machineId) {
   return `t_${makeId(machineId)}`;
 }
 function taskDir(root, taskId) {
-  return join7(root, TASKS_DIR, taskId);
+  return join9(root, TASKS_DIR, taskId);
 }
 function taskFile(root, taskId) {
-  return join7(taskDir(root, taskId), TASK_FILE);
+  return join9(taskDir(root, taskId), TASK_FILE);
 }
 function createTask(root, record) {
   const dir = taskDir(root, record.task_id);
-  if (existsSync9(join7(dir, TASK_FILE))) {
+  if (existsSync11(join9(dir, TASK_FILE))) {
     throw new DaoyanCliError({
       code: "config_invalid",
       message: `task ${record.task_id} \u5DF2\u5B58\u5728\uFF08id \u51B2\u7A81\uFF0C\u8BF7\u91CD\u8BD5\uFF09`
     });
   }
   ensureDir(dir);
-  writeJsonAtomic(join7(dir, TASK_FILE), record);
+  writeJsonAtomic(join9(dir, TASK_FILE), record);
   return record;
 }
 function readTask(root, taskId) {
@@ -5477,10 +6000,10 @@ function nextActionsFor(taskId, status) {
   return [`logs --task ${taskId} --json`, `status --json`];
 }
 function listTasks(root) {
-  const dir = join7(root, TASKS_DIR);
-  if (!existsSync9(dir)) return [];
+  const dir = join9(root, TASKS_DIR);
+  if (!existsSync11(dir)) return [];
   const out = [];
-  for (const ent of readdirSync3(dir, { withFileTypes: true })) {
+  for (const ent of readdirSync4(dir, { withFileTypes: true })) {
     if (!ent.isDirectory()) continue;
     const rec = readTask(root, ent.name);
     if (rec !== null) out.push(rec);
@@ -5496,18 +6019,18 @@ function activeTasks(root) {
 }
 function requestCancel(root, taskId) {
   ensureDir(taskDir(root, taskId));
-  writeJsonAtomic(join7(taskDir(root, taskId), CANCEL_FILE), {
+  writeJsonAtomic(join9(taskDir(root, taskId), CANCEL_FILE), {
     requested_at: nowIso(),
     by_pid: process.pid
   });
 }
 function isCancelRequested(root, taskId) {
-  return existsSync9(join7(taskDir(root, taskId), CANCEL_FILE));
+  return existsSync11(join9(taskDir(root, taskId), CANCEL_FILE));
 }
 function clearCancelRequest(root, taskId) {
-  const file = join7(taskDir(root, taskId), CANCEL_FILE);
-  if (existsSync9(file)) {
-    rmSync5(file, { force: true });
+  const file = join9(taskDir(root, taskId), CANCEL_FILE);
+  if (existsSync11(file)) {
+    rmSync6(file, { force: true });
   }
 }
 function appendTaskRun(root, taskId, runId) {
@@ -5554,7 +6077,7 @@ function taskSummary(rec) {
     events_path: `${TASKS_DIR}/${rec.task_id}/events.jsonl`
   };
 }
-var init_store = __esm({
+var init_store2 = __esm({
   "src/core/task/store.mts"() {
     "use strict";
     init_errors();
@@ -5728,8 +6251,8 @@ var init_client = __esm({
 });
 
 // src/core/workflow/catalog.mts
-import { existsSync as existsSync10, rmSync as rmSync6 } from "fs";
-import { join as join8 } from "path";
+import { existsSync as existsSync12, rmSync as rmSync7 } from "fs";
+import { join as join10 } from "path";
 function extractNodeDef(raw, classType) {
   const nodeRaw = raw[classType];
   if (typeof nodeRaw !== "object" || nodeRaw === null || Array.isArray(nodeRaw)) return null;
@@ -5811,8 +6334,8 @@ function comfyVersionOf(stats) {
   return null;
 }
 function readCatalog(root) {
-  const file = join8(root, CATALOG_FILE);
-  if (!existsSync10(file)) return null;
+  const file = join10(root, CATALOG_FILE);
+  if (!existsSync12(file)) return null;
   const cat = readJsonIfExists(file);
   if (cat === null || typeof cat !== "object" || typeof cat.raw !== "object" || cat.raw === null) {
     throw new DaoyanCliError({
@@ -5823,7 +6346,7 @@ function readCatalog(root) {
   return cat;
 }
 function writeCatalog(root, catalog) {
-  writeJsonAtomic(join8(root, CATALOG_FILE), catalog);
+  writeJsonAtomic(join10(root, CATALOG_FILE), catalog);
 }
 function catalogSize(catalog) {
   return Object.keys(catalog.raw).length;
@@ -5980,11 +6503,11 @@ var init_detect = __esm({
 });
 
 // src/core/gpu/lease.mts
-import { chmodSync as chmodSync2, existsSync as existsSync11, rmSync as rmSync7 } from "fs";
+import { chmodSync as chmodSync2, existsSync as existsSync13, rmSync as rmSync8 } from "fs";
 import { homedir as homedir3 } from "os";
-import { dirname as dirname6, join as join9 } from "path";
+import { dirname as dirname6, join as join11 } from "path";
 function leasePath() {
-  return join9(homedir3(), ".dycli", "gpu", "lease.json");
+  return join11(homedir3(), ".dycli", "gpu", "lease.json");
 }
 function isLease(v) {
   if (typeof v !== "object" || v === null) return false;
@@ -5992,7 +6515,7 @@ function isLease(v) {
   return o.version === 1 && typeof o.task_id === "string" && typeof o.project === "string" && typeof o.created_at === "string" && Array.isArray(o.entries);
 }
 function inspectLease(path = leasePath()) {
-  if (!existsSync11(path)) return { status: "absent", path };
+  if (!existsSync13(path)) return { status: "absent", path };
   try {
     const raw = readJsonIfExists(path);
     if (raw === null) return { status: "absent", path };
@@ -6014,8 +6537,8 @@ function newLease(taskId, project) {
   return { version: 1, task_id: taskId, project, created_at: nowIso(), entries: [] };
 }
 function clearLease(path = leasePath()) {
-  if (existsSync11(path)) {
-    rmSync7(path, { force: true });
+  if (existsSync13(path)) {
+    rmSync8(path, { force: true });
   }
 }
 var init_lease = __esm({
@@ -6075,7 +6598,7 @@ var init_targets = __esm({
 });
 
 // src/core/gpu/cri.mts
-import { existsSync as existsSync12 } from "fs";
+import { existsSync as existsSync14 } from "fs";
 async function crictlAvailable() {
   if (crictlChecked !== null) return crictlChecked;
   const r = await tryExecCapture("crictl", ["--version"], { timeoutMs: 5e3 });
@@ -6086,7 +6609,7 @@ function crictlArgs(endpoint, args) {
   return endpoint !== void 0 ? ["--runtime-endpoint", endpoint, ...args] : args;
 }
 function availableCriEndpoints() {
-  return CRI_ENDPOINTS.filter((ep) => existsSync12(ep.replace(/^unix:\/\//, "")));
+  return CRI_ENDPOINTS.filter((ep) => existsSync14(ep.replace(/^unix:\/\//, "")));
 }
 function crictlEndpointCandidates(recorded) {
   const out = recorded !== void 0 ? [recorded, void 0] : [void 0];
@@ -6096,7 +6619,7 @@ function crictlEndpointCandidates(recorded) {
   return out;
 }
 function availableContainerdSockets() {
-  return CONTAINERD_SOCKETS.filter((p) => existsSync12(p));
+  return CONTAINERD_SOCKETS.filter((p) => existsSync14(p));
 }
 function isEndpointError(stderr) {
   return /connect|connection|no such file|refused|socket|failed to connect|code = Unavailable/i.test(stderr);
@@ -6129,7 +6652,7 @@ var init_cri = __esm({
 });
 
 // src/core/gpu/containers.mts
-import { readFileSync as readFileSync9 } from "fs";
+import { readFileSync as readFileSync10 } from "fs";
 function containerIdFromCgroup(cgroup) {
   const kubernetes = /kubepods(?:[\/.]|$)/i.test(cgroup);
   const patterns = [
@@ -6159,7 +6682,7 @@ function containerIdFromCgroup(cgroup) {
 function readContainerInfo(pid) {
   if (process.platform !== "linux") return null;
   try {
-    return containerIdFromCgroup(readFileSync9(`/proc/${pid}/cgroup`, "utf8"));
+    return containerIdFromCgroup(readFileSync10(`/proc/${pid}/cgroup`, "utf8"));
   } catch {
     return null;
   }
@@ -6177,14 +6700,14 @@ function commandArray(v) {
 }
 function readProcessCmdline(pid) {
   try {
-    return readFileSync9(`/proc/${pid}/cmdline`, "utf8").split("\0").filter((x) => x !== "");
+    return readFileSync10(`/proc/${pid}/cmdline`, "utf8").split("\0").filter((x) => x !== "");
   } catch {
     return [];
   }
 }
 function readParentPid(pid) {
   try {
-    const stat = readFileSync9(`/proc/${pid}/stat`, "utf8");
+    const stat = readFileSync10(`/proc/${pid}/stat`, "utf8");
     const close = stat.lastIndexOf(")");
     if (close < 0) return null;
     const rest = stat.slice(close + 2).split(/\s+/);
@@ -7137,7 +7660,7 @@ var init_vllm = __esm({
 });
 
 // src/core/gpu/providers/process.mts
-import { readFileSync as readFileSync10, readlinkSync } from "fs";
+import { readFileSync as readFileSync11, readlinkSync } from "fs";
 import { spawn as spawn3 } from "child_process";
 async function listProcesses() {
   const r = await tryExecCapture("ps", ["-eo", "pid=,uid=,comm=,args="], { timeoutMs: 1e4 });
@@ -7171,7 +7694,7 @@ async function ancestorPids() {
 function cmdlineOf(info) {
   if (process.platform === "linux") {
     try {
-      const parts = readFileSync10(`/proc/${info.pid}/cmdline`, "utf8").split("\0").filter((x) => x !== "");
+      const parts = readFileSync11(`/proc/${info.pid}/cmdline`, "utf8").split("\0").filter((x) => x !== "");
       if (parts.length > 0) return parts;
     } catch {
     }
@@ -7545,25 +8068,25 @@ __export(local_session_exports, {
 });
 import {
   closeSync,
-  existsSync as existsSync13,
+  existsSync as existsSync15,
   openSync,
-  readFileSync as readFileSync11,
+  readFileSync as readFileSync12,
   readSync,
-  rmSync as rmSync8,
+  rmSync as rmSync9,
   statSync as statSync2,
   unlinkSync,
   writeFileSync as writeFileSync4
 } from "fs";
 import { spawn as spawn4 } from "child_process";
-import { join as join10 } from "path";
+import { join as join12 } from "path";
 function enginePidFile(root) {
-  return join10(root, LOG_DIR, ENGINE_PID_FILE);
+  return join12(root, LOG_DIR, ENGINE_PID_FILE);
 }
 function readEnginePid(root) {
   const file = enginePidFile(root);
-  if (!existsSync13(file)) return null;
+  if (!existsSync15(file)) return null;
   try {
-    const text = readFileSync11(file, "utf8").trim();
+    const text = readFileSync12(file, "utf8").trim();
     if (/^\d+$/.test(text)) {
       return { pid: Number(text), port: 0, comfyui_dir: "", task_id: "", started_at: "" };
     }
@@ -7574,7 +8097,7 @@ function readEnginePid(root) {
   }
 }
 function writeEnginePid(root, rec) {
-  ensureDir(join10(root, LOG_DIR));
+  ensureDir(join12(root, LOG_DIR));
   writeFileSync4(enginePidFile(root), JSON.stringify(rec, null, 2) + "\n", { mode: 384 });
 }
 function pidAlive(pid) {
@@ -7635,7 +8158,7 @@ async function stopResidualEngine(root, log) {
   }
   if (!await verifyOwnEngine(rec)) {
     log(`PID ${rec.pid} \u4E0D\u5C5E\u4E8E\u672C\u9879\u76EE ComfyUI\uFF1B\u5220\u9664\u8FC7\u671F PID \u6587\u4EF6\uFF0C\u4E0D kill`);
-    rmSync8(enginePidFile(root), { force: true });
+    rmSync9(enginePidFile(root), { force: true });
     return;
   }
   if (rec.port > 0) {
@@ -7645,10 +8168,10 @@ async function stopResidualEngine(root, log) {
     }
   }
   await stopPid(rec.pid, log);
-  rmSync8(enginePidFile(root), { force: true });
+  rmSync9(enginePidFile(root), { force: true });
 }
 function tailFile(file, lines) {
-  if (!existsSync13(file)) return "(\u6587\u4EF6\u4E0D\u5B58\u5728)";
+  if (!existsSync15(file)) return "(\u6587\u4EF6\u4E0D\u5B58\u5728)";
   let size = 0;
   try {
     size = statSync2(file).size;
@@ -7759,14 +8282,14 @@ var init_local_session = __esm({
         }
         const started = Date.now();
         const comfyDir = this.comfyDir();
-        const venvPython = join10(this.venvDir(), "bin", "python");
-        if (!existsSync13(venvPython)) {
+        const venvPython = join12(this.venvDir(), "bin", "python");
+        if (!existsSync15(venvPython)) {
           throw new DaoyanCliError({
             code: "engine_start_failed",
             message: `venv \u4E0D\u5B58\u5728\uFF1A${venvPython}\u3002\u8FD0\u884C daoyan init --mode=local \u90E8\u7F72\u5F15\u64CE`
           });
         }
-        if (!existsSync13(join10(comfyDir, "main.py"))) {
+        if (!existsSync15(join12(comfyDir, "main.py"))) {
           throw new DaoyanCliError({
             code: "engine_start_failed",
             message: `ComfyUI \u76EE\u5F55\u65E0\u6548\uFF1A${comfyDir}\uFF08\u7F3A\u5C11 main.py\uFF09\u3002\u8FD0\u884C daoyan init --mode=local`
@@ -7778,9 +8301,9 @@ var init_local_session = __esm({
             message: `\u7AEF\u53E3 ${eng.port} \u5DF2\u88AB\u5176\u4ED6\u8FDB\u7A0B\u5360\u7528\uFF08\u4E0D\u662F\u672C\u9879\u76EE\u521A\u56DE\u6536\u7684\u5F15\u64CE\uFF09\uFF1B\u8BF7\u91CA\u653E\u7AEF\u53E3\u6216\u4FEE\u6539 machine.json`
           });
         }
-        const logDir = join10(this.opts.root, LOG_DIR);
+        const logDir = join12(this.opts.root, LOG_DIR);
         ensureDir(logDir);
-        const logFile = join10(logDir, `engine-${this.opts.taskId}.log`);
+        const logFile = join12(logDir, `engine-${this.opts.taskId}.log`);
         const fd = openSync(logFile, "a");
         const modelsConfig = this.modelsConfigPath();
         const args = ["-u", "main.py", "--port", String(eng.port)];
@@ -7897,7 +8420,7 @@ ${tailFile(logFile, 8)}`
         if (pid !== null) {
           const stopped = await stopPid(pid, log);
           cleanup.stop = stopped ? "ok" : "failed";
-          if (stopped) rmSync8(enginePidFile(this.opts.root), { force: true });
+          if (stopped) rmSync9(enginePidFile(this.opts.root), { force: true });
           else errors.push({ code: "engine_stop_failed", message: `\u5F15\u64CE\u8FDB\u7A0B pid=${pid} \u672A\u80FD\u9000\u51FA` });
         }
         if (inputs.uploaded.length > 0 || inputs.scratch_outputs.length > 0) {
@@ -7934,9 +8457,9 @@ ${tailFile(logFile, 8)}`
       comfyDir() {
         const configured = this.opts.machine.engine.mode === "local" ? this.opts.machine.engine.comfyui_dir : void 0;
         if (configured !== void 0 && configured !== "") {
-          return configured.startsWith("/") ? configured : join10(this.opts.root, configured);
+          return configured.startsWith("/") ? configured : join12(this.opts.root, configured);
         }
-        return join10(this.opts.root, "engine", "ComfyUI");
+        return join12(this.opts.root, "engine", "ComfyUI");
       }
       /**
        * venv 目录：machine.json 显式路径优先，否则约定 engine/.venv。
@@ -7944,9 +8467,9 @@ ${tailFile(logFile, 8)}`
       venvDir() {
         const configured = this.opts.machine.engine.mode === "local" ? this.opts.machine.engine.venv_dir : void 0;
         if (configured !== void 0 && configured !== "") {
-          return configured.startsWith("/") ? configured : join10(this.opts.root, configured);
+          return configured.startsWith("/") ? configured : join12(this.opts.root, configured);
         }
-        return join10(this.opts.root, "engine", ".venv");
+        return join12(this.opts.root, "engine", ".venv");
       }
       /**
        * extra_model_paths 配置路径（machine.models_config 优先）。
@@ -7955,8 +8478,8 @@ ${tailFile(logFile, 8)}`
         if (this.opts.machine.engine.mode !== "local") return null;
         const explicit = this.opts.machine.engine.models_config;
         if (explicit !== void 0 && explicit !== null && explicit !== "") return explicit;
-        const auto = join10(this.opts.root, EXTRA_MODELS_FILE);
-        return existsSync13(auto) ? auto : null;
+        const auto = join12(this.opts.root, EXTRA_MODELS_FILE);
+        return existsSync15(auto) ? auto : null;
       }
       /**
        * 清理本次 run 的 scratch 文件（local 拥有引擎文件系统）。
@@ -7966,10 +8489,10 @@ ${tailFile(logFile, 8)}`
         try {
           const comfyDir = this.comfyDir();
           for (const name of inputs.uploaded) {
-            rmSync8(join10(comfyDir, "input", name), { force: true });
+            rmSync9(join12(comfyDir, "input", name), { force: true });
           }
           for (const out of inputs.scratch_outputs) {
-            rmSync8(join10(comfyDir, "output", out.subfolder, out.filename), { force: true });
+            rmSync9(join12(comfyDir, "output", out.subfolder, out.filename), { force: true });
           }
           return "ok";
         } catch {
@@ -7981,11 +8504,11 @@ ${tailFile(logFile, 8)}`
 });
 
 // src/core/machine/lock.mts
-import { closeSync as closeSync2, existsSync as existsSync14, openSync as openSync2, readFileSync as readFileSync12, rmSync as rmSync9, unlinkSync as unlinkSync2, writeFileSync as writeFileSync5 } from "fs";
+import { closeSync as closeSync2, existsSync as existsSync16, openSync as openSync2, readFileSync as readFileSync13, rmSync as rmSync10, unlinkSync as unlinkSync2, writeFileSync as writeFileSync5 } from "fs";
 import { homedir as homedir4 } from "os";
-import { dirname as dirname7, join as join11 } from "path";
+import { dirname as dirname7, join as join13 } from "path";
 function machineLockPath() {
-  return join11(homedir4(), ".dycli", "machine.lock");
+  return join13(homedir4(), ".dycli", "machine.lock");
 }
 function pidAlive2(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
@@ -7997,10 +8520,10 @@ function pidAlive2(pid) {
   }
 }
 function inspectMachineLock(path = machineLockPath()) {
-  if (!existsSync14(path)) return { status: "absent", path };
+  if (!existsSync16(path)) return { status: "absent", path };
   let raw;
   try {
-    raw = JSON.parse(readFileSync12(path, "utf8"));
+    raw = JSON.parse(readFileSync13(path, "utf8"));
   } catch (e) {
     return {
       status: "corrupt",
@@ -8116,8 +8639,8 @@ function attachMachineLock(opts) {
 }
 async function recoverStaleLock(record, path = machineLockPath()) {
   try {
-    if (record.kind === "generation" && existsSync14(join11(record.project, "project.json"))) {
-      const store = await Promise.resolve().then(() => (init_store(), store_exports));
+    if (record.kind === "generation" && existsSync16(join13(record.project, "project.json"))) {
+      const store = await Promise.resolve().then(() => (init_store2(), store_exports));
       const task = store.readTask(record.project, record.task_id);
       if (task !== null && (task.status === "queued" || task.status === "running")) {
         store.updateTask(record.project, record.task_id, {
@@ -8134,7 +8657,7 @@ async function recoverStaleLock(record, path = machineLockPath()) {
   } catch {
   }
   try {
-    if (record.mode === "local" && existsSync14(join11(record.project, "project.json"))) {
+    if (record.mode === "local" && existsSync16(join13(record.project, "project.json"))) {
       const local = await Promise.resolve().then(() => (init_local_session(), local_session_exports));
       await local.stopResidualEngine(record.project, () => {
       });
@@ -8147,7 +8670,7 @@ async function recoverStaleLock(record, path = machineLockPath()) {
     });
   } catch {
   }
-  rmSync9(path, { force: true });
+  rmSync10(path, { force: true });
 }
 function handleFor(path, initial) {
   let record = initial;
@@ -8188,10 +8711,10 @@ var init_lock = __esm({
 });
 
 // src/commands/init.mts
-import { basename as basename2, isAbsolute as isAbsolute3, join as join12, resolve as resolve4 } from "path";
-import { existsSync as existsSync15, statSync as statSync3 } from "fs";
+import { basename as basename2, isAbsolute as isAbsolute3, join as join14, resolve as resolve4 } from "path";
+import { existsSync as existsSync17, statSync as statSync3 } from "fs";
 function parseArgs(args) {
-  const flags = { noSkill: false, noGit: false, toolchain: {} };
+  const flags = { noSkill: false, noGit: false, toolchain: {}, production: "single" };
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a === void 0) break;
@@ -8202,6 +8725,15 @@ function parseArgs(args) {
     }
     if (name === "--no-git") {
       flags.noGit = true;
+      continue;
+    }
+    if (name === "--production") {
+      const { value, skip } = takeValue(args, i, inline, "--production");
+      if (value !== "single" && value !== "series") {
+        usageError(`--production \u4EC5\u63A5\u53D7 single / series\uFF08\u6536\u5230 ${value}\uFF09`);
+      }
+      flags.production = value;
+      i += skip;
       continue;
     }
     if (name === "--mode") {
@@ -8257,7 +8789,7 @@ function parseArgs(args) {
 }
 function resolveModelPath(raw) {
   const abs = isAbsolute3(raw) ? raw : resolve4(process.cwd(), raw);
-  if (!existsSync15(abs) || !statSync3(abs).isDirectory()) {
+  if (!existsSync17(abs) || !statSync3(abs).isDirectory()) {
     throw new DaoyanCliError({
       code: "config_invalid",
       message: `--modelpath \u5FC5\u987B\u662F\u5DF2\u5B58\u5728\u7684\u76EE\u5F55\uFF08\u6536\u5230 ${raw}\uFF09`
@@ -8298,11 +8830,18 @@ async function runInit(ctx2, args) {
   let project;
   let projectCreated = false;
   if (existingProject === null) {
-    say(`\u5728 ${root} \u521B\u5EFA\u65B0\u9879\u76EE\uFF08v2 \u9AA8\u67B6\uFF09`);
-    scaffoldProject(root, basename2(root));
+    say(`\u5728 ${root} \u521B\u5EFA\u65B0\u9879\u76EE\uFF08v2 story \u9AA8\u67B6\uFF0C${flags.production}\uFF09`);
+    scaffoldProject(root, basename2(root), flags.production);
     project = readProjectAt(root);
     projectCreated = true;
   } else {
+    if (!storyEnabled(root)) {
+      throw new DaoyanCliError({
+        code: "story_not_found",
+        message: "\u65E7\u9879\u76EE\u7ED3\u6784\u4E0D\u518D\u652F\u6301\uFF08\u7F3A\u5C11 story/series.json\uFF09",
+        hint: "\u8BF7\u5728\u4E00\u4E2A\u65B0\u76EE\u5F55\u91CD\u65B0\u6267\u884C daoyan init --mode=local|remote\u3002"
+      });
+    }
     project = existingProject;
     say(`\u590D\u7528\u5DF2\u6709 project.json\uFF08\u4E0D\u8986\u76D6\u5171\u4EAB\u6587\u4EF6\uFF09\uFF1A${root}`);
   }
@@ -8342,7 +8881,7 @@ async function runInit(ctx2, args) {
         writeJsonAtomic2(resolve4(root, "project.json"), project);
       }
       const prevComfyAbs = prevLocal?.comfyui_dir !== void 0 ? isAbsolute3(prevLocal.comfyui_dir) ? prevLocal.comfyui_dir : resolve4(root, prevLocal.comfyui_dir) : null;
-      const reuseCustomEngine = flags.version === void 0 && prevLocal?.comfyui_dir !== void 0 && prevLocal.comfyui_dir !== "engine/ComfyUI" && prevComfyAbs !== null && existsSync15(join12(prevComfyAbs, "main.py"));
+      const reuseCustomEngine = flags.version === void 0 && prevLocal?.comfyui_dir !== void 0 && prevLocal.comfyui_dir !== "engine/ComfyUI" && prevComfyAbs !== null && existsSync17(join14(prevComfyAbs, "main.py"));
       if (reuseCustomEngine) {
         say(`\u590D\u7528 engine use \u9009\u5B9A\u7684\u5F15\u64CE\u76EE\u5F55\uFF1A${prevLocal?.comfyui_dir}`);
         comfyVersion = prevLocal?.comfyui_version ?? version;
@@ -8407,6 +8946,10 @@ async function runInit(ctx2, args) {
     root,
     mode: flags.mode,
     project_created: projectCreated,
+    production: {
+      mode: project.production?.mode ?? flags.production,
+      audio: project.production?.audio ?? true
+    },
     git: {
       repo: git.status,
       branch: git.branch,
@@ -8446,6 +8989,7 @@ var init_init = __esm({
     init_args();
     init_fs();
     init_config();
+    init_paths();
     init_init_flow();
     init_git();
     init_options();
@@ -8588,18 +9132,18 @@ var init_graph = __esm({
 });
 
 // src/core/workflow/load.mts
-import { existsSync as existsSync16, readFileSync as readFileSync13 } from "fs";
-import { dirname as dirname8, join as join13 } from "path";
+import { existsSync as existsSync18, readFileSync as readFileSync14 } from "fs";
+import { dirname as dirname8, join as join15 } from "path";
 function workflowError(message, details) {
   throw new DaoyanCliError({ code: "workflow_invalid", message, details });
 }
 function loadGraphFile(abs, rel) {
-  if (!existsSync16(abs)) {
+  if (!existsSync18(abs)) {
     workflowError(`workflow \u6587\u4EF6\u4E0D\u5B58\u5728\uFF1A${rel}`, { path: rel });
   }
   let raw;
   try {
-    raw = JSON.parse(readFileSync13(abs, "utf8"));
+    raw = JSON.parse(readFileSync14(abs, "utf8"));
   } catch (e) {
     workflowError(`${rel} \u4E0D\u662F\u5408\u6CD5 JSON\uFF1A${e instanceof Error ? e.message : String(e)}`, { path: rel });
   }
@@ -8621,10 +9165,10 @@ function bindingsPathOf(workflowAbs) {
 }
 function loadBindings(workflowAbs) {
   const file = bindingsPathOf(workflowAbs);
-  if (!existsSync16(file)) return null;
+  if (!existsSync18(file)) return null;
   let raw;
   try {
-    raw = JSON.parse(readFileSync13(file, "utf8"));
+    raw = JSON.parse(readFileSync14(file, "utf8"));
   } catch (e) {
     throw new DaoyanCliError({
       code: "workflow_invalid",
@@ -8814,497 +9358,6 @@ var init_load = __esm({
     init_types();
     init_graph();
     init_catalog();
-  }
-});
-
-// src/core/story/paths.mts
-import { existsSync as existsSync17, readdirSync as readdirSync4 } from "fs";
-import { join as join14 } from "path";
-function seriesPath(root) {
-  return join14(root, STORY_SERIES_FILE);
-}
-function charactersPath(root) {
-  return join14(root, STORY_CHARACTERS_FILE);
-}
-function scenesPath(root) {
-  return join14(root, STORY_SCENES_FILE);
-}
-function voicesPath(root) {
-  return join14(root, STORY_VOICES_FILE);
-}
-function episodesRoot(root) {
-  return join14(root, EPISODES_DIR);
-}
-function episodeDir(root, episodeId) {
-  return join14(root, EPISODES_DIR, episodeId);
-}
-function storyMapPath(root, episodeId) {
-  return join14(episodeDir(root, episodeId), STORY_MAP_FILE);
-}
-function takesPath(root, episodeId) {
-  if (episodeId === null || episodeId === "") return join14(root, TAKES_FILE);
-  if (!STORY_ID_RE.test(episodeId)) {
-    throw new DaoyanCliError({
-      code: "story_invalid",
-      message: `\u5267\u96C6 id \u975E\u6CD5\uFF1A${episodeId}`,
-      details: { episode_id: episodeId }
-    });
-  }
-  return join14(episodeDir(root, episodeId), TAKES_FILE);
-}
-function storyEnabled(root) {
-  return existsSync17(seriesPath(root));
-}
-function readSeries(root) {
-  const file = seriesPath(root);
-  if (!existsSync17(file)) return null;
-  return readJson(file);
-}
-function readEpisodeMeta(root, episodeId) {
-  if (!STORY_ID_RE.test(episodeId)) return null;
-  const file = join14(episodeDir(root, episodeId), EPISODE_META_FILE);
-  if (!existsSync17(file)) return null;
-  return readJson(file);
-}
-function listEpisodeMetas(root) {
-  const dir = episodesRoot(root);
-  if (!existsSync17(dir)) return [];
-  const out = [];
-  for (const entry of readdirSync4(dir, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
-    if (!STORY_ID_RE.test(entry.name)) continue;
-    try {
-      const meta = readEpisodeMeta(root, entry.name);
-      if (meta !== null && meta.id === entry.name) out.push(meta);
-    } catch {
-    }
-  }
-  return out.sort((a, b) => a.number - b.number || a.id.localeCompare(b.id));
-}
-function legacyContext(root) {
-  return {
-    episode_id: null,
-    legacy: true,
-    dir: root,
-    rel_dir: "",
-    shots_path: join14(root, SHOTS_FILE),
-    final_dir: join14(root, FINAL_DIR),
-    final_rel: FINAL_DIR,
-    label_prefix: "shot:",
-    script_meta_path: null,
-    script_text_path: null,
-    breakdown_path: null,
-    episode_meta_path: null
-  };
-}
-function storyContext(root, meta) {
-  const dir = episodeDir(root, meta.id);
-  const relDir = `${EPISODES_DIR}/${meta.id}`;
-  const finalRel = `${FINAL_DIR}/${meta.id}`;
-  return {
-    episode_id: meta.id,
-    legacy: false,
-    dir,
-    rel_dir: relDir,
-    shots_path: join14(dir, SHOTS_FILE),
-    final_dir: join14(root, finalRel),
-    final_rel: finalRel,
-    label_prefix: `ep:${meta.id}:shot:`,
-    script_meta_path: join14(dir, SCRIPT_FILE),
-    script_text_path: join14(dir, SCRIPT_TEXT_FILE),
-    breakdown_path: join14(dir, BREAKDOWN_FILE),
-    episode_meta_path: join14(dir, EPISODE_META_FILE)
-  };
-}
-function resolveEpisodeContext(root, episodeId) {
-  if (!storyEnabled(root)) {
-    if (episodeId !== void 0 && episodeId !== "") {
-      throw new DaoyanCliError({
-        code: "story_not_found",
-        message: "\u5F53\u524D\u9879\u76EE\u672A\u542F\u7528 story \u6A21\u5F0F\uFF0C\u4E0D\u80FD\u4F7F\u7528 --episode",
-        details: { episode_id: episodeId },
-        hint: "\u5148\u8FD0\u884C daoyan story init\u3002"
-      });
-    }
-    return legacyContext(root);
-  }
-  const metas = listEpisodeMetas(root);
-  if (metas.length === 0) {
-    throw new DaoyanCliError({
-      code: "story_invalid",
-      message: "story \u6A21\u5F0F\u5DF2\u542F\u7528\uFF0C\u4F46 episodes/ \u4E0B\u6CA1\u6709\u6709\u6548\u5267\u96C6",
-      hint: "\u8FD0\u884C daoyan story episode add --id ep01 --number 1 --title <\u6807\u9898>\u3002"
-    });
-  }
-  if (episodeId !== void 0 && episodeId !== "") {
-    const target = metas.find((m) => m.id === episodeId);
-    if (target === void 0) {
-      throw new DaoyanCliError({
-        code: "episode_not_found",
-        message: `\u672A\u627E\u5230\u5267\u96C6 ${episodeId}`,
-        details: { episode_id: episodeId, episodes: metas.map((m) => m.id) }
-      });
-    }
-    return storyContext(root, target);
-  }
-  if (metas.length > 1) {
-    throw new DaoyanCliError({
-      code: "episode_required",
-      message: `\u5F53\u524D\u9879\u76EE\u6709 ${metas.length} \u96C6\uFF0C\u8BF7\u7528 --episode <id> \u6307\u5B9A\u5267\u96C6`,
-      details: { episodes: metas.map((m) => m.id) }
-    });
-  }
-  return storyContext(root, metas[0]);
-}
-var STORY_ID_RE, REFERENCE_ASSET_RESERVED;
-var init_paths = __esm({
-  "src/core/story/paths.mts"() {
-    "use strict";
-    init_errors();
-    init_fs();
-    init_types();
-    STORY_ID_RE = /^[a-z][a-z0-9-]{1,63}$/;
-    REFERENCE_ASSET_RESERVED = "reference";
-  }
-});
-
-// src/core/story/store.mts
-import { existsSync as existsSync18, readFileSync as readFileSync14, rmSync as rmSync10 } from "fs";
-import { join as join15 } from "path";
-function emptyCharactersFile() {
-  return { version: 1, updated_at: nowIso(), characters: [] };
-}
-function emptyScenesFile() {
-  return { version: 1, updated_at: nowIso(), scenes: [] };
-}
-function emptyVoicesFile() {
-  return { version: 1, updated_at: nowIso(), voices: [] };
-}
-function emptyScriptMeta() {
-  return {
-    version: 1,
-    revision: EMPTY_REVISION,
-    sha256: "",
-    status: "draft",
-    source: "ai",
-    synced_by: "agent",
-    synced_at: "",
-    approved_at: null,
-    changelog: []
-  };
-}
-function emptyBreakdown(episodeId) {
-  return {
-    version: 1,
-    episode_id: episodeId,
-    source_revision: EMPTY_REVISION,
-    source_sha256: "",
-    beats: [],
-    characters: [],
-    scenes: [],
-    voices: [],
-    notes: ""
-  };
-}
-function emptyShots(episodeId) {
-  return {
-    workflow: "t2v",
-    meta: {
-      episode_id: episodeId,
-      title: "",
-      synopsis: "",
-      script_revision: EMPTY_REVISION,
-      script_sha256: "",
-      width: 768,
-      height: 1344,
-      fps: 24,
-      anchors: {}
-    },
-    defaults: {
-      length: 48,
-      steps: 30,
-      cfg: 4,
-      negative: "\u4F4E\u8D28\u91CF\uFF0C\u6A21\u7CCA\uFF0C\u566A\u70B9\uFF0C\u53D8\u5F62\uFF0C\u6C34\u5370"
-    },
-    style_prefix: "",
-    shots: []
-  };
-}
-function loadCharacters(root) {
-  return readJsonIfExists(charactersPath(root)) ?? emptyCharactersFile();
-}
-function loadScenes(root) {
-  return readJsonIfExists(scenesPath(root)) ?? emptyScenesFile();
-}
-function loadVoices(root) {
-  return readJsonIfExists(voicesPath(root)) ?? emptyVoicesFile();
-}
-function loadScriptMeta(root, episodeId) {
-  const file = join15(episodeDir(root, episodeId), SCRIPT_FILE);
-  const raw = readJsonIfExists(file);
-  return raw ?? emptyScriptMeta();
-}
-function loadScriptText(root, episodeId) {
-  const file = join15(episodeDir(root, episodeId), SCRIPT_TEXT_FILE);
-  if (!existsSync18(file)) return "";
-  return readFileSync14(file, "utf8");
-}
-function loadBreakdown(root, episodeId) {
-  return readJsonIfExists(join15(episodeDir(root, episodeId), BREAKDOWN_FILE));
-}
-function loadEpisodeShots(root, episodeId) {
-  return readJsonIfExists(join15(episodeDir(root, episodeId), SHOTS_FILE));
-}
-function loadStoryMap(root, episodeId) {
-  return readJsonIfExists(storyMapPath(root, episodeId));
-}
-function saveCharacters(root, doc) {
-  writeJsonAtomic(charactersPath(root), { ...doc, version: 1, updated_at: nowIso() });
-}
-function saveScenes(root, doc) {
-  writeJsonAtomic(scenesPath(root), { ...doc, version: 1, updated_at: nowIso() });
-}
-function saveVoices(root, doc) {
-  writeJsonAtomic(voicesPath(root), { ...doc, version: 1, updated_at: nowIso() });
-}
-function saveScriptMeta(root, episodeId, meta) {
-  writeJsonAtomic(join15(episodeDir(root, episodeId), SCRIPT_FILE), meta);
-}
-function saveBreakdown(root, episodeId, doc) {
-  writeJsonAtomic(join15(episodeDir(root, episodeId), BREAKDOWN_FILE), doc);
-}
-function saveEpisodeShots(root, episodeId, shots) {
-  writeJsonAtomic(join15(episodeDir(root, episodeId), SHOTS_FILE), shots);
-}
-function saveStoryMap(root, episodeId, doc) {
-  writeJsonAtomic(storyMapPath(root, episodeId), doc);
-}
-function removeStoryMap(root, episodeId) {
-  const file = storyMapPath(root, episodeId);
-  if (!existsSync18(file)) return false;
-  rmSync10(file, { force: true });
-  return true;
-}
-function normalizeScriptText(text) {
-  return text.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-}
-function appendStoryLfsRules(root) {
-  const file = join15(root, ".gitattributes");
-  const current = existsSync18(file) ? readFileSync14(file, "utf8") : "";
-  const required = [
-    "story/assets/**        filter=lfs diff=lfs merge=lfs -text",
-    "episodes/**/anchors/** filter=lfs diff=lfs merge=lfs -text"
-  ];
-  const lines = current.split("\n").filter((line) => line !== "");
-  const missing = required.filter((rule) => !lines.some((line) => line.trim() === rule.trim()));
-  if (missing.length === 0) return false;
-  const next = [...lines, ...missing].join("\n") + "\n";
-  writeFileAtomic(file, next);
-  return true;
-}
-function initStory(root, projectName) {
-  const created = [];
-  for (const dir of [
-    STORY_DIR,
-    STORY_ASSETS_DIR,
-    join15(STORY_ASSETS_DIR, "characters"),
-    join15(STORY_ASSETS_DIR, "scenes"),
-    join15(STORY_ASSETS_DIR, "voices"),
-    EPISODES_DIR,
-    LOG_DIR,
-    WORKFLOWS_DIR
-  ]) {
-    ensureDir(join15(root, dir));
-  }
-  if (!existsSync18(seriesPath(root))) {
-    const now = nowIso();
-    const series = {
-      version: 1,
-      title: projectName,
-      created_at: now,
-      updated_at: now
-    };
-    writeJsonAtomic(seriesPath(root), series);
-    created.push("story/series.json");
-  }
-  if (!existsSync18(charactersPath(root))) {
-    writeJsonAtomic(charactersPath(root), emptyCharactersFile());
-    created.push("story/characters.json");
-  }
-  if (!existsSync18(scenesPath(root))) {
-    writeJsonAtomic(scenesPath(root), emptyScenesFile());
-    created.push("story/scenes.json");
-  }
-  if (!existsSync18(voicesPath(root))) {
-    writeJsonAtomic(voicesPath(root), emptyVoicesFile());
-    created.push("story/voices.json");
-  }
-  if (appendStoryLfsRules(root)) created.push(".gitattributes");
-  if (listEpisodeMetas(root).length === 0) {
-    const series = readSeries(root);
-    const title = series?.title !== void 0 && series.title !== "" ? series.title : "\u7B2C 1 \u96C6";
-    addEpisode(root, { id: "ep01", number: 1, title });
-    created.push("episodes/ep01");
-  }
-  for (const meta of listEpisodeMetas(root)) {
-    const dir = episodeDir(root, meta.id);
-    if (!existsSync18(join15(dir, SCRIPT_FILE))) {
-      writeJsonAtomic(join15(dir, SCRIPT_FILE), emptyScriptMeta());
-      created.push(`episodes/${meta.id}/script.json`);
-    }
-    if (!existsSync18(join15(dir, BREAKDOWN_FILE))) {
-      writeJsonAtomic(join15(dir, BREAKDOWN_FILE), emptyBreakdown(meta.id));
-      created.push(`episodes/${meta.id}/breakdown.json`);
-    }
-    if (!existsSync18(join15(dir, SHOTS_FILE))) {
-      writeJsonAtomic(join15(dir, SHOTS_FILE), emptyShots(meta.id));
-      created.push(`episodes/${meta.id}/shots.json`);
-    }
-  }
-  return { created };
-}
-function addEpisode(root, init) {
-  if (!STORY_ID_RE.test(init.id)) {
-    throw new DaoyanCliError({
-      code: "story_invalid",
-      message: `\u5267\u96C6 id \u975E\u6CD5\uFF1A${init.id}`,
-      hint: "\u4F7F\u7528\u5C0F\u5199\u5B57\u6BCD / \u6570\u5B57 / -\uFF0C\u4F8B\u5982 ep02\u3002"
-    });
-  }
-  if (!Number.isInteger(init.number) || init.number <= 0) {
-    throw new DaoyanCliError({ code: "story_invalid", message: "\u5267\u96C6 number \u5FC5\u987B\u662F\u6B63\u6574\u6570" });
-  }
-  if (init.title.trim() === "") {
-    throw new DaoyanCliError({ code: "story_invalid", message: "\u5267\u96C6\u6807\u9898\u4E0D\u80FD\u4E3A\u7A7A" });
-  }
-  const metas = listEpisodeMetas(root);
-  if (metas.some((m) => m.id === init.id)) {
-    throw new DaoyanCliError({ code: "story_invalid", message: `\u5267\u96C6 ${init.id} \u5DF2\u5B58\u5728` });
-  }
-  if (metas.some((m) => m.number === init.number)) {
-    throw new DaoyanCliError({ code: "story_invalid", message: `\u96C6\u6570 ${init.number} \u5DF2\u88AB\u5360\u7528` });
-  }
-  const dir = episodeDir(root, init.id);
-  ensureDir(dir);
-  const now = nowIso();
-  const meta = {
-    version: 1,
-    id: init.id,
-    number: init.number,
-    title: init.title.trim(),
-    ...init.summary !== void 0 && init.summary !== "" ? { summary: init.summary } : {},
-    created_at: now,
-    updated_at: now
-  };
-  if (!existsSync18(join15(dir, EPISODE_META_FILE))) writeJsonAtomic(join15(dir, EPISODE_META_FILE), meta);
-  if (!existsSync18(join15(dir, SCRIPT_FILE))) writeJsonAtomic(join15(dir, SCRIPT_FILE), emptyScriptMeta());
-  if (!existsSync18(join15(dir, BREAKDOWN_FILE))) writeJsonAtomic(join15(dir, BREAKDOWN_FILE), emptyBreakdown(init.id));
-  if (!existsSync18(join15(dir, SHOTS_FILE))) writeJsonAtomic(join15(dir, SHOTS_FILE), emptyShots(init.id));
-  ensureDir(join15(root, LOG_DIR));
-  return meta;
-}
-function updateEpisode(root, episodeId, patch) {
-  const cur = readEpisodeMeta(root, episodeId);
-  if (cur === null) {
-    throw new DaoyanCliError({ code: "episode_not_found", message: `\u672A\u627E\u5230\u5267\u96C6 ${episodeId}` });
-  }
-  const metas = listEpisodeMetas(root);
-  if (patch.number !== void 0) {
-    if (!Number.isInteger(patch.number) || patch.number <= 0) {
-      throw new DaoyanCliError({ code: "story_invalid", message: "\u5267\u96C6 number \u5FC5\u987B\u662F\u6B63\u6574\u6570" });
-    }
-    if (metas.some((m) => m.id !== episodeId && m.number === patch.number)) {
-      throw new DaoyanCliError({ code: "story_invalid", message: `\u96C6\u6570 ${patch.number} \u5DF2\u88AB\u5360\u7528` });
-    }
-  }
-  if (patch.title !== void 0 && patch.title.trim() === "") {
-    throw new DaoyanCliError({ code: "story_invalid", message: "\u5267\u96C6\u6807\u9898\u4E0D\u80FD\u4E3A\u7A7A" });
-  }
-  const next = {
-    ...cur,
-    ...patch.number !== void 0 ? { number: patch.number } : {},
-    ...patch.title !== void 0 ? { title: patch.title.trim() } : {},
-    ...patch.summary !== void 0 ? { summary: patch.summary } : {},
-    updated_at: nowIso()
-  };
-  writeJsonAtomic(join15(episodeDir(root, episodeId), EPISODE_META_FILE), next);
-  return next;
-}
-function syncScript(opts) {
-  if (readEpisodeMeta(opts.root, opts.episodeId) === null) {
-    throw new DaoyanCliError({ code: "episode_not_found", message: `\u672A\u627E\u5230\u5267\u96C6 ${opts.episodeId}` });
-  }
-  const text = normalizeScriptText(opts.text);
-  if (text.trim() === "") {
-    throw new DaoyanCliError({ code: "story_invalid", message: "\u5267\u672C\u6B63\u6587\u4E3A\u7A7A" });
-  }
-  const bytes = Buffer.byteLength(text, "utf8");
-  if (bytes > MAX_SCRIPT_BYTES) {
-    throw new DaoyanCliError({
-      code: "story_invalid",
-      message: `\u5267\u672C\u8D85\u8FC7 ${MAX_SCRIPT_BYTES} \u5B57\u8282\u4E0A\u9650`,
-      details: { bytes, limit: MAX_SCRIPT_BYTES }
-    });
-  }
-  const cur = loadScriptMeta(opts.root, opts.episodeId);
-  if (opts.baseRevision !== void 0 && cur.revision !== opts.baseRevision) {
-    throw new DaoyanCliError({
-      code: "story_conflict",
-      message: `\u5267\u672C revision \u5DF2\u53D8\u4E3A ${cur.revision}\uFF08\u671F\u671B ${opts.baseRevision}\uFF09`,
-      details: { current: cur.revision, expected: opts.baseRevision }
-    });
-  }
-  const hash = sha256(text);
-  if (cur.revision > 0 && cur.sha256 === hash) {
-    return { meta: cur, changed: false };
-  }
-  const revision = cur.revision + 1;
-  const entry = {
-    revision,
-    at: nowIso(),
-    source: opts.source,
-    summary: opts.summary.trim() === "" ? "\u540C\u6B65\u5267\u672C" : opts.summary.trim()
-  };
-  const meta = {
-    version: 1,
-    revision,
-    sha256: hash,
-    status: "draft",
-    source: opts.source,
-    synced_by: opts.syncedBy ?? "agent",
-    synced_at: entry.at,
-    approved_at: null,
-    changelog: [...cur.changelog, entry].slice(-SCRIPT_CHANGELOG_LIMIT)
-  };
-  writeFileAtomic(join15(episodeDir(opts.root, opts.episodeId), SCRIPT_TEXT_FILE), text);
-  saveScriptMeta(opts.root, opts.episodeId, meta);
-  return { meta, changed: true };
-}
-function approveScript(root, episodeId) {
-  const cur = loadScriptMeta(root, episodeId);
-  if (cur.revision <= 0) {
-    throw new DaoyanCliError({ code: "story_invalid", message: "\u5267\u672C\u5C1A\u672A\u540C\u6B65\uFF0C\u4E0D\u80FD\u786E\u8BA4" });
-  }
-  const textFile = join15(episodeDir(root, episodeId), SCRIPT_TEXT_FILE);
-  if (!existsSync18(textFile)) {
-    throw new DaoyanCliError({ code: "story_invalid", message: "\u5267\u672C\u6B63\u6587\u4E0D\u5B58\u5728\uFF0C\u4E0D\u80FD\u786E\u8BA4" });
-  }
-  if (cur.status === "approved") return cur;
-  const next = { ...cur, status: "approved", approved_at: nowIso() };
-  saveScriptMeta(root, episodeId, next);
-  return next;
-}
-var MAX_SCRIPT_BYTES, SCRIPT_CHANGELOG_LIMIT, EMPTY_REVISION;
-var init_store2 = __esm({
-  "src/core/story/store.mts"() {
-    "use strict";
-    init_errors();
-    init_fs();
-    init_types();
-    init_paths();
-    MAX_SCRIPT_BYTES = 2 * 1024 * 1024;
-    SCRIPT_CHANGELOG_LIMIT = 20;
-    EMPTY_REVISION = 0;
   }
 });
 
@@ -9815,7 +9868,7 @@ var init_assets = __esm({
     init_store3();
     init_types();
     init_paths();
-    init_store2();
+    init_store();
     MAX_ASSET_BYTES = 200 * 1024 * 1024;
     LFS_POINTER_PREFIX = "version https://git-lfs.github.com/spec/v1";
     MAGIC_READ_BYTES = 64;
@@ -10055,6 +10108,7 @@ function gapFromError(err, slot, owner) {
 }
 function planWorkflowAssets(opts) {
   const empty = { uploads: [], records: [], slots: [], gaps: [] };
+  const audio = opts.audio ?? true;
   let file;
   try {
     file = loadWorkflowAssets(opts.workflowAbs);
@@ -10093,6 +10147,18 @@ function planWorkflowAssets(opts) {
   const cast = opts.shot.characters ?? [];
   for (const slot of file.slots) {
     const required = slot.required !== false;
+    if (slot.kind === "voice" && !audio) {
+      gaps.push({
+        code: "voice_disabled",
+        error_code: "story_gate_failed",
+        severity: "warning",
+        slot: slot.name,
+        owner: null,
+        message: `\u9879\u76EE\u5DF2\u5173\u95ED\u97F3\u9891\uFF0C\u5FFD\u7565\u97F3\u8272\u69FD\u4F4D ${slot.name}`,
+        hint: "\u5728 Web \u9879\u76EE\u7BA1\u7406\u5F00\u542F\u97F3\u9891\u540E\u91CD\u65B0\u751F\u6210\u3002"
+      });
+      continue;
+    }
     const node = slot.target.slice(0, slot.target.indexOf("."));
     if (loaded.graph[node] === void 0) {
       gaps.push({
@@ -10305,7 +10371,7 @@ var init_workflow_assets = __esm({
     "use strict";
     init_errors();
     init_load();
-    init_store2();
+    init_store();
     init_assets();
   }
 });
@@ -10359,7 +10425,7 @@ function validateTakeTarget(root, context, shotId, run2, outputName) {
       details: { run_id: run2.run_id, shot_id: shotId, expected_label: label, actual_label: run2.label }
     });
   }
-  if (!context.legacy && run2.episode_id !== context.episode_id) {
+  if (run2.episode_id !== context.episode_id) {
     throw new DaoyanCliError({
       code: "take_invalid",
       message: `run ${run2.run_id} \u5C5E\u4E8E\u5267\u96C6 ${String(run2.episode_id ?? "\u672A\u5F52\u5C5E")}\uFF0C\u4E0D\u662F ${String(context.episode_id)}`,
@@ -10611,6 +10677,13 @@ var init_takes = __esm({
 // src/core/story/validate.mts
 import { existsSync as existsSync23, readFileSync as readFileSync18, readdirSync as readdirSync6 } from "fs";
 import { join as join19 } from "path";
+function isVoiceIssue(item) {
+  const text = `${item.code ?? ""} ${item.path ?? ""} ${item.message ?? ""} ${item.ref ?? ""}`;
+  return /voice|音色/i.test(text);
+}
+function filterVoiceItems(items, audio) {
+  return audio ? items : items.filter((item) => !isVoiceIssue(item));
+}
 function issue(episodeId, path, code, severity, message, hint) {
   return { episode_id: episodeId, path, code, severity, message, hint };
 }
@@ -10767,7 +10840,7 @@ function validateCharacters(root, doc, voices, episodeIds, verifyHashes, issues)
         "characters_version_invalid",
         "error",
         "characters.json version \u5FC5\u987B\u4E3A 1",
-        "\u91CD\u65B0 story init \u6216\u4FEE\u6B63 version\u3002"
+        "\u91CD\u65B0\u6267\u884C daoyan init \u6216\u4FEE\u6B63 version\u3002"
       )
     );
   }
@@ -11714,7 +11787,7 @@ function checkEpisodeShotsDoc(root, episodeId, project, shots, breakdown, charac
             );
           }
           try {
-            resolveWorkflowAssets({ root, shot, workflowAbs: wf.abs });
+            resolveWorkflowAssets({ root, shot, workflowAbs: wf.abs, audio: audioEnabledOf(project) });
           } catch (e) {
             issues.push(
               issue(
@@ -11953,7 +12026,7 @@ function computeEpisodeStoryStatus(root, episodeId, project) {
           break;
         }
         try {
-          resolveWorkflowAssets({ root, shot, workflowAbs: wf.abs });
+          resolveWorkflowAssets({ root, shot, workflowAbs: wf.abs, audio: audioEnabledOf(effectiveProject) });
         } catch (e) {
           const details = isDaoyanCliError(e) ? e.details : void 0;
           const nested = details?.blockers;
@@ -11986,6 +12059,9 @@ function computeEpisodeStoryStatus(root, episodeId, project) {
       }
     }
   }
+  const audio = audioEnabledOf(effectiveProject);
+  const filteredBlockers = filterVoiceItems(blockers, audio);
+  blockers.splice(0, blockers.length, ...filteredBlockers);
   let stage = "ready";
   if (blockers.some((b) => b.code === "script_missing" || b.code === "script_draft")) stage = "script";
   else if (blockers.some((b) => b.code === "breakdown_missing" || b.code === "breakdown_stale")) stage = "breakdown";
@@ -12004,13 +12080,15 @@ function computeEpisodeStoryStatus(root, episodeId, project) {
       warnings.push(blocker("take_stale", `\u955C\u5934 ${id} \u7684\u5B9A\u7A3F\u7A3F\u4EF6\u5DF2\u5931\u6548\uFF0C\u9700\u91CD\u65B0\u5B9A\u7A3F`, void 0, [id]));
     }
   }
+  const filteredWarnings = filterVoiceItems(warnings, audio);
+  warnings.splice(0, warnings.length, ...filteredWarnings);
   const counts = {
     characters: breakdown?.characters.length ?? 0,
     forms: breakdown?.characters.reduce((sum, c) => sum + c.forms.length, 0) ?? 0,
     scenes: breakdown?.scenes.length ?? 0,
-    voices: breakdown?.voices.length ?? 0,
+    voices: audio ? breakdown?.voices.length ?? 0 : 0,
     shots: shots?.shots.length ?? 0,
-    assets: breakdownAssetCount(breakdown, characters, scenes, voices),
+    assets: breakdownAssetCount(breakdown, characters, scenes, audio ? voices : { ...voices, voices: [] }),
     finalized_shots: takes?.finalized ?? 0
   };
   const nextActions = nextActionsForEpisode(stage, episodeId, blockers);
@@ -12137,13 +12215,13 @@ function computeSeriesStoryStatus(root, project) {
 function validateStory(root, episodeId, verifyHashes = false) {
   const issues = [];
   if (!storyEnabled(root)) {
-    issues.push(issue(null, "story/", "story_not_found", "error", "story \u6A21\u5F0F\u672A\u542F\u7528", "\u8FD0\u884C daoyan story init\u3002"));
+    issues.push(issue(null, "story/", "story_not_found", "error", "\u9879\u76EE\u7F3A\u5C11 story \u7ED3\u6784", "\u91CD\u65B0\u6267\u884C daoyan init\u3002"));
     return issues;
   }
   const series = readSeries(root);
   if (series === null || !existsSync23(seriesPath(root))) {
     issues.push(
-      issue(null, "story/series.json", "series_missing", "error", "\u7CFB\u5217\u5143\u6570\u636E\u4E0D\u5B58\u5728", "\u91CD\u65B0 story init\u3002")
+      issue(null, "story/series.json", "series_missing", "error", "\u7CFB\u5217\u5143\u6570\u636E\u4E0D\u5B58\u5728", "\u91CD\u65B0\u6267\u884C daoyan init\u3002")
     );
   } else if (stringOf(series.title) === null) {
     issues.push(
@@ -12158,6 +12236,19 @@ function validateStory(root, episodeId, verifyHashes = false) {
     );
   }
   const metas = listEpisodeMetas(root);
+  const initialProject = readProjectAt(root);
+  if (initialProject !== null && (initialProject.production?.mode ?? "series") === "single" && metas.length > 1) {
+    issues.push(
+      issue(
+        null,
+        "episodes/",
+        "episode_count_invalid",
+        "error",
+        `\u5355\u89C6\u9891\u9879\u76EE\u53EA\u80FD\u6709 1 \u96C6\uFF0C\u5F53\u524D ${metas.length} \u96C6`,
+        "\u7528 story episode remove <id> \u5220\u9664\u591A\u4F59\u5267\u96C6\u3002"
+      )
+    );
+  }
   const episodeIds = new Set(metas.map((m) => m.id));
   const numbers = /* @__PURE__ */ new Set();
   for (const meta of metas) {
@@ -12192,14 +12283,25 @@ function validateStory(root, episodeId, verifyHashes = false) {
   const voices = loadVoices(root);
   if (!existsSync23(charactersPath(root))) {
     issues.push(
-      issue(null, "story/characters.json", "characters_missing", "error", "\u89D2\u8272\u8BBE\u5B9A\u4E0D\u5B58\u5728", "\u91CD\u65B0 story init\u3002")
+      issue(
+        null,
+        "story/characters.json",
+        "characters_missing",
+        "error",
+        "\u89D2\u8272\u8BBE\u5B9A\u4E0D\u5B58\u5728",
+        "\u91CD\u65B0\u6267\u884C daoyan init\u3002"
+      )
     );
   }
   if (!existsSync23(scenesPath(root))) {
-    issues.push(issue(null, "story/scenes.json", "scenes_missing", "error", "\u573A\u666F\u8BBE\u5B9A\u4E0D\u5B58\u5728", "\u91CD\u65B0 story init\u3002"));
+    issues.push(
+      issue(null, "story/scenes.json", "scenes_missing", "error", "\u573A\u666F\u8BBE\u5B9A\u4E0D\u5B58\u5728", "\u91CD\u65B0\u6267\u884C daoyan init\u3002")
+    );
   }
   if (!existsSync23(voicesPath(root))) {
-    issues.push(issue(null, "story/voices.json", "voices_missing", "error", "\u97F3\u8272\u8BBE\u5B9A\u4E0D\u5B58\u5728", "\u91CD\u65B0 story init\u3002"));
+    issues.push(
+      issue(null, "story/voices.json", "voices_missing", "error", "\u97F3\u8272\u8BBE\u5B9A\u4E0D\u5B58\u5728", "\u91CD\u65B0\u6267\u884C daoyan init\u3002")
+    );
   }
   validateCharacters(root, characters, voices, episodeIds, verifyHashes, issues);
   validateScenes(root, scenes, episodeIds, verifyHashes, issues);
@@ -12287,7 +12389,8 @@ function validateStory(root, episodeId, verifyHashes = false) {
     }
     validateEpisodeFinals(root, meta.id, issues);
   }
-  return issues;
+  const project = readProjectAt(root);
+  return filterVoiceItems(issues, audioEnabledOf(project));
 }
 function checkCharactersDocForWrite(root, doc, verifyHashes = false) {
   const issues = [];
@@ -12343,6 +12446,7 @@ var init_validate = __esm({
   "src/core/story/validate.mts"() {
     "use strict";
     init_config();
+    init_production();
     init_types();
     init_load();
     init_fs();
@@ -12351,7 +12455,7 @@ var init_validate = __esm({
     init_assets();
     init_paths();
     init_takes();
-    init_store2();
+    init_store();
     ALLOWED_ASSET_TYPES = /* @__PURE__ */ new Set([
       "image/png",
       "image/jpeg",
@@ -12460,200 +12564,6 @@ function validateWorkflows(root, machine, issues) {
     }
   }
 }
-function validateShots(root, shots, issues) {
-  if (shots === null) {
-    issues.push({
-      path: "shots.json",
-      code: "shots_missing",
-      severity: "warning",
-      message: "\u6CA1\u6709 shots.json\uFF08\u5355 run \u6A21\u5F0F\u53EF\u5FFD\u7565\uFF09",
-      hint: "\u9700\u8981 shot/batch \u65F6\u521B\u5EFA shots.json\u3002"
-    });
-    return;
-  }
-  if (!Number.isFinite(shots.meta.width) || shots.meta.width <= 0) {
-    issues.push({
-      path: "shots.meta.width",
-      code: "shots_width_invalid",
-      severity: "error",
-      message: "meta.width \u5FC5\u987B\u662F\u6B63\u6570",
-      hint: "\u586B\u5199\u751F\u6210\u5BBD\u5EA6\u3002"
-    });
-  } else if (shots.meta.width % DIM_MULTIPLE !== 0) {
-    issues.push({
-      path: "shots.meta.width",
-      code: "shots_width_not_aligned",
-      severity: "warning",
-      message: `meta.width=${shots.meta.width} \u4E0D\u662F 32 \u7684\u500D\u6570`,
-      hint: "\u67D0\u4E9B\u6A21\u578B\u4F1A\u5BF9\u9F50\u5230 32/64\uFF0C\u5EFA\u8BAE\u4E3B\u52A8\u5BF9\u9F50\u3002"
-    });
-  }
-  if (!Number.isFinite(shots.meta.height) || shots.meta.height <= 0) {
-    issues.push({
-      path: "shots.meta.height",
-      code: "shots_height_invalid",
-      severity: "error",
-      message: "meta.height \u5FC5\u987B\u662F\u6B63\u6570",
-      hint: "\u586B\u5199\u751F\u6210\u9AD8\u5EA6\u3002"
-    });
-  } else if (shots.meta.height % DIM_MULTIPLE !== 0) {
-    issues.push({
-      path: "shots.meta.height",
-      code: "shots_height_not_aligned",
-      severity: "warning",
-      message: `meta.height=${shots.meta.height} \u4E0D\u662F 32 \u7684\u500D\u6570`,
-      hint: "\u5EFA\u8BAE\u5BF9\u9F50\u5230 32 \u7684\u500D\u6570\u3002"
-    });
-  }
-  if (shots.shots.length === 0) {
-    issues.push({
-      path: "shots.shots",
-      code: "shots_empty",
-      severity: "error",
-      message: "\u5206\u955C\u8868\u4E3A\u7A7A",
-      hint: "\u6DFB\u52A0\u81F3\u5C11\u4E00\u4E2A\u955C\u5934\u3002"
-    });
-  }
-  const seenId = /* @__PURE__ */ new Set();
-  const seenSeed = /* @__PURE__ */ new Set();
-  const byId = new Map(shots.shots.map((s) => [s.id, s]));
-  for (const s of shots.shots) {
-    const tag = `shots.${s.id}`;
-    if (seenId.has(s.id)) {
-      issues.push({
-        path: tag,
-        code: "shot_id_duplicate",
-        severity: "error",
-        message: `\u955C\u53F7 ${s.id} \u91CD\u590D`,
-        hint: "\u955C\u53F7\u5FC5\u987B\u552F\u4E00\u3002"
-      });
-    }
-    seenId.add(s.id);
-    if (typeof s.seed !== "number") {
-      issues.push({
-        path: tag,
-        code: "shot_seed_invalid",
-        severity: "error",
-        message: "\u7F3A\u5C11\u6570\u503C seed",
-        hint: "\u4E3A\u6BCF\u4E2A\u955C\u5934\u8BBE\u7F6E seed\u3002"
-      });
-    } else if (seenSeed.has(String(s.seed))) {
-      issues.push({
-        path: tag,
-        code: "shot_seed_duplicate",
-        severity: "warning",
-        message: `seed ${s.seed} \u4E0E\u5176\u4ED6\u955C\u5934\u91CD\u590D`,
-        hint: "\u91CD\u590D seed \u53EF\u80FD\u4EA7\u751F\u76F8\u4F3C\u7ED3\u679C\uFF08\u5E76\u975E\u9519\u8BEF\uFF09\u3002"
-      });
-    }
-    if (typeof s.seed === "number") seenSeed.add(String(s.seed));
-    if (typeof s.prompt !== "string" || s.prompt.trim() === "") {
-      issues.push({
-        path: tag,
-        code: "shot_prompt_empty",
-        severity: "error",
-        message: "prompt \u4E3A\u7A7A",
-        hint: "\u586B\u5199\u955C\u5934\u63D0\u793A\u8BCD\u3002"
-      });
-    }
-    const len = s.length ?? shots.defaults.length;
-    if (typeof len === "number" && len % FRAME_GRID_STEP !== FRAME_GRID_OFFSET) {
-      issues.push({
-        path: tag,
-        code: "shot_length_not_aligned",
-        severity: "warning",
-        message: `length ${len} \u4E0D\u7B26\u5408 17k+5 \u5E27\u7F51\u683C`,
-        hint: "\u5F15\u64CE\u53EF\u80FD\u9759\u9ED8\u5BF9\u9F50\uFF1B\u5EFA\u8BAE\u4F7F\u7528 17k+5\u3002"
-      });
-    }
-    const ref = s.workflow ?? shots.workflow ?? null;
-    if (ref !== null) {
-      const wf = resolveWorkflowRef(root, ref);
-      if (!existsSync24(wf.abs)) {
-        issues.push({
-          path: tag,
-          code: "shot_workflow_missing",
-          severity: "error",
-          message: `workflow \u6587\u4EF6\u4E0D\u5B58\u5728\uFF1A${wf.rel}`,
-          hint: "\u5148\u521B\u5EFA/\u5BFC\u5165\u8BE5 workflow\u3002"
-        });
-      } else if (!existsSync24(bindingsPathOf(wf.abs))) {
-        issues.push({
-          path: tag,
-          code: "shot_bindings_missing",
-          severity: "warning",
-          message: `workflow \u7F3A\u5C11 bindings\uFF1A${wf.rel.replace(/\.json$/, ".bindings.json")}`,
-          hint: "shot/batch \u9700\u8981 bindings \u6CE8\u5165 prompt/seed\u3002"
-        });
-      }
-    }
-  }
-  for (const s of shots.shots) {
-    const ff = s.first_frame;
-    if (ff === void 0) continue;
-    const tag = `shots.${s.id}.first_frame`;
-    if (typeof ff === "string") {
-      const rel = shots.meta.anchors[ff];
-      if (rel === void 0) {
-        issues.push({
-          path: tag,
-          code: "anchor_missing_key",
-          severity: "error",
-          message: `\u951A\u70B9 key "${ff}" \u4E0D\u5728 meta.anchors`,
-          hint: "\u5728 meta.anchors \u767B\u8BB0\u6216\u6539\u7528\u5B58\u5728\u7684 key\u3002"
-        });
-      } else if (!existsSync24(join20(root, rel))) {
-        issues.push({
-          path: tag,
-          code: "anchor_file_missing",
-          severity: "error",
-          message: `\u951A\u70B9\u56FE\u7247\u4E0D\u5B58\u5728\uFF1A${rel}`,
-          hint: "\u653E\u5165\u951A\u70B9\u6587\u4EF6\uFF0C\u6216\u4FEE\u6B63 meta.anchors \u8DEF\u5F84\u3002"
-        });
-      }
-    } else if (typeof ff === "object" && typeof ff.relay === "string") {
-      if (!byId.has(ff.relay)) {
-        issues.push({
-          path: tag,
-          code: "relay_upstream_missing",
-          severity: "error",
-          message: `\u63A5\u529B\u4E0A\u6E38 ${ff.relay} \u4E0D\u5B58\u5728`,
-          hint: "\u4FEE\u6B63 relay \u955C\u53F7\u3002"
-        });
-      }
-    } else {
-      issues.push({
-        path: tag,
-        code: "first_frame_invalid",
-        severity: "error",
-        message: 'first_frame \u975E\u6CD5\uFF08\u5E94\u4E3A\u951A\u70B9\u5B57\u7B26\u4E32\u6216 {"relay":"id"}\uFF09',
-        hint: "\u4FEE\u6B63 first_frame\u3002"
-      });
-    }
-  }
-  for (const s of shots.shots) {
-    const seen = /* @__PURE__ */ new Set([s.id]);
-    let cur = s;
-    for (; ; ) {
-      const ff = cur.first_frame;
-      if (typeof ff !== "object" || ff === void 0) break;
-      const next = byId.get(ff.relay);
-      if (next === void 0) break;
-      if (seen.has(next.id)) {
-        issues.push({
-          path: `shots.${s.id}`,
-          code: "relay_cycle",
-          severity: "error",
-          message: `\u63A5\u529B\u94FE\u6210\u73AF\uFF08\u7ECF\u8FC7 ${next.id}\uFF09`,
-          hint: "\u6253\u65AD\u63A5\u529B\u73AF\u3002"
-        });
-        break;
-      }
-      seen.add(next.id);
-      cur = next;
-    }
-  }
-}
 function validateMachine(root, machine, issues) {
   if (machine === null) {
     issues.push({
@@ -12698,7 +12608,6 @@ function validateMachine(root, machine, issues) {
 async function runValidate(ctx2) {
   const { root, config: project } = requireProject(ctx2);
   const machine = loadMachineIfExists(root);
-  const shots = loadShotsIfExists(root);
   const issues = [];
   if (project.default_workflow !== void 0) {
     const wf = resolveWorkflowRef(root, project.default_workflow);
@@ -12714,19 +12623,15 @@ async function runValidate(ctx2) {
   }
   validateMachine(root, machine, issues);
   validateWorkflows(root, machine, issues);
-  if (storyEnabled(root)) {
-    for (const item of validateStory(root)) {
-      issues.push({
-        path: item.path,
-        episode_id: item.episode_id,
-        code: item.code,
-        severity: item.severity === "error" ? "error" : "warning",
-        message: item.message,
-        hint: item.hint
-      });
-    }
-  } else {
-    validateShots(root, shots, issues);
+  for (const item of validateStory(root)) {
+    issues.push({
+      path: item.path,
+      episode_id: item.episode_id,
+      code: item.code,
+      severity: item.severity === "error" ? "error" : "warning",
+      message: item.message,
+      hint: item.hint
+    });
   }
   const lock = inspectMachineLock();
   if (lock.status === "corrupt") {
@@ -12776,7 +12681,6 @@ async function runValidate(ctx2) {
   }
   return 0;
 }
-var DIM_MULTIPLE, FRAME_GRID_STEP, FRAME_GRID_OFFSET;
 var init_validate2 = __esm({
   "src/commands/validate.mts"() {
     "use strict";
@@ -12792,20 +12696,12 @@ var init_validate2 = __esm({
     init_skill();
     init_lock();
     init_version();
-    init_paths();
     init_validate();
-    DIM_MULTIPLE = 32;
-    FRAME_GRID_STEP = 17;
-    FRAME_GRID_OFFSET = 5;
   }
 });
 
 // src/core/story/production.mts
 function loadContextShots(root, context) {
-  if (context.legacy) return loadShotsFile(root);
-  if (context.episode_id === null) {
-    throw new DaoyanCliError({ code: "story_invalid", message: "\u7F3A\u5C11 episode_id" });
-  }
   const shots = loadEpisodeShots(root, context.episode_id);
   if (shots === null) {
     throw new DaoyanCliError({
@@ -12825,7 +12721,7 @@ function storyEnforceOf(project) {
 }
 function checkStoryGate(root, context, project) {
   const mode = storyEnforceOf(project);
-  if (context.legacy || context.episode_id === null || mode === "off") {
+  if (mode === "off") {
     return { mode, blockers: [], stage: null };
   }
   const status = computeEpisodeStoryStatus(root, context.episode_id, project);
@@ -12844,18 +12740,16 @@ function gateError(context, blockers, stage = null) {
     }
   });
 }
-var init_production = __esm({
+var init_production2 = __esm({
   "src/core/story/production.mts"() {
     "use strict";
     init_errors();
-    init_config();
     init_validate();
-    init_store2();
+    init_store();
   }
 });
 
 // src/core/run/reassign.mts
-import { existsSync as existsSync25 } from "fs";
 function reassignRunToEpisode(opts) {
   const run2 = requireRun(opts.root, opts.runId);
   const priorLabel = run2.label;
@@ -12924,11 +12818,6 @@ function reassignRunToEpisode(opts) {
   };
   writeRun(opts.root, next);
   const warnings = [];
-  if (legacyTakeReferences(opts.root, opts.runId)) {
-    warnings.push(
-      `\u6839\u76EE\u5F55 takes.json \u91CC\u6709\u6307\u5411\u8BE5 run \u7684\u5B9A\u7A3F\u8BB0\u5F55\uFF1B\u8FC1\u79FB\u540E\u8BE5\u8BB0\u5F55\u4F1A\u5224\u4E3A\u5931\u6548\uFF0C\u9700\u8981\u5728 ${context.episode_id} \u91CD\u65B0 take finalize\u3002`
-    );
-  }
   const task = readTask(opts.root, run2.task_id);
   if (task !== null && (task.episode_id ?? null) !== context.episode_id) {
     warnings.push(
@@ -12937,13 +12826,6 @@ function reassignRunToEpisode(opts) {
   }
   return { record: next, changed: true, prior_label: priorLabel, prior_episode_id: priorEpisode, label, warnings };
 }
-function legacyTakeReferences(root, runId) {
-  const file = takesPath(root, null);
-  if (!existsSync25(file)) return false;
-  const takes = readJsonIfExists(file);
-  if (takes === null || !Array.isArray(takes.shots)) return false;
-  return takes.shots.some((s) => s.finalized !== null && s.finalized !== void 0 && s.finalized.run_id === runId);
-}
 var LEGACY_SHOT_LABEL_RE, EPISODE_SHOT_LABEL_RE;
 var init_reassign = __esm({
   "src/core/run/reassign.mts"() {
@@ -12951,9 +12833,9 @@ var init_reassign = __esm({
     init_errors();
     init_fs();
     init_store3();
-    init_store();
-    init_paths();
     init_store2();
+    init_paths();
+    init_store();
     LEGACY_SHOT_LABEL_RE = /^shot:(.+)$/;
     EPISODE_SHOT_LABEL_RE = /^ep:[^:]+:shot:(.+)$/;
   }
@@ -13013,7 +12895,7 @@ var init_ffmpeg = __esm({
 });
 
 // src/core/task/plans.mts
-import { existsSync as existsSync26, mkdirSync as mkdirSync4, statSync as statSync6 } from "fs";
+import { existsSync as existsSync25, mkdirSync as mkdirSync4, statSync as statSync6 } from "fs";
 import { basename as basename6, join as join21 } from "path";
 function splitTarget2(target) {
   const dot = target.indexOf(".");
@@ -13142,7 +13024,7 @@ function pickRelaySource(root, context, upstreamId, enforceTakes) {
     });
   }
   const abs = runOutputAbs(root, take.run, take.output);
-  if (!existsSync26(abs)) {
+  if (!existsSync25(abs)) {
     throw new DaoyanCliError({
       code: "relay_upstream_missing",
       message: `\u63A5\u529B\u4E0A\u6E38\u4EA7\u7269\u4E0D\u5728\u5DE5\u4F5C\u533A\uFF08\u53EF\u80FD\u672A git lfs pull\uFF09\uFF1A${take.run.run_id}/${take.output.path}`,
@@ -13171,7 +13053,7 @@ function firstFrameUpload(opts) {
       });
     }
     const src = join21(opts.root, rel);
-    if (!existsSync26(src)) {
+    if (!existsSync25(src)) {
       throw new DaoyanCliError({
         code: "anchor_not_found",
         message: `\u951A\u70B9\u56FE\u7247\u4E0D\u5B58\u5728\uFF1A${rel}`,
@@ -13201,7 +13083,7 @@ function firstFrameUpload(opts) {
   mkdirSync4(relayDir, { recursive: true });
   const cache = join21(relayDir, `relay_${upstream.id}_${source.run_id}_to_${opts.shot.id}.png`);
   let needExtract = true;
-  if (existsSync26(cache)) {
+  if (existsSync25(cache)) {
     try {
       needExtract = statSync6(cache).mtimeMs < statSync6(source.abs).mtimeMs;
     } catch {
@@ -13295,7 +13177,12 @@ async function planShotRuns(opts) {
     }
     const values = shotLogicalValues(opts.shots, shot, opts.stepsOverride);
     const ff = firstFrameUpload({ root: opts.root, shots: opts.shots, shot, bindings, context, enforceTakes });
-    const assetPlan = resolveWorkflowAssets({ root: opts.root, shot, workflowAbs: wf.abs });
+    const assetPlan = resolveWorkflowAssets({
+      root: opts.root,
+      shot,
+      workflowAbs: wf.abs,
+      audio: audioEnabledOf(opts.project)
+    });
     const applied = applyLogicalValues(over.graph, bindings, values);
     const applyError = applied.issues.find((i) => i.severity === "error");
     if (applyError !== void 0) {
@@ -13350,6 +13237,7 @@ var init_plans = __esm({
     init_takes();
     init_load();
     init_workflow_assets();
+    init_production();
   }
 });
 
@@ -13383,7 +13271,7 @@ var init_signals = __esm({
 });
 
 // src/core/task/events.mts
-import { existsSync as existsSync27, readFileSync as readFileSync20 } from "fs";
+import { existsSync as existsSync26, readFileSync as readFileSync20 } from "fs";
 import { join as join22 } from "path";
 import { appendFileSync as appendFileSync2 } from "fs";
 function eventsPath(taskDir2) {
@@ -13391,7 +13279,7 @@ function eventsPath(taskDir2) {
 }
 function readEvents(taskDir2, fromSeq = 0) {
   const file = eventsPath(taskDir2);
-  if (!existsSync27(file)) return [];
+  if (!existsSync26(file)) return [];
   const out = [];
   for (const line of readFileSync20(file, "utf8").split("\n")) {
     if (line.trim() === "") continue;
@@ -13620,7 +13508,7 @@ var init_preflight = __esm({
 });
 
 // src/core/run/executor.mts
-import { existsSync as existsSync28, readFileSync as readFileSync21, statSync as statSync7, openSync as openSync3, readSync as readSync2, closeSync as closeSync3 } from "fs";
+import { existsSync as existsSync27, readFileSync as readFileSync21, statSync as statSync7, openSync as openSync3, readSync as readSync2, closeSync as closeSync3 } from "fs";
 import { basename as basename7, join as join23 } from "path";
 function collectOutputItems(outputs) {
   const out = [];
@@ -13643,7 +13531,7 @@ function collectOutputItems(outputs) {
   return out;
 }
 function readTailText(file, lines) {
-  if (!existsSync28(file)) return "";
+  if (!existsSync27(file)) return "";
   let size = 0;
   try {
     size = statSync7(file).size;
@@ -13945,7 +13833,7 @@ function patchRunCleanup(opts) {
   let first = true;
   for (const runId of opts.runIds) {
     const file = join23(opts.root, "runs", runId, "run.json");
-    if (!existsSync28(file)) continue;
+    if (!existsSync27(file)) continue;
     try {
       const rec = JSON.parse(readFileSync21(file, "utf8"));
       rec.engine.cleanup = opts.cleanup;
@@ -13987,7 +13875,7 @@ var init_executor = __esm({
 });
 
 // src/core/task/worker.mts
-import { existsSync as existsSync29, readdirSync as readdirSync8 } from "fs";
+import { existsSync as existsSync28, readdirSync as readdirSync8 } from "fs";
 import { basename as basename8, dirname as dirname10, join as join24, resolve as resolve5 } from "path";
 function isFatalRunError(code) {
   return code === "engine_oom" || code === "engine_crashed" || code === "engine_unreachable" || code === "engine_busy" || code === "engine_start_failed" || code === "engine_stop_failed" || code === "gpu_lease_corrupt" || code === "machine_busy" || code === "machine_lock_corrupt" || code === "worker_start_failed";
@@ -14113,16 +14001,10 @@ async function runWorker(opts) {
       });
     } else {
       const context = resolveEpisodeContext(root, task.episode_id ?? void 0);
-      if (!context.legacy && (task.episode_id === null || task.episode_id === void 0)) {
-        throw new DaoyanCliError({
-          code: "story_invalid",
-          message: "story \u6A21\u5F0F\u7684 shot \u4EFB\u52A1\u7F3A\u5C11 episode_id"
-        });
-      }
       labelPrefix = context.label_prefix;
       episodeContext = context;
       enforceTakes = storyEnforceOf(project) === "strict" && task.options.story_gate_bypassed !== true;
-      shotsFile = context.legacy ? loadShotsFile(root) : loadEpisodeShots(root, context.episode_id);
+      shotsFile = loadEpisodeShots(root, context.episode_id);
       if (shotsFile === null) {
         throw new DaoyanCliError({
           code: "story_invalid",
@@ -14406,10 +14288,10 @@ var init_worker = __esm({
     init_config();
     init_types();
     init_paths();
-    init_production();
-    init_store2();
-    init_lock();
+    init_production2();
     init_store();
+    init_lock();
+    init_store2();
     init_events();
     init_plans();
     init_session();
@@ -14655,14 +14537,14 @@ var init_create = __esm({
     init_store3();
     init_config();
     init_lock();
-    init_store();
+    init_store2();
     init_events();
     init_worker();
   }
 });
 
 // src/core/run/summary.mts
-import { existsSync as existsSync30 } from "fs";
+import { existsSync as existsSync29 } from "fs";
 import { join as join26 } from "path";
 function outputSummaries(root, rec) {
   return rec.outputs.map((o) => {
@@ -14673,7 +14555,7 @@ function outputSummaries(root, rec) {
       abs_path: abs,
       sha256: o.sha256,
       bytes: o.bytes,
-      present: existsSync30(abs)
+      present: existsSync29(abs)
     };
   });
 }
@@ -15014,7 +14896,7 @@ var init_run = __esm({
     init_reassign();
     init_plans();
     init_create();
-    init_store();
+    init_store2();
     init_summary();
     init_graph();
   }
@@ -15205,7 +15087,7 @@ var init_shot = __esm({
     init_args();
     init_config();
     init_paths();
-    init_production();
+    init_production2();
     init_run();
   }
 });
@@ -15368,13 +15250,13 @@ var init_take = __esm({
     init_args();
     init_config();
     init_paths();
-    init_production();
+    init_production2();
     init_takes();
   }
 });
 
 // src/commands/wrap.mts
-import { existsSync as existsSync31, mkdirSync as mkdirSync5, writeFileSync as writeFileSync8 } from "fs";
+import { existsSync as existsSync30, mkdirSync as mkdirSync5, writeFileSync as writeFileSync8 } from "fs";
 import { join as join27 } from "path";
 function pickVideoAt(root, rec) {
   const chosen = pickPrimaryOutput(rec);
@@ -15464,7 +15346,7 @@ async function runWrap(ctx2, args) {
       missing.push(shot.id);
       continue;
     }
-    if (!existsSync31(pick.abs)) {
+    if (!existsSync30(pick.abs)) {
       missing.push(shot.id);
       continue;
     }
@@ -15571,13 +15453,13 @@ var init_wrap = __esm({
     init_types();
     init_store3();
     init_paths();
-    init_production();
+    init_production2();
     init_takes();
   }
 });
 
 // src/commands/logs.mts
-import { closeSync as closeSync5, existsSync as existsSync32, openSync as openSync5, readSync as readSync3, readdirSync as readdirSync9, statSync as statSync8 } from "fs";
+import { closeSync as closeSync5, existsSync as existsSync31, openSync as openSync5, readSync as readSync3, readdirSync as readdirSync9, statSync as statSync8 } from "fs";
 import { join as join28 } from "path";
 function parseArgs2(args) {
   const out = { follow: false, n: 100, src: "all" };
@@ -15642,7 +15524,7 @@ function cleanLines(raw) {
   return out;
 }
 function readTail(file, n) {
-  if (!existsSync32(file)) return [];
+  if (!existsSync31(file)) return [];
   let size = 0;
   try {
     size = statSync8(file).size;
@@ -15662,8 +15544,8 @@ function readTail(file, n) {
 }
 function fileSources(root, src) {
   const dir = join28(root, LOG_DIR);
-  const engines = existsSync32(dir) ? readdirSync9(dir).filter((f) => /^engine-.*\.log$/.test(f)).sort().reverse() : [];
-  const workers = existsSync32(dir) ? readdirSync9(dir).filter((f) => /^worker-.*\.log$/.test(f)).sort().reverse() : [];
+  const engines = existsSync31(dir) ? readdirSync9(dir).filter((f) => /^engine-.*\.log$/.test(f)).sort().reverse() : [];
+  const workers = existsSync31(dir) ? readdirSync9(dir).filter((f) => /^worker-.*\.log$/.test(f)).sort().reverse() : [];
   const all = [
     ...workers[0] !== void 0 ? [{ name: "worker", file: join28(dir, workers[0]) }] : [],
     ...engines[0] !== void 0 ? [{ name: "engine", file: join28(dir, engines[0]) }] : [],
@@ -15759,7 +15641,7 @@ async function runLogs(ctx2, args) {
     return taskEvents(ctx2, root, taskId, flags);
   }
   const sources = fileSources(root, flags.src);
-  const existing = sources.filter((s) => existsSync32(s.file));
+  const existing = sources.filter((s) => existsSync31(s.file));
   if (existing.length === 0) {
     if (ctx2.json) {
       emitData({ sources: {}, note: "\u6682\u65E0\u65E5\u5FD7\u6587\u4EF6\uFF1B\u8FD0\u884C\u4EFB\u52A1\u540E\u53EF\u7528 logs --task <id>" });
@@ -15793,7 +15675,7 @@ async function runLogs(ctx2, args) {
     while (!stop) {
       await new Promise((r) => setTimeout(r, 500));
       for (const s of existing) {
-        if (!existsSync32(s.file)) continue;
+        if (!existsSync31(s.file)) continue;
         let size = 0;
         try {
           size = statSync8(s.file).size;
@@ -15835,11 +15717,11 @@ var init_logs = __esm({
     init_args();
     init_config();
     init_types();
-    init_store();
+    init_store2();
     init_events();
-    init_store();
+    init_store2();
     init_store3();
-    init_store();
+    init_store2();
     init_signals();
     ANSI_RE = /\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*(?:\x07|\x1b\\)/g;
     TQDM_RE = /^\s*\d+%.{0,40}\|\s*(\d+)\/(\d+) \[/;
@@ -15847,7 +15729,7 @@ var init_logs = __esm({
 });
 
 // src/core/status/snapshot.mts
-import { existsSync as existsSync33 } from "fs";
+import { existsSync as existsSync32 } from "fs";
 import { join as join29 } from "path";
 async function probeEngine(root, machine, engineTimeoutMs = 3e3) {
   if (machine.engine.mode === "remote") {
@@ -15885,7 +15767,7 @@ function shotProgress(root, shots, context) {
   return shots.shots.map((s) => {
     const label = `${labelPrefix}${s.id}`;
     const rec = pool.find((r) => r.label === label && r.status === "succeeded") ?? null;
-    const present = rec !== null && rec.outputs.some((o) => existsSync33(join29(root, RUNS_DIR, rec.run_id, o.path)));
+    const present = rec !== null && rec.outputs.some((o) => existsSync32(join29(root, RUNS_DIR, rec.run_id, o.path)));
     const take = context === void 0 ? null : pickShotTake(root, context, s.id, pool);
     return {
       id: s.id,
@@ -15989,7 +15871,7 @@ var init_snapshot = __esm({
     init_lock();
     init_store3();
     init_takes();
-    init_store();
+    init_store2();
     init_detect();
     init_lease();
     init_skill();
@@ -16040,7 +15922,7 @@ async function runStatus(ctx2, args) {
   const flags = parseArgs3(args);
   const { root, config: project } = requireProject(ctx2);
   const machine = loadMachine(root);
-  let shots = loadShotsIfExists(root);
+  let shots = null;
   if (flags.taskId !== void 0) {
     let task = readTask(root, flags.taskId);
     if (task === null) {
@@ -16122,21 +16004,16 @@ async function runStatus(ctx2, args) {
     }
     return flags.wait ? run2.status === "succeeded" ? 0 : 1 : 0;
   }
-  const storyOn = storyEnabled(root);
+  requireStory(root);
   let episodeContext = null;
   let episodeStatus = null;
   let seriesStatus = null;
-  if (storyOn) {
-    if (flags.episode !== void 0) {
-      episodeContext = resolveEpisodeContext(root, flags.episode);
-      shots = loadContextShots(root, episodeContext);
-      episodeStatus = computeEpisodeStoryStatus(root, flags.episode, project);
-    } else {
-      shots = null;
-      seriesStatus = computeSeriesStoryStatus(root, project);
-    }
-  } else if (flags.episode !== void 0) {
-    resolveEpisodeContext(root, flags.episode);
+  if (flags.episode !== void 0) {
+    episodeContext = resolveEpisodeContext(root, flags.episode);
+    shots = loadContextShots(root, episodeContext);
+    episodeStatus = computeEpisodeStoryStatus(root, flags.episode, project);
+  } else {
+    seriesStatus = computeSeriesStoryStatus(root, project);
   }
   const { COMMANDS: COMMANDS2 } = await Promise.resolve().then(() => (init_registry(), registry_exports));
   const data = await buildStatusSnapshot(root, project, machine, shots, {
@@ -16225,19 +16102,19 @@ var init_status = __esm({
     init_types();
     init_store3();
     init_summary();
-    init_store();
+    init_store2();
     init_events();
-    init_store();
+    init_store2();
     init_create();
     init_snapshot();
     init_paths();
-    init_production();
+    init_production2();
     init_validate();
   }
 });
 
 // src/commands/engine.mts
-import { existsSync as existsSync34, readdirSync as readdirSync10 } from "fs";
+import { existsSync as existsSync33, readdirSync as readdirSync10 } from "fs";
 import { isAbsolute as isAbsolute6, join as join30, relative, resolve as resolve6 } from "path";
 async function comfyTags(limit) {
   try {
@@ -16298,7 +16175,7 @@ async function runEngine(ctx2, args) {
           mode: "local",
           comfyui_dir: portablePath(found.root, dirs.comfyDir),
           venv_dir: portablePath(found.root, dirs.venvDir),
-          installed: existsSync34(join30(dirs.comfyDir, "main.py")),
+          installed: existsSync33(join30(dirs.comfyDir, "main.py")),
           version: machine2.engine.comfyui_version ?? found.config.comfyui?.version ?? null
         };
       } else if (machine2 !== null && machine2.engine.mode === "remote") {
@@ -16405,7 +16282,7 @@ async function runEngine(ctx2, args) {
       let comfyDir;
       let venvDir;
       let version;
-      if (existsSync34(join30(asPath, "main.py"))) {
+      if (existsSync33(join30(asPath, "main.py"))) {
         comfyDir = asPath;
         venvDir = join30(asPath, ".venv");
         if (!await venvReady(venvDir)) {
@@ -16418,7 +16295,7 @@ async function runEngine(ctx2, args) {
         const base = join30(root, "engine", "versions", target);
         comfyDir = join30(base, "ComfyUI");
         venvDir = join30(base, ".venv");
-        if (!existsSync34(join30(comfyDir, "main.py"))) {
+        if (!existsSync33(join30(comfyDir, "main.py"))) {
           throw new DaoyanCliError({
             code: "provision_failed",
             message: `\u672A\u627E\u5230\u7248\u672C ${target}\uFF08${portablePath(root, comfyDir)}\uFF09\u3002\u5148\u5B89\u88C5\uFF1Adaoyan engine install ${target}`
@@ -16733,7 +16610,7 @@ var init_ops = __esm({
 });
 
 // src/commands/workflow.mts
-import { existsSync as existsSync35, readFileSync as readFileSync23, readdirSync as readdirSync11 } from "fs";
+import { existsSync as existsSync34, readFileSync as readFileSync23, readdirSync as readdirSync11 } from "fs";
 import { basename as basename9, join as join31, resolve as resolve7 } from "path";
 function readStdin() {
   try {
@@ -16818,7 +16695,7 @@ function readOpsFile(path) {
   }
 }
 function isEmptyPlaceholder(abs) {
-  if (!existsSync35(abs)) return false;
+  if (!existsSync34(abs)) return false;
   try {
     const parsed = parseGraph(JSON.parse(readFileSync23(abs, "utf8")));
     return !hasGraphErrors(parsed.issues) && Object.keys(parsed.graph).length === 0;
@@ -16842,7 +16719,7 @@ async function runWorkflow(ctx2, args) {
     const { root } = requireProject(ctx2);
     const target = resolveWorkflowRef(root, name);
     const replaced = isEmptyPlaceholder(target.abs);
-    if (existsSync35(target.abs) && !replaced) {
+    if (existsSync34(target.abs) && !replaced) {
       throw new DaoyanCliError({ code: "usage", message: `workflow ${name} \u5DF2\u5B58\u5728\uFF1A${target.rel}`, exit: 2 });
     }
     ensureDir(join31(root, WORKFLOWS_DIR));
@@ -16868,7 +16745,7 @@ async function runWorkflow(ctx2, args) {
     const { root } = requireProject(ctx2);
     const target = resolveWorkflowRef(root, name);
     const replaced = isEmptyPlaceholder(target.abs);
-    if (existsSync35(target.abs) && !replaced) {
+    if (existsSync34(target.abs) && !replaced) {
       throw new DaoyanCliError({ code: "usage", message: `workflow ${name} \u5DF2\u5B58\u5728`, exit: 2 });
     }
     const loaded = loadGraphFile(resolve7(process.cwd(), source), basename9(source));
@@ -16880,7 +16757,7 @@ async function runWorkflow(ctx2, args) {
   if (sub === "list") {
     const { root } = requireProject(ctx2);
     const dir = join31(root, WORKFLOWS_DIR);
-    const items = existsSync35(dir) ? readdirSync11(dir).filter((f) => f.endsWith(".json") && !f.endsWith(BINDINGS_SUFFIX)).sort().map((f) => {
+    const items = existsSync34(dir) ? readdirSync11(dir).filter((f) => f.endsWith(".json") && !f.endsWith(BINDINGS_SUFFIX)).sort().map((f) => {
       const abs = join31(dir, f);
       try {
         const parsed = parseGraph(JSON.parse(readFileSync23(abs, "utf8")));
@@ -16944,7 +16821,7 @@ async function runWorkflow(ctx2, args) {
       nodes: stats.nodes,
       links: stats.links,
       graph_sha256: loaded.sha256,
-      bindings: existsSync35(bindingsPathOf(ref.abs)) ? bindingsPathOf(ref.abs).slice(root.length + 1) : null,
+      bindings: existsSync34(bindingsPathOf(ref.abs)) ? bindingsPathOf(ref.abs).slice(root.length + 1) : null,
       ...full ? { graph: loaded.graph } : { node_list: nodeSummaries(loaded.graph) }
     };
     if (ctx2.json) {
@@ -17309,7 +17186,7 @@ var init_addresses = __esm({
 });
 
 // src/core/web/data.mts
-import { existsSync as existsSync36, readdirSync as readdirSync12, readFileSync as readFileSync24, statSync as statSync9 } from "fs";
+import { existsSync as existsSync35, readdirSync as readdirSync12, readFileSync as readFileSync24, statSync as statSync9 } from "fs";
 import { basename as basename10, join as join32, resolve as resolve8, sep as sep2 } from "path";
 function extensionOf(name) {
   const dot = name.lastIndexOf(EXTENSION_SEPARATOR);
@@ -17352,7 +17229,7 @@ function artifactOf(root, run2, output2) {
   const base = runDir(root, run2.run_id);
   const abs = resolve8(base, output2.path);
   const within = abs !== base && abs.startsWith(base + sep2);
-  const present = within && existsSync36(abs);
+  const present = within && existsSync35(abs);
   let bytes = output2.bytes;
   let lfsPointer = false;
   let version = output2.sha256;
@@ -17391,7 +17268,7 @@ function safeReadRun(root, runId) {
 }
 function safeListRuns(root) {
   const dir = join32(root, RUNS_DIR);
-  if (!existsSync36(dir)) return [];
+  if (!existsSync35(dir)) return [];
   const out = [];
   for (const ent of readdirSync12(dir, { withFileTypes: true })) {
     if (!ent.isDirectory()) continue;
@@ -17412,7 +17289,7 @@ function safeReadTask(root, taskId) {
 }
 function safeListTasks(root) {
   const dir = join32(root, TASKS_DIR);
-  if (!existsSync36(dir)) return [];
+  if (!existsSync35(dir)) return [];
   const out = [];
   for (const ent of readdirSync12(dir, { withFileTypes: true })) {
     if (!ent.isDirectory()) continue;
@@ -17516,7 +17393,7 @@ function getRunDetail(root, runId) {
     overrides: run2.overrides,
     input_files: inputsSnapshot?.files ?? [],
     events,
-    workflow_snapshot: existsSync36(join32(runDir(root, run2.run_id), RUN_WORKFLOW_FILE))
+    workflow_snapshot: existsSync35(join32(runDir(root, run2.run_id), RUN_WORKFLOW_FILE))
   };
 }
 function listRunsView(root, episodeId) {
@@ -17843,8 +17720,8 @@ function buildShotsView(root, shots, labelPrefix = "shot:", context) {
   };
 }
 function listFinals(root, episodeId) {
-  const dir = episodeId !== void 0 && episodeId !== "" ? join32(root, FINAL_DIR, episodeId) : join32(root, FINAL_DIR);
-  if (!existsSync36(dir)) return [];
+  const dir = join32(root, FINAL_DIR, episodeId);
+  if (!existsSync35(dir)) return [];
   const entries = readdirSync12(dir, { withFileTypes: true }).filter((e) => e.isFile());
   const referenced = /* @__PURE__ */ new Set();
   const out = [];
@@ -17854,7 +17731,7 @@ function listFinals(root, episodeId) {
       const manifest = JSON.parse(readFileSync24(join32(dir, entry.name), "utf8"));
       const cut = typeof manifest.cut === "string" ? manifest.cut : "";
       if (cut === "" || basename10(cut) !== cut || cut.includes("/") || cut.includes("\\")) continue;
-      if (!existsSync36(join32(dir, cut))) continue;
+      if (!existsSync35(join32(dir, cut))) continue;
       referenced.add(cut);
       const stat = statSync9(join32(dir, cut));
       const mediaUrl = withMediaVersion(finalMediaUrl(cut, episodeId), `${stat.size}-${stat.mtimeMs}`);
@@ -17864,7 +17741,7 @@ function listFinals(root, episodeId) {
         artifact: String(x.artifact ?? "")
       })) : [];
       out.push({
-        episode_id: episodeId !== void 0 && episodeId !== "" ? episodeId : null,
+        episode_id: episodeId,
         name: cut,
         manifest: entry.name,
         media_url: mediaUrl,
@@ -17886,7 +17763,7 @@ function listFinals(root, episodeId) {
       const stat = statSync9(join32(dir, entry.name));
       const mediaUrl = withMediaVersion(finalMediaUrl(entry.name, episodeId), `${stat.size}-${stat.mtimeMs}`);
       out.push({
-        episode_id: episodeId !== void 0 && episodeId !== "" ? episodeId : null,
+        episode_id: episodeId,
         name: entry.name,
         manifest: null,
         media_url: mediaUrl,
@@ -17905,7 +17782,7 @@ function listFinals(root, episodeId) {
 }
 function listWorkflows(root, project) {
   const dir = join32(root, WORKFLOWS_DIR);
-  if (!existsSync36(dir)) return [];
+  if (!existsSync35(dir)) return [];
   const defaultRef = (project.default_workflow ?? "").trim();
   const out = [];
   for (const entry of readdirSync12(dir, { withFileTypes: true })) {
@@ -17922,7 +17799,7 @@ function listWorkflows(root, project) {
       name,
       path: `${WORKFLOWS_DIR}/${entry.name}`,
       nodes,
-      bindings: existsSync36(join32(dir, `${name}.bindings.json`)),
+      bindings: existsSync35(join32(dir, `${name}.bindings.json`)),
       default: defaultRef === name || defaultRef === `workflows/${name}` || defaultRef === `workflows/${name}.json`,
       valid: graph !== null && typeof graph === "object"
     });
@@ -17966,12 +17843,11 @@ function storyOverviewFields(root, project) {
   const story = computeSeriesStoryStatus(root, project);
   return { story, series: story.series, episodes: story.episodes };
 }
-function buildSharedOverview(root, project, shots) {
+function buildSharedOverview(root, project) {
   const runs = safeListRuns(root);
   const tasks = safeListTasks(root);
   const storyFields = storyOverviewFields(root, project);
-  const storyboard = storyFields === null ? buildShotsView(root, shots, "shot:", resolveEpisodeContext(root)) : null;
-  const stats = buildStats(shots, runs, tasks, storyboard);
+  const stats = buildStats(null, runs, tasks, null);
   return {
     project: { name: project.name, version: project.version },
     mode: null,
@@ -17985,10 +17861,10 @@ function buildSharedOverview(root, project, shots) {
     recent_tasks: tasks.slice(0, 10).map((task) => taskItem(root, task)),
     gpu: null,
     skill: null,
-    shots: storyFields === null ? shotProgress(root, shots, resolveEpisodeContext(root)) : [],
-    storyboard,
+    shots: [],
+    storyboard: null,
     ...storyFields !== null ? storyFields : {},
-    next_actions: storyFields !== null ? ["story status --json", "story episode list --json"] : ["init --mode=local", "init --mode=remote --url <url>"],
+    next_actions: storyFields !== null ? storyFields.story.next_actions : [],
     stats: storyFields !== null ? withStoryStats(stats, storyFields.story) : stats,
     recent_artifacts: flattenArtifacts(root, runs).slice(0, OVERVIEW_ARTIFACT_LIMIT),
     generated_at: nowIso()
@@ -18008,21 +17884,20 @@ function machineViewOf(machine) {
     override_workflows: m.override_workflows
   };
 }
-async function buildOverview(root, project, machine, shots, commands = []) {
-  if (machine === null) return buildSharedOverview(root, project, shots);
+async function buildOverview(root, project, machine, commands = []) {
+  if (machine === null) return buildSharedOverview(root, project);
   const storyFields = storyOverviewFields(root, project);
-  const base = await buildStatusSnapshot(root, project, machine, storyFields === null ? shots : null, {
+  const base = await buildStatusSnapshot(root, project, machine, null, {
     commands,
     engineTimeoutMs: OVERVIEW_ENGINE_TIMEOUT_MS
   });
   const runs = safeListRuns(root);
   const tasks = safeListTasks(root);
-  const storyboard = storyFields === null ? buildShotsView(root, shots, "shot:", resolveEpisodeContext(root)) : null;
-  const stats = buildStats(shots, runs, tasks, storyboard);
+  const stats = buildStats(null, runs, tasks, null);
   return {
     ...base,
     machine: machineViewOf(base.machine),
-    storyboard,
+    storyboard: null,
     ...storyFields !== null ? storyFields : {},
     next_actions: storyFields !== null ? storyFields.story.next_actions : base.next_actions,
     stats: storyFields !== null ? withStoryStats(stats, storyFields.story) : stats,
@@ -18039,7 +17914,7 @@ var init_data = __esm({
     init_fs();
     init_snapshot();
     init_events();
-    init_store();
+    init_store2();
     init_store3();
     init_paths();
     init_takes();
@@ -18091,7 +17966,7 @@ var init_data = __esm({
 });
 
 // src/core/web/media.mts
-import { createReadStream, existsSync as existsSync37, realpathSync, statSync as statSync10 } from "fs";
+import { createReadStream, existsSync as existsSync36, realpathSync, statSync as statSync10 } from "fs";
 import { basename as basename11, extname, join as join33, sep as sep3 } from "path";
 import { pipeline } from "stream/promises";
 function contentTypeOf(name) {
@@ -18108,7 +17983,7 @@ function safeRealpath(file) {
   }
 }
 function makeTarget(abs, name, etag) {
-  if (!existsSync37(abs)) return null;
+  if (!existsSync36(abs)) return null;
   try {
     const stat = statSync10(abs);
     if (!stat.isFile()) return null;
@@ -18143,23 +18018,6 @@ function resolveRunMedia(root, runId, name) {
   const abs = safeRealpath(join33(runDir(root, runId), output2.path));
   if (abs === null || !isWithin(base, abs)) return null;
   return makeTarget(abs, output2.name, `"${output2.sha256}"`);
-}
-function resolveFinalMedia(root, name) {
-  const dir = join33(root, FINAL_DIR);
-  const projectRoot = safeRealpath(root);
-  if (projectRoot === null) return null;
-  const base = safeRealpath(dir);
-  if (base === null || !isWithin(projectRoot, base)) return null;
-  if (basename11(name) !== name || name.includes("/") || name.includes("\\")) return null;
-  const abs = safeRealpath(join33(dir, name));
-  if (abs === null || !isWithin(base, abs)) return null;
-  try {
-    const stat = statSync10(abs);
-    if (!stat.isFile()) return null;
-    return makeTarget(abs, name, `"${stat.size}-${stat.mtimeMs}"`);
-  } catch {
-    return null;
-  }
 }
 function resolveStoryMedia(root, relPath) {
   if (relPath === "" || relPath.startsWith("/") || relPath.includes("..") || relPath.includes("\\")) return null;
@@ -18326,18 +18184,18 @@ var init_media = __esm({
 });
 
 // src/core/story/map.mts
-import { existsSync as existsSync38, readFileSync as readFileSync25, readdirSync as readdirSync13, statSync as statSync11 } from "fs";
+import { existsSync as existsSync37, readFileSync as readFileSync25, readdirSync as readdirSync13, statSync as statSync11 } from "fs";
 import { join as join34 } from "path";
 function runMediaUrl2(runId, name, version) {
   const url = `${RUN_MEDIA_PREFIX}/${encodeURIComponent(runId)}/${encodeURIComponent(name)}`;
   return version !== "" ? `${url}?v=${encodeURIComponent(version)}` : url;
 }
 function hashIfExists(file) {
-  return existsSync38(file) ? sha256File(file) : "";
+  return existsSync37(file) ? sha256File(file) : "";
 }
 function projectOf(root) {
   const file = join34(root, PROJECT_FILE);
-  if (!existsSync38(file)) return null;
+  if (!existsSync37(file)) return null;
   try {
     return JSON.parse(readFileSync25(file, "utf8"));
   } catch {
@@ -18366,7 +18224,7 @@ function outputKind(name) {
 }
 function assetRefOf(root, asset) {
   const abs = join34(root, asset.path);
-  const present = existsSync38(abs);
+  const present = existsSync37(abs);
   let bytes = asset.bytes;
   let lfsPointer = false;
   let version = asset.sha256;
@@ -18622,7 +18480,7 @@ function voiceView(voice) {
 }
 function readStoryMapAnnotations(root, episodeId) {
   const file = storyMapPath(root, episodeId);
-  if (!existsSync38(file)) return { doc: null, warnings: [] };
+  if (!existsSync37(file)) return { doc: null, warnings: [] };
   let raw;
   try {
     raw = JSON.parse(readFileSync25(file, "utf8"));
@@ -19048,7 +18906,7 @@ function anchorOf(root, shot, shots) {
   if (typeof first !== "string" || first === "") return null;
   const path = shots.meta.anchors[first];
   if (path === void 0 || path === "") return null;
-  return { key: first, path, present: existsSync38(join34(root, path)) };
+  return { key: first, path, present: existsSync37(join34(root, path)) };
 }
 function buildEventFacts(root, shots, characters, fps, beats) {
   const facts = [];
@@ -19196,7 +19054,7 @@ function buildWorkflowCandidate(root, name, rel, abs, project) {
 }
 function collectWorkflowCatalog(root, project) {
   const dir = join34(root, WORKFLOWS_DIR);
-  if (!existsSync38(dir)) return [];
+  if (!existsSync37(dir)) return [];
   const out = [];
   for (const entry of readdirSync13(dir, { withFileTypes: true })) {
     if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
@@ -19355,7 +19213,12 @@ function buildGenerationEvent(root, event, fact, shots, project, workflows, rend
           hint: "\u4FEE\u6B63 workflow / bindings / assets \u58F0\u660E\uFF0C\u6216\u6362\u4E00\u4E2A\u5019\u9009\u3002"
         });
       }
-      const plan = planWorkflowAssets({ root, shot: fact.shot, workflowAbs: resolved.abs });
+      const plan = planWorkflowAssets({
+        root,
+        shot: fact.shot,
+        workflowAbs: resolved.abs,
+        audio: audioEnabledOf(project)
+      });
       const slots = plan.slots.map((slot) => ({
         slot: slot.slot,
         kind: slot.kind,
@@ -19583,6 +19446,13 @@ function buildStoryMap(root, episodeId, project) {
     }
   }
   const duration = facts.some((fact) => fact.duration_seconds !== null) ? facts.reduce((sum, fact) => sum + (fact.duration_seconds ?? 0), 0) : null;
+  const audio = audioEnabledOf(projectConfig);
+  if (!audio) {
+    catalogResult.catalog.voices = [];
+    for (const event of generationEvents) event.voices = [];
+  }
+  const visibleGaps = audio ? generationGaps : generationGaps.filter((gap) => !/voice|音色/i.test(`${gap.code} ${gap.ref ?? ""} ${gap.message}`));
+  const visibleWarnings = audio ? warnings : warnings.filter((gap) => !/voice|音色/i.test(`${gap.code} ${gap.ref ?? ""} ${gap.message}`));
   const source = storyMapSource(root, episodeId, script);
   const staleReasons = [];
   if (annotations.doc !== null) {
@@ -19625,10 +19495,10 @@ function buildStoryMap(root, episodeId, project) {
         failed_shots: failedShots
       },
       events: generationEvents,
-      gaps: generationGaps
+      gaps: visibleGaps
     },
     relations,
-    warnings: dedupeGaps(warnings)
+    warnings: dedupeGaps(visibleWarnings)
   };
 }
 function dedupeGaps(gaps) {
@@ -19743,7 +19613,7 @@ function materializeStoryMap(root, episodeId, options) {
     });
   }
   const existingRead = readStoryMapAnnotations(root, episodeId);
-  if (!options.force && existingRead.doc === null && existsSync38(storyMapPath(root, episodeId))) {
+  if (!options.force && existingRead.doc === null && existsSync37(storyMapPath(root, episodeId))) {
     throw new DaoyanCliError({
       code: "story_invalid",
       message: "\u73B0\u6709 story-map.json \u65E0\u6CD5\u89E3\u6790",
@@ -19805,8 +19675,9 @@ var init_map = __esm({
     init_assets();
     init_paths();
     init_takes();
-    init_store2();
+    init_store();
     init_workflow_assets();
+    init_production();
     BLOCKER = "blocker";
     WARNING = "warning";
     RUN_MEDIA_PREFIX = "/media/run";
@@ -19824,11 +19695,11 @@ var init_map = __esm({
 });
 
 // src/core/web/story-data.mts
-import { existsSync as existsSync39, statSync as statSync12 } from "fs";
+import { existsSync as existsSync38, statSync as statSync12 } from "fs";
 import { join as join35 } from "path";
 function assetView(root, asset) {
   const abs = join35(root, asset.path);
-  const present = existsSync39(abs);
+  const present = existsSync38(abs);
   let bytes = asset.bytes;
   let lfsPointer = false;
   let version = asset.sha256;
@@ -20110,10 +19981,10 @@ function buildStoryEpisodeView(root, episodeId, project) {
     artifacts: artifacts.items,
     finals,
     files: {
-      script_md: existsSync39(join35(dir, "script.md")),
-      script_json: existsSync39(join35(dir, "script.json")),
-      breakdown: existsSync39(join35(dir, "breakdown.json")),
-      shots: existsSync39(join35(dir, "shots.json"))
+      script_md: existsSync38(join35(dir, "script.md")),
+      script_json: existsSync38(join35(dir, "script.json")),
+      breakdown: existsSync38(join35(dir, "breakdown.json")),
+      shots: existsSync38(join35(dir, "shots.json"))
     },
     episodes: listEpisodeMetas(root)
   };
@@ -20124,10 +19995,73 @@ var init_story_data = __esm({
     init_data();
     init_assets();
     init_paths();
-    init_store2();
+    init_store();
     init_validate();
     init_map();
     init_assets();
+  }
+});
+
+// src/core/story/mode.mts
+function readProduction(root) {
+  const project = readProjectAt(root);
+  if (project === null) {
+    throw new DaoyanCliError({
+      code: "project_not_found",
+      message: "\u672A\u627E\u5230 project.json",
+      hint: "\u5728\u9879\u76EE\u76EE\u5F55\u5185\u8FD0\u884C\uFF0C\u6216\u5148\u6267\u884C daoyan init\u3002"
+    });
+  }
+  return productionOf(project);
+}
+function assertModeSwitch(root, mode) {
+  const metas = listEpisodeMetas(root);
+  if (mode === "series") return;
+  if (metas.length === 0) {
+    throw new DaoyanCliError({
+      code: "story_invalid",
+      message: "\u9879\u76EE\u6CA1\u6709\u6709\u6548\u5267\u96C6\uFF0C\u4E0D\u80FD\u5207\u6362\u4E3A\u5355\u89C6\u9891\u6A21\u5F0F",
+      hint: "\u5148\u521B\u5EFA\u7B2C\u4E00\u96C6\u3002"
+    });
+  }
+  if (metas.length > 1) {
+    throw new DaoyanCliError({
+      code: "mode_conflict",
+      message: `\u9879\u76EE\u5F53\u524D\u6709 ${metas.length} \u96C6\uFF0C\u53EA\u6709\u4E00\u96C6\u65F6\u624D\u80FD\u5207\u6362\u4E3A\u5355\u89C6\u9891\u6A21\u5F0F`,
+      details: { episodes: metas.map((meta) => meta.id) },
+      hint: "\u7528 daoyan story episode remove <id> \u5220\u9664\u591A\u4F59\u5267\u96C6\u540E\u91CD\u8BD5\u3002"
+    });
+  }
+}
+function saveProduction(root, next) {
+  const project = readProjectAt(root);
+  if (project === null) {
+    throw new DaoyanCliError({
+      code: "project_not_found",
+      message: "\u672A\u627E\u5230 project.json",
+      hint: "\u5728\u9879\u76EE\u76EE\u5F55\u5185\u8FD0\u884C\uFF0C\u6216\u5148\u6267\u884C daoyan init\u3002"
+    });
+  }
+  const updated = {
+    ...project,
+    production: { mode: next.mode, audio: next.audio }
+  };
+  saveProjectAt(root, updated);
+  return updated;
+}
+function updateProduction(root, patch) {
+  const current = readProduction(root);
+  const mode = patch.mode ?? current.mode;
+  if (patch.mode !== void 0) assertModeSwitch(root, patch.mode);
+  return saveProduction(root, { mode, audio: patch.audio ?? current.audio });
+}
+var init_mode = __esm({
+  "src/core/story/mode.mts"() {
+    "use strict";
+    init_errors();
+    init_config();
+    init_production();
+    init_paths();
   }
 });
 
@@ -20264,11 +20198,6 @@ function refreshContext(ctx2) {
     if (machine !== null) ctx2.machine = machine;
   } catch {
   }
-  try {
-    const shots = loadShotsIfExists(ctx2.root);
-    if (shots !== null) ctx2.shots = shots;
-  } catch {
-  }
 }
 function broadcastRevision(realtime) {
   const chunk = `event: revision
@@ -20317,7 +20246,7 @@ data: ${JSON.stringify({ revision: realtime.revision, at: realtime.changed_at })
 async function overviewOf(ctx2, cache) {
   const now = Date.now();
   if (cache.data !== null && now - cache.at < OVERVIEW_CACHE_MS) return cache.data;
-  const data = await buildOverview(ctx2.root, ctx2.project, ctx2.machine, ctx2.shots, ctx2.commands);
+  const data = await buildOverview(ctx2.root, ctx2.project, ctx2.machine, ctx2.commands);
   cache.at = now;
   cache.data = data;
   return data;
@@ -20356,7 +20285,7 @@ function sendWriteError(res, error) {
     return;
   }
   if (isDaoyanCliError(error)) {
-    const status = error.code === "run_not_found" || error.code === "take_not_found" ? 404 : error.code === "machine_busy" || error.code === "story_gate_failed" ? 409 : error.code === "episode_required" || error.code === "episode_not_found" ? 400 : error.exit === 2 ? 400 : error.code === "take_invalid" || error.code === "take_pending" || error.code === "story_invalid" ? 400 : 500;
+    const status = error.code === "run_not_found" || error.code === "take_not_found" ? 404 : error.code === "machine_busy" || error.code === "story_gate_failed" || error.code === "mode_conflict" ? 409 : error.code === "episode_required" || error.code === "episode_not_found" ? 400 : error.exit === 2 ? 400 : error.code === "take_invalid" || error.code === "take_pending" || error.code === "story_invalid" ? 400 : 500;
     const body = Buffer.from(
       JSON.stringify({
         ok: false,
@@ -20440,6 +20369,38 @@ async function requireWriteBody(req) {
 function decodePathSegment(value) {
   return value === void 0 ? null : decodeSegment(value);
 }
+async function handleProjectSettings(req, res, ctx2, cache) {
+  try {
+    const body = await requireWriteBody(req);
+    const mode = body.mode;
+    if (mode !== void 0 && mode !== "single" && mode !== "series") {
+      throw new WriteRequestError(400, "bad_request", "mode \u53EA\u80FD\u662F single / series");
+    }
+    const audio = body.audio;
+    if (audio !== void 0 && typeof audio !== "boolean") {
+      throw new WriteRequestError(400, "bad_request", "audio \u5FC5\u987B\u662F boolean");
+    }
+    if (mode === void 0 && audio === void 0) {
+      throw new WriteRequestError(400, "bad_request", "\u81F3\u5C11\u63D0\u4F9B mode \u6216 audio");
+    }
+    const updated = updateProduction(ctx2.root, {
+      ...mode !== void 0 ? { mode } : {},
+      ...audio !== void 0 ? { audio } : {}
+    });
+    ctx2.project = updated;
+    cache.at = 0;
+    cache.data = null;
+    const production = productionOf(updated);
+    sendJson(res, 200, {
+      name: updated.name,
+      mode: production.mode,
+      audio: production.audio,
+      episode_count: listEpisodeMetas(ctx2.root).length
+    });
+  } catch (e) {
+    sendWriteError(res, e);
+  }
+}
 async function handleScriptApprove(req, res, ctx2, cache) {
   try {
     const body = await requireWriteBody(req);
@@ -20453,24 +20414,18 @@ async function handleScriptApprove(req, res, ctx2, cache) {
     sendWriteError(res, e);
   }
 }
-function parseShotGenerateTarget(pathname, body) {
+function parseShotGenerateTarget(pathname) {
   const matched = EPISODE_SHOT_GENERATE_RE.exec(pathname);
-  if (matched !== null) {
-    const episodeId = decodePathSegment(matched[1]);
-    const shotId = decodePathSegment(matched[2]);
-    if (episodeId === null || shotId === null) return null;
-    return { episodeId, shotId };
-  }
-  if (pathname === SHOT_GENERATE_PATH) {
-    const shotId = stringField(body.shot_id);
-    return shotId === void 0 ? null : { episodeId: void 0, shotId };
-  }
-  return null;
+  if (matched === null) return null;
+  const episodeId = decodePathSegment(matched[1]);
+  const shotId = decodePathSegment(matched[2]);
+  if (episodeId === null || shotId === null) return null;
+  return { episodeId, shotId };
 }
 async function handleShotGenerate(req, res, ctx2, cache, pathname) {
   try {
     const body = await requireWriteBody(req);
-    const target = parseShotGenerateTarget(pathname, body);
+    const target = parseShotGenerateTarget(pathname);
     if (target === null) throw new WriteRequestError(400, "bad_request", "\u7F3A\u5C11\u6709\u6548\u7684\u5267\u96C6 / \u955C\u53F7");
     const regenerate = body.regenerate === true;
     const context = resolveEpisodeContext(ctx2.root, target.episodeId);
@@ -20559,7 +20514,11 @@ async function handleRequest(req, res, ctx2, cache, realtime) {
         await handleScriptApprove(req, res, ctx2, cache);
         return;
       }
-      if (pathname === SHOT_GENERATE_PATH || EPISODE_SHOT_GENERATE_RE.test(pathname)) {
+      if (pathname === PROJECT_SETTINGS_PATH) {
+        await handleProjectSettings(req, res, ctx2, cache);
+        return;
+      }
+      if (EPISODE_SHOT_GENERATE_RE.test(pathname)) {
         await handleShotGenerate(req, res, ctx2, cache, pathname);
         return;
       }
@@ -20598,6 +20557,28 @@ async function handleRequest(req, res, ctx2, cache, realtime) {
       );
       return;
     }
+    if (pathname === "/api/project") {
+      const production = productionOf(ctx2.project);
+      const episodes = listEpisodeMetas(ctx2.root).map((meta) => ({
+        id: meta.id,
+        number: meta.number,
+        title: meta.title
+      }));
+      sendJson(
+        res,
+        200,
+        {
+          name: ctx2.project.name,
+          version: ctx2.project.version,
+          mode: production.mode,
+          audio: production.audio,
+          episode_count: episodes.length,
+          episodes
+        },
+        headOnly
+      );
+      return;
+    }
     if (pathname === "/api/events") {
       if (headOnly) {
         sendJson(res, 200, { revision: realtime.revision, at: realtime.changed_at }, true);
@@ -20615,19 +20596,11 @@ async function handleRequest(req, res, ctx2, cache, realtime) {
       return;
     }
     if (pathname === "/api/episodes") {
-      if (!storyEnabled(ctx2.root)) {
-        sendJson(res, 200, { episodes: [] }, headOnly);
-        return;
-      }
       const view = buildStorySeriesView(ctx2.root, ctx2.project);
       sendJson(res, 200, { episodes: view.episodes, series: view.series, status: view.status }, headOnly);
       return;
     }
     if (pathname.startsWith("/api/episodes/")) {
-      if (!storyEnabled(ctx2.root)) {
-        sendJsonError(res, 404, "not_found", "story \u6A21\u5F0F\u672A\u542F\u7528", headOnly);
-        return;
-      }
       const segments = pathname.split("/");
       const episodeId = decodeSegment(segments[3] ?? "");
       if (episodeId === null) {
@@ -20676,14 +20649,6 @@ async function handleRequest(req, res, ctx2, cache, realtime) {
     }
     if (pathname === "/api/story/assets") {
       sendJson(res, 200, { items: listStoryAssetsView(ctx2.root) }, headOnly);
-      return;
-    }
-    if (pathname === "/api/shots") {
-      if (storyEnabled(ctx2.root)) {
-        sendJsonError(res, 410, "use_episode_api", "story \u6A21\u5F0F\u8BF7\u4F7F\u7528 /api/episodes/<id>/shots", headOnly);
-        return;
-      }
-      sendJson(res, 200, buildShotsView(ctx2.root, ctx2.shots, "shot:", resolveEpisodeContext(ctx2.root)), headOnly);
       return;
     }
     if (pathname === "/api/artifacts") {
@@ -20746,7 +20711,7 @@ async function handleRequest(req, res, ctx2, cache, realtime) {
     }
     if (pathname === "/api/finals") {
       const episode = url.searchParams.get("episode") ?? void 0;
-      if (episode === void 0 && storyEnabled(ctx2.root)) {
+      if (episode === void 0 || episode === "") {
         const items = listEpisodeMetas(ctx2.root).flatMap((meta) => listFinals(ctx2.root, meta.id));
         sendJson(res, 200, items, headOnly);
         return;
@@ -20801,34 +20766,20 @@ async function handleRequest(req, res, ctx2, cache, realtime) {
       const segments = pathname.split("/");
       if (segments.length === 5) {
         const episodeId = decodeSegment(segments[3] ?? "");
-        const name2 = decodeSegment(segments[4] ?? "");
-        if (episodeId === null || name2 === null) {
+        const name = decodeSegment(segments[4] ?? "");
+        if (episodeId === null || name === null) {
           sendJsonError(res, 400, "bad_request", "\u5A92\u4F53\u8DEF\u5F84\u975E\u6CD5", headOnly);
           return;
         }
-        const target2 = resolveEpisodeFinalMedia(ctx2.root, episodeId, name2);
-        if (target2 === null) {
+        const target = resolveEpisodeFinalMedia(ctx2.root, episodeId, name);
+        if (target === null) {
           sendJsonError(res, 404, "not_found", "\u5A92\u4F53\u4E0D\u5B58\u5728", headOnly);
           return;
         }
-        await serveMedia(req, res, target2, url.searchParams.get("download") === "1");
+        await serveMedia(req, res, target, url.searchParams.get("download") === "1");
         return;
       }
-      if (segments.length !== 4) {
-        sendJsonError(res, 404, "not_found", "\u5A92\u4F53\u4E0D\u5B58\u5728", headOnly);
-        return;
-      }
-      const name = decodeSegment(segments[3] ?? "");
-      if (name === null) {
-        sendJsonError(res, 400, "bad_request", "\u5A92\u4F53\u8DEF\u5F84\u975E\u6CD5", headOnly);
-        return;
-      }
-      const target = resolveFinalMedia(ctx2.root, name);
-      if (target === null) {
-        sendJsonError(res, 404, "not_found", "\u5A92\u4F53\u4E0D\u5B58\u5728", headOnly);
-        return;
-      }
-      await serveMedia(req, res, target, url.searchParams.get("download") === "1");
+      sendJsonError(res, 404, "not_found", "\u5A92\u4F53\u4E0D\u5B58\u5728", headOnly);
       return;
     }
     if (pathname.startsWith(API_PREFIX) || pathname.startsWith(MEDIA_PREFIX2)) {
@@ -20872,7 +20823,6 @@ async function startWebServer(options) {
     root: options.root,
     project: options.project,
     machine: options.machine,
-    shots: options.shots,
     commands: options.commands ?? [],
     assets: options.assets,
     taskStarter,
@@ -20952,7 +20902,7 @@ async function startWebServer(options) {
     closed
   };
 }
-var DEFAULT_HOST, OVERVIEW_CACHE_MS, ASSET_CACHE_SECONDS, REVISION_POLL_MS, SSE_HEARTBEAT_MS, REVISION_IGNORED_DIRS, REVISION_ROOT_FILES, REVISION_WATCH_DIRS, REVISION_RECORD_FILES, URL_BASE, ALLOWED_METHODS, TAKE_WRITE_PATHS, SCRIPT_APPROVE_PATH, SHOT_GENERATE_PATH, EPISODE_SHOT_GENERATE_RE, MAX_WRITE_BODY_BYTES, API_PREFIX, MEDIA_PREFIX2, CONTENT_SECURITY_POLICY, WriteRequestError;
+var DEFAULT_HOST, OVERVIEW_CACHE_MS, ASSET_CACHE_SECONDS, REVISION_POLL_MS, SSE_HEARTBEAT_MS, REVISION_IGNORED_DIRS, REVISION_ROOT_FILES, REVISION_WATCH_DIRS, REVISION_RECORD_FILES, URL_BASE, ALLOWED_METHODS, TAKE_WRITE_PATHS, SCRIPT_APPROVE_PATH, PROJECT_SETTINGS_PATH, EPISODE_SHOT_GENERATE_RE, MAX_WRITE_BODY_BYTES, API_PREFIX, MEDIA_PREFIX2, CONTENT_SECURITY_POLICY, WriteRequestError;
 var init_server = __esm({
   "src/core/web/server.mts"() {
     "use strict";
@@ -20966,7 +20916,9 @@ var init_server = __esm({
     init_story_data();
     init_paths();
     init_production();
-    init_store2();
+    init_mode();
+    init_production2();
+    init_store();
     init_takes();
     init_create();
     DEFAULT_HOST = "127.0.0.1";
@@ -20986,7 +20938,7 @@ var init_server = __esm({
     ALLOWED_METHODS = "GET, HEAD, POST";
     TAKE_WRITE_PATHS = /* @__PURE__ */ new Set(["/api/takes/finalize", "/api/takes/revoke"]);
     SCRIPT_APPROVE_PATH = "/api/script/approve";
-    SHOT_GENERATE_PATH = "/api/shots/generate";
+    PROJECT_SETTINGS_PATH = "/api/project/settings";
     EPISODE_SHOT_GENERATE_RE = /^\/api\/episodes\/([^/]+)\/shots\/([^/]+)\/generate$/;
     MAX_WRITE_BODY_BYTES = 64 * 1024;
     API_PREFIX = "/api";
@@ -21037,7 +20989,7 @@ var init_ui = __esm({
 var app_default;
 var init_app = __esm({
   "src/core/web/ui/app.client"() {
-    app_default = '/* daoyan web \u5BA2\u6237\u7AEF \u2014\u2014 \u539F\u751F JS \u5355\u9875\u5E94\u7528\uFF0C\u65E0\u6784\u5EFA\u4F9D\u8D56\u3002\n * \u6570\u636E\u6765\u81EA\u540C\u6E90 API\uFF1B\u5199\u64CD\u4F5C\u53EA\u6709\u955C\u5934\u5B9A\u7A3F\u3001\u786E\u8BA4\u5267\u672C\u4E0E\u521B\u5EFA\u955C\u5934\u751F\u6210\u4EFB\u52A1\u3002\n * DOM \u6587\u672C\u7EDF\u4E00\u7528 textContent\uFF0C\u907F\u514D\u63D0\u793A\u8BCD\u7B49\u5B57\u6BB5\u6CE8\u5165 HTML\u3002 */\n\n// \u9875\u9762\u89C6\u56FE\nconst VIEWS = [\n    { id: "overview", label: "\u6982\u89C8", hint: "\u9879\u76EE\u4E0E\u5267\u96C6\u72B6\u6001" },\n    { id: "characters", label: "\u89D2\u8272", hint: "\u89D2\u8272\u3001\u5F62\u6001\u4E0E\u53C2\u8003\u56FE" },\n    { id: "scenes", label: "\u573A\u666F", hint: "\u573A\u666F\u4E0E\u53C2\u8003\u56FE" },\n    { id: "voices", label: "\u97F3\u8272", hint: "\u97F3\u8272\u4E0E\u53C2\u8003\u97F3\u9891" },\n    { id: "assets", label: "\u8BBE\u5B9A\u8D44\u4EA7", hint: "\u5168\u90E8\u53C2\u8003\u8D44\u4EA7" },\n    { id: "shots", label: "\u5206\u955C", hint: "\u955C\u5934\u8FDB\u5EA6\u4E0E\u63D0\u793A\u8BCD" },\n    { id: "artifacts", label: "\u4EA7\u51FA\u7269", hint: "\u64AD\u653E\u4E0E\u4E0B\u8F7D" },\n    { id: "tasks", label: "\u4EFB\u52A1", hint: "\u4EFB\u52A1\u4E0E\u4E8B\u4EF6" },\n    { id: "finals", label: "\u6210\u7247", hint: "\u5408\u7247\u7ED3\u679C" },\n    { id: "workflows", label: "\u5DE5\u4F5C\u6D41", hint: "\u56FE\u4E0E bindings" },\n];\n// \u5408\u6CD5\u89C6\u56FE\u96C6\u5408\uFF08\u5267\u96C6\u8BE6\u60C5\u7531 hash \u7684 episode/<id> \u5355\u72EC\u89E3\u6790\uFF09\nconst VIEW_IDS = new Set(VIEWS.map((view) => view.id));\n// \u9ED8\u8BA4\u89C6\u56FE\nconst DEFAULT_VIEW = "overview";\n// \u63A5\u53E3\u8DEF\u5F84\nconst API = {\n    overview: "/api/overview",\n    characters: "/api/story/characters",\n    scenes: "/api/story/scenes",\n    voices: "/api/story/voices",\n    assets: "/api/story/assets",\n    shots: "/api/shots",\n    artifacts: "/api/artifacts?limit=500",\n    tasks: "/api/tasks",\n    finals: "/api/finals",\n    workflows: "/api/workflows",\n    takeFinalize: "/api/takes/finalize",\n    takeRevoke: "/api/takes/revoke",\n};\n// \u5404\u89C6\u56FE\u8F6E\u8BE2\u95F4\u9694\uFF08\u6BEB\u79D2\uFF09\nconst POLL_MS = {\n    overview: 3000,\n    characters: 10000,\n    scenes: 10000,\n    voices: 10000,\n    assets: 10000,\n    episode: 4000,\n    shots: 5000,\n    artifacts: 5000,\n    tasks: 3000,\n    finals: 8000,\n    workflows: 15000,\n};\n// \u72B6\u6001\u6587\u6848\nconst STATUS_LABEL = {\n    queued: "\u6392\u961F",\n    running: "\u8FD0\u884C\u4E2D",\n    succeeded: "\u6210\u529F",\n    failed: "\u5931\u8D25",\n    cancelled: "\u5DF2\u53D6\u6D88",\n    interrupted: "\u5DF2\u4E2D\u65AD",\n    held: "\u6301\u6709",\n    stale: "\u9648\u65E7",\n    absent: "\u7A7A\u95F2",\n    corrupt: "\u635F\u574F",\n};\n// \u4EA7\u7269\u7C7B\u578B\u6587\u6848\nconst KIND_LABEL = {\n    video: "\u89C6\u9891",\n    image: "\u56FE\u7247",\n    audio: "\u97F3\u9891",\n    json: "JSON",\n    text: "\u6587\u672C",\n    other: "\u6587\u4EF6",\n};\n// \u4EA7\u7269\u7C7B\u578B\u56FE\u6807\nconst KIND_ICON = {\n    video: "\u25B6",\n    image: "\u25A7",\n    audio: "\u266A",\n    json: "{}",\n    text: "TXT",\n    other: "\u2193",\n};\n// \u5267\u60C5\u9636\u6BB5\u6587\u6848\nconst STAGE_LABEL = {\n    script: "\u5267\u672C",\n    breakdown: "\u62C6\u89E3",\n    assets: "\u8BBE\u5B9A\u8D44\u4EA7",\n    storyboard: "\u5206\u955C",\n    workflow: "\u5DE5\u4F5C\u6D41",\n    ready: "\u53EF\u62CD\u6444",\n    wrapped: "\u5DF2\u5408\u7247",\n};\n// \u4EFB\u52A1\u7C7B\u578B\u6587\u6848\nconst TASK_KIND_LABEL = {\n    run: "\u5355\u6B21",\n    shot: "\u955C\u5934",\n    retake: "\u91CD\u62CD",\n    batch: "\u6279\u91CF",\n    metadata: "\u5143\u6570\u636E",\n};\n// \u6700\u5927\u64AD\u653E\u5217\u8868\u957F\u5EA6\nconst MAX_PLAYLIST = 200;\n// \u6587\u672C\u9884\u89C8\u4E0A\u9650\nconst TEXT_PREVIEW_LIMIT = 200_000;\n// SVG \u547D\u540D\u7A7A\u95F4\nconst SVG_NS = "http://www.w3.org/2000/svg";\n// \u56FE\u8C31\u8282\u70B9\u5BBD\u5EA6\nconst MAP_NODE_WIDTH = 190;\n// \u56FE\u8C31\u8282\u70B9\u9AD8\u5EA6\nconst MAP_NODE_HEIGHT = 48;\n// \u56FE\u8C31\u884C\u9AD8\nconst MAP_ROW_HEIGHT = 76;\n// \u56FE\u8C31\u9876\u90E8\u7559\u767D\nconst MAP_TOP = 32;\n// \u56FE\u8C31\u5DE6\u5217 x\nconst MAP_LEFT_X = 32;\n// \u56FE\u8C31\u53F3\u5217 x\nconst MAP_RIGHT_X = 470;\n// \u56FE\u8C31\u753B\u5E03\u5BBD\u5EA6\nconst MAP_WIDTH = 700;\n// \u56FE\u8C31\u6700\u5927\u5171\u73B0\u5F27\u6570\u91CF\nconst MAP_MAX_ARCS = 15;\n// \u4EFB\u52A1\u8BE6\u60C5\u7F13\u5B58\u65F6\u95F4\uFF08\u6BEB\u79D2\uFF09\nconst TASK_DETAIL_CACHE_MS = 2000;\n// \u65F6\u95F4\u683C\u5F0F\u5668\nconst TIME_FORMATTER = new Intl.DateTimeFormat("zh-CN", {\n    year: "numeric",\n    month: "2-digit",\n    day: "2-digit",\n    hour: "2-digit",\n    minute: "2-digit",\n    second: "2-digit",\n    hour12: false,\n});\n// \u5B57\u8282\u5355\u4F4D\nconst BYTE_UNITS = ["B", "KB", "MB", "GB", "TB"];\n// hash \u524D\u7F00\nconst HASH_PREFIX = "#/";\n// \u53EF\u64AD\u653E\u7C7B\u578B\nconst PLAYABLE_KINDS = new Set(["video", "audio"]);\n// \u53EF\u9884\u89C8\u7C7B\u578B\nconst PREVIEW_KINDS = new Set(["video", "audio", "image", "json", "text"]);\n\n// \u5E94\u7528\u6839\u8282\u70B9\nconst appRoot = document.querySelector("#app");\n// \u6A21\u6001\u6846\u6839\u8282\u70B9\nconst modalRoot = document.querySelector("#modal");\n// \u6A21\u6001\u6807\u9898\nconst modalTitle = document.querySelector("#modal-title");\n// \u6A21\u6001\u5185\u5BB9\nconst modalContent = document.querySelector("#modal-content");\n// \u6A21\u6001\u8BA1\u6570\nconst modalCounter = document.querySelector("#modal-counter");\n// \u4E0A\u4E00\u4E2A\u6309\u94AE\nconst modalPrev = document.querySelector("#modal-prev");\n// \u4E0B\u4E00\u4E2A\u6309\u94AE\nconst modalNext = document.querySelector("#modal-next");\n// \u5173\u95ED\u6309\u94AE\nconst modalClose = document.querySelector("#modal-close");\n// Toast \u6839\u8282\u70B9\nconst toastRoot = document.querySelector("#toast");\n\n// \u5F53\u524D\u89C6\u56FE\nlet currentView = DEFAULT_VIEW;\n// \u5F53\u524D\u5267\u96C6 id\nlet currentEpisodeId = null;\n// \u5F53\u524D\u89C6\u56FE\u662F\u5426\u5DF2\u6210\u529F\u52A0\u8F7D\nlet loaded = false;\n// \u4E0A\u6B21\u6E32\u67D3\u7684\u6570\u636E\u7B7E\u540D\uFF08\u907F\u514D\u8F6E\u8BE2\u91CD\u590D\u91CD\u5EFA DOM\uFF09\nlet lastSignature = "";\n// \u5F53\u524D\u8BF7\u6C42\u63A7\u5236\u5668\nlet requestController = null;\n// \u8F6E\u8BE2\u5B9A\u65F6\u5668\nlet pollTimer = null;\n// \u9879\u76EE\u53D8\u66F4\u8BA2\u9605\nlet projectEvents = null;\n// \u6700\u8FD1\u4E00\u6B21\u9879\u76EE\u7248\u672C\nlet projectRevision = null;\n// \u53D8\u66F4\u5237\u65B0\u9632\u6296\u5B9A\u65F6\u5668\nlet revisionRefreshTimer = null;\n// \u5F53\u524D\u4EA7\u7269\u7B5B\u9009\nlet artifactFilters = { label: "", status: "", kind: "", search: "" };\n// \u5F53\u524D\u5206\u955C\u7B5B\u9009\nlet shotFilters = { character: "", scene: "", status: "", search: "" };\n// \u56FE\u8C31 Tab\uFF08graph | timeline\uFF09\nlet mapTab = "graph";\n// \u56FE\u8C31\u805A\u5408\u6A21\u5F0F\uFF08character | form\uFF09\nlet mapMode = "character";\n// \u56FE\u8C31\u7B5B\u9009\uFF08{ kind, id } | null\uFF09\nlet mapFocus = null;\n// \u53EA\u663E\u793A\u5173\u952E\u4E8B\u4EF6\nlet mapOnlyMajor = false;\n// \u53EA\u663E\u793A\u963B\u585E\u4E8B\u4EF6\nlet mapBlockedOnly = false;\n// \u5F53\u524D\u5C55\u5F00\u7684 task id\nlet openTaskId = null;\n// \u4EFB\u52A1\u8BE6\u60C5\u7F13\u5B58\nconst taskDetailCache = new Map();\n// \u6536\u5230\u9879\u76EE\u53D8\u66F4\u540E\u5F3A\u5236\u5237\u65B0\u5C55\u5F00\u7684\u4EFB\u52A1\u8BE6\u60C5\nlet taskDetailRefresh = false;\n// \u64AD\u653E\u5217\u8868\nlet playerItems = [];\n// \u64AD\u653E\u7D22\u5F15\nlet playerIndex = 0;\n// Toast \u5B9A\u65F6\u5668\nlet toastTimer = null;\n// \u6700\u540E\u66F4\u65B0\u65F6\u95F4\nlet lastUpdatedAt = "";\n\n// \u4FA7\u8FB9\u5BFC\u822A\u5BB9\u5668\nlet navRoot = null;\n// \u4E3B\u5185\u5BB9\u5BB9\u5668\nlet viewRoot = null;\n// \u9879\u76EE\u540D\u5143\u7D20\nlet projectNameEl = null;\n// \u4FA7\u680F\u9879\u76EE\u540D\u5143\u7D20\nlet brandProjectEl = null;\n// \u6A21\u5F0F\u5143\u7D20\nlet modeEl = null;\n// \u8FDE\u63A5\u72B6\u6001\u5143\u7D20\nlet connectionEl = null;\n// \u66F4\u65B0\u65F6\u95F4\u5143\u7D20\nlet updatedEl = null;\n\n/**\n * \u521B\u5EFA\u5143\u7D20\u5E76\u8BBE\u7F6E\u6587\u672C\u3002\n */\nfunction createElement(tag, className, text) {\n    // \u65B0\u5143\u7D20\n    const node = document.createElement(tag);\n    if (className !== undefined && className !== "") node.className = className;\n    if (text !== undefined && text !== null) node.textContent = String(text);\n    return node;\n}\n\n/**\n * \u6E05\u7A7A\u5B50\u8282\u70B9\u3002\n */\nfunction clearNode(node) {\n    while (node.firstChild !== null) node.removeChild(node.firstChild);\n}\n\n/**\n * \u683C\u5F0F\u5316\u5B57\u8282\u3002\n */\nfunction formatBytes(bytes) {\n    // \u515C\u5E95\u6570\u503C\n    const value = Number(bytes);\n    if (!Number.isFinite(value) || value <= 0) return "0 B";\n    // \u5355\u4F4D\u6307\u6570\n    let index = 0;\n    // \u5F53\u524D\u6570\u503C\n    let current = value;\n    while (current >= 1024 && index < BYTE_UNITS.length - 1) {\n        current /= 1024;\n        index += 1;\n    }\n    // \u5C0F\u6570\u4F4D\n    const digits = index === 0 ? 0 : current >= 10 ? 1 : 2;\n    return `${current.toFixed(digits)} ${BYTE_UNITS[index]}`;\n}\n\n/**\n * \u683C\u5F0F\u5316\u65F6\u95F4\u3002\n */\nfunction formatTime(iso) {\n    if (typeof iso !== "string" || iso === "") return "\u2014";\n    // \u65F6\u95F4\u5BF9\u8C61\n    const date = new Date(iso);\n    if (Number.isNaN(date.getTime())) return "\u2014";\n    return TIME_FORMATTER.format(date);\n}\n\n/**\n * \u683C\u5F0F\u5316\u8017\u65F6\u3002\n */\nfunction formatDuration(ms) {\n    // \u6BEB\u79D2\u503C\n    const value = Number(ms);\n    if (!Number.isFinite(value) || value <= 0) return "0 \u79D2";\n    if (value < 1000) return `${Math.round(value)} \u6BEB\u79D2`;\n    // \u79D2\n    const seconds = Math.round(value / 1000);\n    if (seconds < 60) return `${seconds} \u79D2`;\n    // \u5206\u949F/\u79D2\n    const minutes = Math.floor(seconds / 60);\n    // \u4F59\u6570\u79D2\n    const rest = seconds % 60;\n    return rest === 0 ? `${minutes} \u5206` : `${minutes} \u5206 ${rest} \u79D2`;\n}\n\n/**\n * \u5237\u65B0\u4EFB\u52A1\u8FD0\u884C\u65F6\u957F\uFF08\u6BCF\u79D2\u8C03\u7528\uFF09\u3002\n */\nfunction tickTaskElapsed() {\n    for (const node of document.querySelectorAll("[data-task-elapsed]")) {\n        // \u5F00\u59CB\u65F6\u95F4\n        const started = Date.parse(node.dataset.started ?? "");\n        if (Number.isNaN(started)) continue;\n        // \u7ED3\u675F\u65F6\u95F4\uFF08\u672A\u7ED3\u675F\u5219\u7528\u5F53\u524D\u65F6\u95F4\uFF09\n        const finishedRaw = node.dataset.finished ?? "";\n        const finished = finishedRaw === "" ? Date.now() : Date.parse(finishedRaw);\n        node.textContent = `\u5DF2\u8FD0\u884C ${formatDuration(Math.max(0, (Number.isNaN(finished) ? Date.now() : finished) - started))}`;\n    }\n}\n\n/**\n * \u77ED id\u3002\n */\nfunction shortId(id) {\n    if (typeof id !== "string") return "\u2014";\n    return id.length > 20 ? `${id.slice(0, 20)}\u2026` : id;\n}\n\n/**\n * \u6587\u672C\u515C\u5E95\u3002\n */\nfunction textOrDash(value) {\n    if (value === undefined || value === null || value === "") return "\u2014";\n    return String(value);\n}\n\n/**\n * \u901A\u7528\u5FBD\u6807\u3002\n */\nfunction badge(text, className) {\n    return createElement("span", `badge ${className ?? ""}`.trim(), text);\n}\n\n/**\n * \u72B6\u6001\u5FBD\u6807\u3002\n */\nfunction statusBadge(status, text) {\n    // \u72B6\u6001\u952E\n    const key = typeof status === "string" && status !== "" ? status : "queued";\n    return badge(text ?? STATUS_LABEL[key] ?? key, `status-${key}`);\n}\n\n/**\n * \u7C7B\u578B\u5FBD\u6807\u3002\n */\nfunction kindBadge(kind) {\n    // \u7C7B\u578B\u952E\n    const key = typeof kind === "string" && kind !== "" ? kind : "other";\n    return badge(KIND_LABEL[key] ?? key, `kind-${key}`);\n}\n\n/**\n * \u8FFD\u52A0\u952E\u503C\u884C\u3002\n */\nfunction appendKv(dl, key, value) {\n    dl.append(createElement("dt", "", key));\n    dl.append(createElement("dd", "", textOrDash(value)));\n}\n\n/**\n * \u4EBA\u7269 / \u573A\u666F\u53BB\u91CD\u952E\u3002\n */\nfunction entityKey(entity) {\n    return entity.id !== null && entity.id !== undefined ? `id:${entity.id}` : `name:${entity.name}`;\n}\n\n/**\n * \u683C\u5F0F\u5316\u79D2\u6570\u3002\n */\nfunction formatSeconds(seconds) {\n    // \u6570\u503C\u515C\u5E95\n    const value = Number(seconds);\n    if (!Number.isFinite(value) || value < 0) return "\u2014";\n    if (value < 60) return Number.isInteger(value) ? `${value} \u79D2` : `${value.toFixed(1)} \u79D2`;\n    // \u5206\u949F\u4E0E\u4F59\u79D2\n    const minutes = Math.floor(value / 60);\n    const rest = Math.round(value % 60);\n    return rest === 0 ? `${minutes} \u5206` : `${minutes} \u5206 ${rest} \u79D2`;\n}\n\n/**\n * \u4EBA\u7269 / \u573A\u666F chip\u3002\n */\nfunction entityChip(entity, className) {\n    // chip\n    const chip = createElement("span", `chip ${className ?? ""}`.trim(), entity.name);\n    if (entity.description) chip.title = entity.description;\n    return chip;\n}\n\n/**\n * \u4E00\u7EC4\u4EBA\u7269 / \u573A\u666F chip\u3002\n */\nfunction entityChips(entities, className) {\n    // chip \u5BB9\u5668\n    const row = createElement("div", "chip-row");\n    if (!Array.isArray(entities) || entities.length === 0) {\n        row.append(createElement("span", "muted", "\u672A\u6807\u6CE8"));\n        return row;\n    }\n    for (const entity of entities) row.append(entityChip(entity, className));\n    return row;\n}\n\n/**\n * \u5206\u955C\u72B6\u6001\u5FBD\u6807\u3002\n */\nfunction shotStatusBadge(shot) {\n    if (shot.done === true) return statusBadge("succeeded", "\u5DF2\u5B8C\u6210");\n    if (shot.latest_status === "failed") return statusBadge("failed");\n    if (shot.latest_status === "running" || shot.latest_status === "queued") {\n        return statusBadge(shot.latest_status);\n    }\n    return statusBadge("queued", "\u672A\u5B8C\u6210");\n}\n\n/**\n * \u8BF7\u6C42 JSON \u5E76\u89E3\u5305\u4FE1\u5C01\u3002\n */\nasync function requestJson(path, signal) {\n    // \u54CD\u5E94\n    const response = await fetch(path, { headers: { Accept: "application/json" }, signal });\n    // \u54CD\u5E94\u4F53\n    const payload = await response.json();\n    if (payload.ok !== true) {\n        throw new Error(payload.error !== undefined ? payload.error.message : `\u8BF7\u6C42\u5931\u8D25\uFF08HTTP ${response.status}\uFF09`);\n    }\n    return payload.data;\n}\n\n/**\n * \u5F53\u524D\u89C6\u56FE\u8BF7\u6C42\uFF08\u53EF\u88AB\u4E0B\u4E00\u6B21\u5BFC\u822A\u4E2D\u6B62\uFF09\u3002\n */\nasync function fetchJson(path) {\n    // \u8BF7\u6C42\u63A7\u5236\u5668\n    const controller = new AbortController();\n    requestController = controller;\n    try {\n        return await requestJson(path, controller.signal);\n    } finally {\n        if (requestController === controller) requestController = null;\n    }\n}\n\n/**\n * \u6E32\u67D3\u9875\u9762\u9AA8\u67B6\u3002\n */\nfunction renderShell() {\n    appRoot.innerHTML = `\n        <div class="app-shell">\n            <aside class="sidebar">\n                <div class="brand">\n                    <div class="brand-mark"><span class="brand-dot"></span>daoyan web</div>\n                    <p id="brand-project" class="brand-sub" hidden></p>\n                </div>\n                <nav id="nav" class="nav" aria-label="\u9875\u9762\u5BFC\u822A"></nav>\n                <div class="sidebar-foot">\n                    <code>Ctrl+C</code> \u505C\u6B62\u670D\u52A1<br />\n                    \u6570\u636E\u6765\u81EA\u5F53\u524D\u9879\u76EE\u76EE\u5F55\uFF1B\u53EF\u786E\u8BA4\u5267\u672C\u3001\u751F\u6210\u955C\u5934\u4E0E\u5B9A\u7A3F\u3002\n                </div>\n            </aside>\n            <main class="main">\n                <header class="topbar">\n                    <div class="topbar-left">\n                        <h1 id="project-name" class="project-name">\u9879\u76EE</h1>\n                        <span id="project-mode" class="project-mode">\u2014</span>\n                    </div>\n                    <div class="topbar-right">\n                        <span id="connection" class="connection">\n                            <span class="connection-dot"></span>\n                            <span id="connection-text">\u8FDE\u63A5\u4E2D</span>\n                        </span>\n                        <span id="updated-at" class="muted">\u2014</span>\n                    </div>\n                </header>\n                <section id="view" class="content" aria-live="polite"></section>\n            </main>\n        </div>\n    `;\n    navRoot = document.querySelector("#nav");\n    viewRoot = document.querySelector("#view");\n    projectNameEl = document.querySelector("#project-name");\n    brandProjectEl = document.querySelector("#brand-project");\n    modeEl = document.querySelector("#project-mode");\n    connectionEl = document.querySelector("#connection");\n    updatedEl = document.querySelector("#updated-at");\n}\n\n/**\n * \u6E32\u67D3\u5BFC\u822A\u3002\n */\nfunction renderNav() {\n    clearNode(navRoot);\n    for (const view of VIEWS) {\n        // \u5BFC\u822A\u6309\u94AE\n        const button = createElement("button", "nav-item");\n        button.type = "button";\n        button.dataset.view = view.id;\n        button.append(createElement("span", "nav-label", view.label));\n        button.append(createElement("span", "nav-hint", view.hint));\n        button.addEventListener("click", () => {\n            window.location.hash = `${HASH_PREFIX}${view.id}`;\n        });\n        navRoot.append(button);\n    }\n}\n\n/**\n * \u9AD8\u4EAE\u5F53\u524D\u5BFC\u822A\u3002\n */\nfunction setActiveNav() {\n    if (navRoot === null) return;\n    // \u5267\u96C6\u8BE6\u60C5\u5F52\u5C5E\u6982\u89C8\n    const activeView = currentView === "episode" ? "overview" : currentView;\n    for (const button of navRoot.querySelectorAll(".nav-item")) {\n        button.classList.toggle("active", button.dataset.view === activeView);\n    }\n}\n\n/**\n * \u66F4\u65B0\u8FDE\u63A5\u72B6\u6001\u3002\n */\nfunction setConnection(state, text) {\n    if (connectionEl === null) return;\n    connectionEl.classList.remove("ok", "error");\n    if (state === "ok") connectionEl.classList.add("ok");\n    if (state === "error") connectionEl.classList.add("error");\n    // \u72B6\u6001\u6587\u672C\n    const textEl = connectionEl.querySelector("#connection-text");\n    if (textEl !== null) textEl.textContent = text;\n}\n\n/**\n * \u8BBE\u7F6E\u9875\u9762\u6807\u9898\u4E0E\u4FA7\u680F\u9879\u76EE\u540D\u3002\n */\nfunction setProjectName(name) {\n    // \u6E05\u6D17\u540E\u7684\u540D\u79F0\n    const value = typeof name === "string" ? name.trim() : "";\n    document.title = value === "" ? "daoyan web" : value;\n    if (brandProjectEl !== null) {\n        brandProjectEl.textContent = value;\n        brandProjectEl.hidden = value === "";\n    }\n}\n\n/**\n * \u52A0\u8F7D\u9876\u680F\u9879\u76EE\u4FE1\u606F\uFF08\u4E0D\u63A2\u6D4B\u5F15\u64CE\uFF09\u3002\n */\nasync function loadHeader() {\n    try {\n        // \u5065\u5EB7\u68C0\u67E5\u6570\u636E\n        const data = await requestJson("/api/health");\n        if (projectNameEl !== null && typeof data.project === "string") projectNameEl.textContent = data.project;\n        setProjectName(data.project);\n        if (modeEl !== null) modeEl.textContent = data.mode === null ? "\u672A\u7ED1\u5B9A\u672C\u673A" : data.mode;\n    } catch {\n        // \u9876\u680F\u5931\u8D25\u4E0D\u5F71\u54CD\u9875\u9762\u4E3B\u4F53\n    }\n}\n\n/**\n * \u63D0\u4EA4\u5199\u8BF7\u6C42\uFF08\u5B9A\u7A3F / \u64A4\u9500\uFF09\uFF0C\u8FD4\u56DE\u4FE1\u5C01 data\u3002\n */\nasync function postJson(path, body) {\n    // \u54CD\u5E94\n    const response = await fetch(path, {\n        method: "POST",\n        headers: { "Content-Type": "application/json", Accept: "application/json" },\n        body: JSON.stringify(body),\n    });\n    // \u54CD\u5E94\u4F53\n    const payload = await response.json();\n    if (payload.ok !== true) {\n        // \u9519\u8BEF\u4FE1\u606F\n        const message = payload.error !== undefined ? payload.error.message : `\u8BF7\u6C42\u5931\u8D25\uFF08HTTP ${response.status}\uFF09`;\n        // \u6062\u590D\u5EFA\u8BAE\n        const hint = payload.error !== undefined && payload.error.hint !== undefined ? ` ${payload.error.hint}` : "";\n        throw new Error(message + hint);\n    }\n    return payload.data;\n}\n\n/**\n * \u5237\u65B0\u5F53\u524D\u89C6\u56FE\u6570\u636E\uFF08\u5199\u64CD\u4F5C\u540E\u7ACB\u5373\u53CD\u6620\uFF09\u3002\n */\nasync function reloadView() {\n    lastSignature = "";\n    await loadCurrent();\n}\n\n/**\n * \u66F4\u65B0\u9876\u680F\u9879\u76EE\u4FE1\u606F\u3002\n */\nfunction updateHeader(data) {\n    if (projectNameEl !== null && data !== null && data.project !== undefined && data.project.name !== undefined) {\n        projectNameEl.textContent = data.project.name;\n        setProjectName(data.project.name);\n    }\n    if (modeEl !== null && data !== null && data.mode !== undefined) {\n        modeEl.textContent = data.mode === null ? "\u672A\u7ED1\u5B9A\u672C\u673A" : data.mode;\n    }\n    if (updatedEl !== null) {\n        updatedEl.textContent = lastUpdatedAt === "" ? "\u2014" : `\u66F4\u65B0\u4E8E ${formatTime(lastUpdatedAt)}`;\n    }\n}\n\n/**\n * \u663E\u793A\u9519\u8BEF\u6761\u3002\n */\nfunction showError(message) {\n    if (viewRoot === null) return;\n    // \u73B0\u6709\u9519\u8BEF\u6761\n    let banner = viewRoot.querySelector(".error-banner");\n    if (banner === null) {\n        banner = createElement("div", "error-banner");\n        viewRoot.prepend(banner);\n    }\n    banner.textContent = message;\n}\n\n/**\n * \u6E05\u9664\u9519\u8BEF\u6761\u3002\n */\nfunction clearError() {\n    if (viewRoot === null) return;\n    // \u73B0\u6709\u9519\u8BEF\u6761\n    const banner = viewRoot.querySelector(".error-banner");\n    if (banner !== null) banner.remove();\n}\n\n/**\n * \u663E\u793A Toast\u3002\n */\nfunction showToast(message, isError) {\n    toastRoot.textContent = message;\n    toastRoot.classList.toggle("error", isError === true);\n    toastRoot.hidden = false;\n    if (toastTimer !== null) window.clearTimeout(toastTimer);\n    toastTimer = window.setTimeout(() => {\n        toastRoot.hidden = true;\n    }, 2600);\n}\n\n/**\n * \u7A7A\u72B6\u6001\u8282\u70B9\u3002\n */\nfunction emptyNode(title, body) {\n    // \u5BB9\u5668\n    const box = createElement("div", "empty");\n    box.append(createElement("p", "empty-title", title));\n    box.append(createElement("p", "empty-body", body));\n    return box;\n}\n\n/**\n * \u52A0\u8F7D\u72B6\u6001\u3002\n */\nfunction renderLoading() {\n    if (viewRoot === null) return;\n    clearNode(viewRoot);\n    // \u52A0\u8F7D\u5BB9\u5668\n    const box = createElement("div", "loading");\n    box.append(createElement("span", "spinner"));\n    box.append(createElement("span", "", "\u52A0\u8F7D\u4E2D\u2026"));\n    viewRoot.append(box);\n}\n\n/**\n * \u8BA1\u7B97\u7528\u4E8E\u8DF3\u8FC7\u91CD\u590D\u6E32\u67D3\u7684\u6570\u636E\u7B7E\u540D\uFF08\u5FFD\u7565\u6982\u89C8\u7684\u751F\u6210\u65F6\u95F4\uFF09\u3002\n */\nfunction signatureOf(data) {\n    if (data !== null && typeof data === "object" && Object.prototype.hasOwnProperty.call(data, "generated_at")) {\n        // \u53BB\u6389\u65F6\u95F4\u6233\u540E\u7684\u526F\u672C\n        const copy = { ...data };\n        delete copy.generated_at;\n        return JSON.stringify(copy);\n    }\n    return JSON.stringify(data);\n}\n\n/**\n * \u52A0\u8F7D\u5F53\u524D\u89C6\u56FE\u3002\n */\nasync function loadCurrent() {\n    if (requestController !== null) requestController.abort();\n    // \u76EE\u6807\u89C6\u56FE\n    const view = currentView;\n    if (!loaded) renderLoading();\n    try {\n        // \u63A5\u53E3\u6570\u636E\n        const path =\n            view === "episode" && currentEpisodeId !== null\n                ? `/api/episodes/${encodeURIComponent(currentEpisodeId)}`\n                : API[view];\n        const data = await fetchJson(path);\n        if (view !== currentView) return;\n        // \u6570\u636E\u7B7E\u540D\uFF08\u7A33\u5B9A\u9875\u9762\u4E0D\u91CD\u590D\u91CD\u5EFA DOM\uFF09\n        const signature = signatureOf(data);\n        lastUpdatedAt = new Date().toISOString();\n        updateHeader(data);\n        setConnection("ok", "\u5DF2\u8FDE\u63A5");\n        if (loaded && signature === lastSignature) return;\n        loaded = true;\n        lastSignature = signature;\n        renderView(view, data);\n    } catch (error) {\n        if (error !== null && error !== undefined && error.name === "AbortError") return;\n        setConnection("error", "\u8FDE\u63A5\u5931\u8D25");\n        if (!loaded) {\n            clearNode(viewRoot);\n            viewRoot.append(emptyNode("\u65E0\u6CD5\u52A0\u8F7D", "\u8BF7\u786E\u8BA4\u670D\u52A1\u4ECD\u5728\u8FD0\u884C\uFF0C\u6216\u5237\u65B0\u9875\u9762\u91CD\u8BD5\u3002"));\n        }\n        showError(error instanceof Error ? error.message : "\u52A0\u8F7D\u5931\u8D25");\n    }\n}\n\n/**\n * \u5207\u6362\u89C6\u56FE\u3002\n */\nfunction onHashChange() {\n    // \u539F\u59CB hash\n    const raw = window.location.hash.replace(/^#\\/?/, "");\n    // \u8DEF\u5F84\u6BB5\n    const parts = raw.split("/");\n    // \u76EE\u6807\u89C6\u56FE / \u5267\u96C6\n    let view = DEFAULT_VIEW;\n    let episodeId = null;\n    if (parts[0] === "episode" && parts[1] !== undefined && parts[1] !== "") {\n        try {\n            episodeId = decodeURIComponent(parts[1]);\n            view = "episode";\n        } catch {\n            view = DEFAULT_VIEW;\n        }\n    } else {\n        view = VIEW_IDS.has(raw) ? raw : DEFAULT_VIEW;\n    }\n    currentView = view;\n    currentEpisodeId = episodeId;\n    mapTab = "graph";\n    mapMode = "character";\n    mapFocus = null;\n    mapOnlyMajor = false;\n    mapBlockedOnly = false;\n    loaded = false;\n    lastSignature = "";\n    openTaskId = null;\n    setActiveNav();\n    renderLoading();\n    void loadCurrent();\n    schedulePoll();\n}\n\n/**\n * \u4ECE SSE \u4E8B\u4EF6\u91CC\u53D6\u7248\u672C\u53F7\u3002\n */\nfunction revisionFromEvent(event) {\n    try {\n        // \u4E8B\u4EF6\u6570\u636E\n        const data = JSON.parse(event.data);\n        return typeof data.revision === "number" ? data.revision : null;\n    } catch {\n        return null;\n    }\n}\n\n/**\n * \u9879\u76EE\u53D1\u751F\u53D8\u5316\uFF1A\u91CD\u8F7D\u9876\u680F\u4E0E\u5F53\u524D\u89C6\u56FE\u3002\n */\nfunction onProjectRevision(revision) {\n    if (revision === null || revision === projectRevision) return;\n    projectRevision = revision;\n    taskDetailRefresh = true;\n    if (!loaded) return;\n    if (revisionRefreshTimer !== null) window.clearTimeout(revisionRefreshTimer);\n    revisionRefreshTimer = window.setTimeout(() => {\n        revisionRefreshTimer = null;\n        void loadHeader();\n        void loadCurrent();\n    }, 120);\n}\n\n/**\n * \u8BA2\u9605\u9879\u76EE\u53D8\u66F4\uFF08SSE\uFF1B\u5931\u8D25\u65F6\u4FDD\u7559\u5B9A\u65F6\u8F6E\u8BE2\u515C\u5E95\uFF09\u3002\n */\nfunction connectProjectEvents() {\n    if (typeof EventSource === "undefined") return;\n    if (projectEvents !== null) projectEvents.close();\n    projectEvents = new EventSource("/api/events");\n    projectEvents.addEventListener("ready", (event) => {\n        // \u5EFA\u7ACB\u57FA\u7EBF\uFF0C\u4E0D\u89E6\u53D1\u9996\u5C4F\u91CD\u8F7D\n        const revision = revisionFromEvent(event);\n        if (revision !== null) projectRevision = revision;\n    });\n    projectEvents.addEventListener("revision", (event) => {\n        onProjectRevision(revisionFromEvent(event));\n    });\n}\n\n/**\n * \u5B89\u6392\u8F6E\u8BE2\u3002\n */\nfunction schedulePoll() {\n    if (pollTimer !== null) window.clearInterval(pollTimer);\n    // \u5F53\u524D\u95F4\u9694\n    const interval = POLL_MS[currentView] ?? 5000;\n    pollTimer = window.setInterval(() => {\n        if (document.hidden) return;\n        void loadCurrent();\n    }, interval);\n}\n\n/**\n * \u5206\u53D1\u89C6\u56FE\u6E32\u67D3\u3002\n */\nfunction renderView(view, data) {\n    if (viewRoot === null) return;\n    clearNode(viewRoot);\n    if (view === "overview") renderOverview(data);\n    else if (view === "episode") renderEpisode(data);\n    else if (view === "characters") renderCharacters(data);\n    else if (view === "scenes") renderScenes(data);\n    else if (view === "voices") renderVoices(data);\n    else if (view === "assets") renderAssets(data);\n    else if (view === "shots") renderShots(data);\n    else if (view === "artifacts") renderArtifacts(data);\n    else if (view === "tasks") renderTasks(data);\n    else if (view === "finals") renderFinals(data);\n    else if (view === "workflows") renderWorkflows(data);\n    clearError();\n}\n\n/**\n * \u72B6\u6001\u5361\u7247\u3002\n */\nfunction statCard(label, value, hint) {\n    // \u5361\u7247\n    const card = createElement("div", "stat-card");\n    card.append(createElement("p", "stat-label", label));\n    card.append(createElement("p", "stat-value", value));\n    if (hint !== undefined) card.append(createElement("p", "stat-hint", hint));\n    return card;\n}\n\n/**\n * story \u6A21\u5F0F\u9690\u85CF legacy \u5206\u955C\u5165\u53E3\u3002\n */\nfunction hideLegacyShotsNav() {\n    if (navRoot === null) return;\n    // \u5206\u955C\u5BFC\u822A\n    const button = navRoot.querySelector(\'.nav-item[data-view="shots"]\');\n    if (button !== null) button.remove();\n}\n\n/**\n * \u5267\u60C5\u9636\u6BB5\u5FBD\u6807\u3002\n */\nfunction stageBadge(stage) {\n    return badge(STAGE_LABEL[stage] ?? stage, `stage-${stage}`);\n}\n\n/**\n * \u8D44\u4EA7\u7F29\u7565 / \u64AD\u653E\u8282\u70B9\u3002\n */\nfunction assetNode(asset, compact) {\n    // \u5BB9\u5668\n    const box = createElement("div", compact === true ? "asset-compact" : "asset-tile");\n    if (asset === null || asset === undefined) {\n        box.append(createElement("span", "muted", "\u65E0\u8D44\u4EA7"));\n        return box;\n    }\n    if (asset.present !== true || asset.lfs_pointer === true) {\n        box.append(createElement("span", "asset-missing", asset.lfs_pointer === true ? "LFS \u672A\u62C9\u53D6" : "\u6587\u4EF6\u7F3A\u5931"));\n        return box;\n    }\n    if (asset.kind === "image") {\n        // \u56FE\u7247\u9884\u89C8\u6309\u94AE\n        const button = createElement("button", "asset-thumb");\n        button.type = "button";\n        button.title = "\u70B9\u51FB\u9884\u89C8";\n        button.setAttribute("aria-label", `\u9884\u89C8 ${asset.path}`);\n        // \u56FE\u7247\n        const img = document.createElement("img");\n        img.src = asset.media_url;\n        img.alt = asset.path;\n        img.loading = "lazy";\n        button.append(img);\n        button.addEventListener("click", () => {\n            openImageUrl(asset.media_url, asset.path);\n        });\n        box.append(button);\n    } else if (asset.kind === "audio") {\n        // \u97F3\u9891\n        const audio = document.createElement("audio");\n        audio.controls = true;\n        audio.preload = "metadata";\n        audio.src = asset.media_url;\n        box.append(audio);\n    } else {\n        box.append(createElement("span", "preview-icon", KIND_ICON[asset.kind] ?? "\u2193"));\n    }\n    box.append(createElement("span", "asset-name mono", asset.path));\n    return box;\n}\n\n/**\n * \u7CFB\u5217\u6982\u89C8\u3002\n */\nfunction renderStorySeries(story) {\n    hideLegacyShotsNav();\n    // \u533A\u5757\u5934\n    const head = createElement("div", "section-head");\n    head.append(createElement("h3", "section-title", "\u5267\u96C6"));\n    head.append(createElement("span", "section-meta", `${story.series.episodes_total} \u96C6`));\n    viewRoot.append(head);\n    // \u5267\u96C6\u7F51\u683C\n    const grid = createElement("div", "grid");\n    for (const episode of story.episodes) {\n        // \u5361\u7247\n        const card = createElement("article", "card episode-card");\n        // \u5185\u5BB9\n        const body = createElement("div", "card-body");\n        body.append(createElement("p", "eyebrow", `\u7B2C ${episode.number} \u96C6`));\n        body.append(createElement("h3", "card-title", episode.title));\n        // \u5143\u4FE1\u606F\n        const meta = createElement("div", "card-meta");\n        meta.append(stageBadge(episode.stage));\n        meta.append(createElement("span", "", `\u5267\u672C r${episode.script.revision} \xB7 ${episode.script.status}`));\n        if (episode.blockers.length > 0) {\n            meta.append(createElement("span", "text-warn", `${episode.blockers.length} \u9879\u963B\u65AD`));\n        }\n        body.append(meta);\n        // \u963B\u65AD\u6458\u8981\n        if (episode.blockers.length > 0) {\n            const list = createElement("ul", "mini-list");\n            for (const blocker of episode.blockers.slice(0, 3)) {\n                list.append(createElement("li", "", blocker.message));\n            }\n            body.append(list);\n        }\n        // \u64CD\u4F5C\n        const actions = createElement("div", "card-actions");\n        const open = createElement("button", "button", "\u67E5\u770B\u5267\u96C6");\n        open.type = "button";\n        open.addEventListener("click", () => {\n            window.location.hash = `${HASH_PREFIX}episode/${encodeURIComponent(episode.id)}`;\n        });\n        actions.append(open);\n        body.append(actions);\n        card.append(body);\n        grid.append(card);\n    }\n    viewRoot.append(grid);\n    // \u4E0B\u4E00\u6B65\n    if (Array.isArray(story.next_actions) && story.next_actions.length > 0) {\n        const callout = createElement("div", "callout");\n        callout.append(createElement("strong", "", "\u4E0B\u4E00\u6B65"));\n        const list = createElement("ul", "mini-list");\n        for (const action of story.next_actions) list.append(createElement("li", "", action));\n        callout.append(list);\n        viewRoot.append(callout);\n    }\n}\n\n/**\n * \u5267\u96C6\u8BE6\u60C5\u3002\n */\nfunction renderEpisode(data) {\n    hideLegacyShotsNav();\n    // \u5267\u96C6 / \u72B6\u6001\n    const episode = data.episode;\n    const status = data.status;\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", `Episode ${episode.id}`));\n    headText.append(createElement("h2", "page-title", `\u7B2C ${episode.number} \u96C6 \xB7 ${episode.title}`));\n    headText.append(createElement("p", "page-subtitle", episode.summary ?? ""));\n    head.append(headText);\n    // \u8FD4\u56DE\n    const back = createElement("button", "button ghost", "\u2190 \u8FD4\u56DE\u6982\u89C8");\n    back.type = "button";\n    back.addEventListener("click", () => {\n        window.location.hash = `${HASH_PREFIX}overview`;\n    });\n    head.append(back);\n    viewRoot.append(head);\n    // \u9636\u6BB5\n    const stageRow = createElement("div", "chip-row");\n    stageRow.append(stageBadge(status.stage));\n    stageRow.append(createElement("span", "muted", `\u5267\u672C r${status.script.revision} \xB7 ${status.script.status}`));\n    stageRow.append(createElement("span", "muted", `\u62C6\u89E3 r${status.documents.breakdown.source_revision}`));\n    stageRow.append(createElement("span", "muted", `\u5206\u955C r${status.documents.shots.source_revision}`));\n    viewRoot.append(stageRow);\n    // \u963B\u65AD\n    if (status.blockers.length > 0) {\n        const callout = createElement("div", "callout warn");\n        callout.append(createElement("strong", "", `\u95E8\u7981\u963B\u65AD ${status.blockers.length} \u9879`));\n        const list = createElement("ul", "mini-list");\n        for (const blocker of status.blockers)\n            list.append(createElement("li", "", `[${blocker.code}] ${blocker.message}`));\n        callout.append(list);\n        viewRoot.append(callout);\n    }\n    // \u5267\u60C5\u56FE\u8C31\n    viewRoot.append(renderStoryMap(data.map));\n    // \u5267\u672C\n    const scriptMeta = data.script.meta ?? {};\n    const scriptApproved = scriptMeta.status === "approved";\n    const scriptHead = createElement("div", "section-head");\n    scriptHead.append(createElement("h3", "section-title", "\u5267\u672C"));\n    const scriptActions = createElement("div", "section-actions");\n    scriptActions.append(\n        createElement(\n            "span",\n            "section-meta",\n            scriptMeta.revision > 0 ? `r${scriptMeta.revision} \xB7 ${scriptApproved ? "\u5DF2\u786E\u8BA4" : "\u5F85\u786E\u8BA4"}` : "\u5C1A\u672A\u540C\u6B65",\n        ),\n    );\n    if (!scriptApproved && scriptMeta.revision > 0) {\n        // \u786E\u8BA4\u5267\u672C\n        const approve = createElement("button", "button", "\u786E\u8BA4\u5267\u672C");\n        approve.type = "button";\n        approve.addEventListener("click", async () => {\n            if (approve.disabled) return;\n            approve.disabled = true;\n            approve.textContent = "\u786E\u8BA4\u4E2D\u2026";\n            try {\n                await postJson("/api/script/approve", { episode_id: episode.id });\n                showToast("\u5267\u672C\u5DF2\u786E\u8BA4");\n                await reloadView();\n            } catch (error) {\n                showToast(error instanceof Error ? error.message : "\u786E\u8BA4\u5931\u8D25", true);\n                approve.disabled = false;\n                approve.textContent = "\u786E\u8BA4\u5267\u672C";\n            }\n        });\n        scriptActions.append(approve);\n    }\n    scriptHead.append(scriptActions);\n    viewRoot.append(scriptHead);\n    const script = createElement(\n        "pre",\n        "script-text",\n        data.script.content === "" ? "\uFF08\u5C1A\u672A\u540C\u6B65\uFF09" : data.script.content,\n    );\n    viewRoot.append(script);\n    // \u62C6\u89E3\n    const breakdown = data.breakdown;\n    const breakdownHead = createElement("div", "section-head");\n    breakdownHead.append(createElement("h3", "section-title", "\u672C\u96C6\u62C6\u89E3"));\n    breakdownHead.append(\n        createElement("span", "section-meta", breakdown === null ? "\u7F3A\u5931" : `source r${breakdown.source_revision}`),\n    );\n    viewRoot.append(breakdownHead);\n    if (breakdown === null) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u62C6\u89E3", "\u4F7F\u7528 daoyan story breakdown set \u5199\u5165\u672C\u96C6\u89D2\u8272\u3001\u5F62\u6001\u3001\u573A\u666F\u4E0E\u97F3\u8272\u3002"));\n    } else {\n        const list = createElement("div", "layout-two");\n        // \u89D2\u8272\n        const cast = createElement("div", "panel");\n        cast.append(createElement("h4", "panel-title", "\u89D2\u8272\u4E0E\u5F62\u6001"));\n        const castList = createElement("ul", "mini-list");\n        for (const item of breakdown.characters) {\n            castList.append(createElement("li", "", `${item.id} \xB7 ${item.forms.join(" / ")}`));\n        }\n        cast.append(castList);\n        // \u573A\u666F / \u97F3\u8272 / beat\n        const other = createElement("div", "panel");\n        other.append(createElement("h4", "panel-title", "\u573A\u666F / \u97F3\u8272 / Beat"));\n        other.append(createElement("p", "", `\u573A\u666F\uFF1A${breakdown.scenes.join("\u3001") || "\u65E0"}`));\n        other.append(createElement("p", "", `\u97F3\u8272\uFF1A${breakdown.voices.join("\u3001") || "\u65E0"}`));\n        other.append(createElement("p", "", `Beat\uFF1A${(breakdown.beats ?? []).map((b) => b.id).join("\u3001") || "\u65E0"}`));\n        list.append(cast);\n        list.append(other);\n        viewRoot.append(list);\n    }\n    // \u5206\u955C\n    const shots = data.shots;\n    const shotsHead = createElement("div", "section-head");\n    shotsHead.append(createElement("h3", "section-title", "\u5206\u955C"));\n    shotsHead.append(\n        createElement("span", "section-meta", shots === null ? "\u7F3A\u5931" : `${shots.summary.shots_total} \u955C`),\n    );\n    viewRoot.append(shotsHead);\n    if (shots === null || shots.shots.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u5206\u955C", "\u4F7F\u7528 daoyan story shots set \u5199\u5165\u672C\u96C6\u5206\u955C\u3002"));\n    } else {\n        const grid = createElement("div", "shot-grid");\n        for (const shot of shots.shots) grid.append(renderShotCard(shot));\n        viewRoot.append(grid);\n    }\n    // \u4EFB\u52A1\n    const taskHead = createElement("div", "section-head");\n    taskHead.append(createElement("h3", "section-title", "\u672C\u96C6\u4EFB\u52A1"));\n    taskHead.append(createElement("span", "section-meta", `${data.tasks.length} \u4E2A`));\n    viewRoot.append(taskHead);\n    if (data.tasks.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u4EFB\u52A1", "\u62CD\u6444\u672C\u96C6\u540E\uFF0Ctask \u4F1A\u51FA\u73B0\u5728\u8FD9\u91CC\u3002"));\n    } else {\n        const list = createElement("div", "task-list");\n        for (const task of data.tasks.slice(0, 10)) {\n            const row = createElement("div", "task-row");\n            row.append(createElement("span", "mono", task.task_id));\n            row.append(createElement("span", "", task.command));\n            row.append(statusBadge(task.status));\n            list.append(row);\n        }\n        viewRoot.append(list);\n    }\n    // \u6210\u7247\n    const finalHead = createElement("div", "section-head");\n    finalHead.append(createElement("h3", "section-title", "\u6210\u7247"));\n    finalHead.append(createElement("span", "section-meta", `${data.finals.length} \u4E2A`));\n    viewRoot.append(finalHead);\n    if (data.finals.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u6210\u7247", "\u8FD0\u884C daoyan wrap --episode <id> \u540E\u51FA\u73B0\u3002"));\n    } else {\n        const list = createElement("div", "task-list");\n        for (const item of data.finals) {\n            const row = createElement("div", "task-row");\n            row.append(createElement("span", "mono", item.name));\n            row.append(createElement("span", "", formatTime(item.created_at ?? "")));\n            const play = createElement("button", "button", "\u64AD\u653E");\n            play.type = "button";\n            play.addEventListener("click", () => {\n                openPlayer([{ title: item.name, url: item.media_url, kind: "video" }], 0);\n            });\n            row.append(play);\n            list.append(row);\n        }\n        viewRoot.append(list);\n    }\n}\n\n/**\n * \u56FE\u8C31\u91CD\u8981\u5EA6\u5FBD\u6807\u3002\n */\nfunction mapImportanceBadge(importance) {\n    // \u6587\u6848\n    const label = importance === "major" ? "\u5173\u952E" : importance === "minor" ? "\u8FC7\u573A" : "\u5E38\u89C4";\n    return badge(label, `importance-${importance}`);\n}\n\n/**\n * \u56FE\u8C31\u5C31\u7EEA\u5FBD\u6807\u3002\n */\nfunction mapReadyBadge(gen) {\n    if (gen === undefined) return badge("\u65E0\u4E0A\u4E0B\u6587", "map-unknown");\n    if (gen.ready) return badge("\u53EF\u751F\u6210", "map-ready");\n    // \u963B\u585E\u6570\n    const blockers = gen.gaps.filter((gap) => gap.severity === "blocker").length;\n    return badge(`\u963B\u585E ${blockers}`, "map-blocked");\n}\n\n/**\n * \u56FE\u8C31\u6E32\u67D3\u5FBD\u6807\u3002\n */\nfunction mapRenderBadge(gen) {\n    // \u72B6\u6001\n    const status = gen?.render?.latest_status;\n    if (status === "succeeded") return badge("\u5DF2\u751F\u6210", "map-rendered");\n    if (status === "failed") return badge("\u5931\u8D25", "map-failed");\n    if (status === "cancelled" || status === "interrupted") return badge(STATUS_LABEL[status] ?? status, "map-failed");\n    return badge("\u672A\u751F\u6210", "map-pending");\n}\n\n/**\n * SVG \u8282\u70B9\u3002\n */\nfunction svgNode(tag, attrs) {\n    // \u8282\u70B9\n    const node = document.createElementNS(SVG_NS, tag);\n    if (attrs !== undefined) {\n        for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, String(value));\n    }\n    return node;\n}\n\n/**\n * \u65F6\u95F4\u7801\u3002\n */\nfunction formatTimecode(seconds) {\n    // \u6570\u503C\n    const value = Math.max(0, Math.round(Number(seconds) || 0));\n    // \u5206\u949F\n    const minutes = Math.floor(value / 60);\n    // \u79D2\n    const rest = value % 60;\n    return `${String(minutes).padStart(2, "0")}:${String(rest).padStart(2, "0")}`;\n}\n\n/**\n * \u56FE\u8C31\u7D22\u5F15\u3002\n */\nfunction mapIndexes(map) {\n    // \u89D2\u8272\n    const characters = new Map();\n    for (const item of map.catalog.characters) characters.set(item.id, item);\n    // \u573A\u666F\n    const scenes = new Map();\n    for (const item of map.catalog.scenes) scenes.set(item.id, item);\n    // \u97F3\u8272\n    const voices = new Map();\n    for (const item of map.catalog.voices) voices.set(item.id, item);\n    // \u751F\u6210\u4E8B\u4EF6\n    const generation = new Map();\n    for (const item of map.generation.events) generation.set(item.shot_id, item);\n    return { characters, scenes, voices, generation };\n}\n\n/**\n * \u67E5\u627E\u5F62\u6001\u3002\n */\nfunction formOf(character, formId) {\n    if (character === undefined || character === null) return null;\n    return character.forms.find((form) => form.id === formId) ?? null;\n}\n\n/**\n * \u8D44\u4EA7\u72B6\u6001\u3002\n */\nfunction assetStatus(asset) {\n    if (asset === null || asset === undefined) return "missing";\n    if (asset.lfs_pointer) return "lfs";\n    if (!asset.present) return "absent";\n    return "ready";\n}\n\n/**\n * \u8D44\u4EA7\u72B6\u6001\u6587\u6848\u3002\n */\nfunction assetStatusLabel(status) {\n    if (status === "lfs") return "LFS \u672A\u62C9\u53D6";\n    if (status === "absent") return "\u6587\u4EF6\u7F3A\u5931";\n    if (status === "missing") return "\u672A\u6307\u5B9A";\n    return "\u53EF\u7528";\n}\n\n/**\n * \u8D44\u4EA7\u7F29\u7565 / \u9884\u89C8\u3002\n */\nfunction mapAssetNode(asset, compact) {\n    // \u5BB9\u5668\n    const box = createElement("span", compact === true ? "map-asset compact" : "map-asset");\n    if (asset === null || asset === undefined) {\n        box.append(createElement("span", "map-asset-missing", "\u672A\u6307\u5B9A"));\n        return box;\n    }\n    // \u72B6\u6001\n    const status = assetStatus(asset);\n    if (status !== "ready") {\n        box.append(createElement("span", "map-asset-missing", `${asset.id} \xB7 ${assetStatusLabel(status)}`));\n        return box;\n    }\n    // \u5185\u5BB9\u7C7B\u578B\n    const contentType = typeof asset.content_type === "string" ? asset.content_type : "";\n    if (contentType.startsWith("image/")) {\n        // \u9884\u89C8\u6309\u94AE\n        const button = createElement("button", "map-asset-thumb");\n        button.type = "button";\n        button.title = `\u9884\u89C8 ${asset.id}`;\n        button.setAttribute("aria-label", `\u9884\u89C8 ${asset.id}`);\n        // \u56FE\u7247\n        const image = document.createElement("img");\n        image.src = asset.media_url;\n        image.alt = asset.id;\n        image.loading = "lazy";\n        button.append(image);\n        button.append(createElement("span", "mono", asset.id));\n        button.addEventListener("click", () => openImageUrl(asset.media_url, asset.path));\n        box.append(button);\n        return box;\n    }\n    if (contentType.startsWith("audio/")) {\n        // \u8BD5\u542C\u6309\u94AE\n        const button = createElement("button", "map-asset-thumb", `\u266A ${asset.id}`);\n        button.type = "button";\n        button.addEventListener("click", () => {\n            openPlayer([{ title: asset.path, url: asset.media_url, kind: "audio" }], 0);\n        });\n        box.append(button);\n        return box;\n    }\n    box.append(createElement("span", "mono", asset.id));\n    return box;\n}\n\n/**\n * \u8D44\u4EA7\u5217\u8868\u3002\n */\nfunction mapAssetList(container, assets) {\n    // \u5217\u8868\n    const row = createElement("div", "map-assets");\n    if (!Array.isArray(assets) || assets.length === 0) {\n        row.append(createElement("span", "muted", "\u65E0"));\n        container.append(row);\n        return;\n    }\n    for (const asset of assets) row.append(mapAssetNode(asset, true));\n    container.append(row);\n}\n\n/**\n * \u56FE\u8C31\u7B5B\u9009\u6587\u6848\u3002\n */\nfunction mapFocusLabel(map, focus) {\n    if (focus === null) return "";\n    if (focus.kind === "scene") {\n        // \u573A\u666F\n        const scene = map.catalog.scenes.find((item) => item.id === focus.id);\n        return scene !== undefined ? `\u573A\u666F\uFF1A${scene.name}` : `\u573A\u666F\uFF1A${focus.id}`;\n    }\n    // \u89D2\u8272\n    const character = map.catalog.characters.find((item) => item.id === focus.id);\n    return character !== undefined ? `\u89D2\u8272\uFF1A${character.name}` : `\u89D2\u8272\uFF1A${focus.id}`;\n}\n\n/**\n * \u573A\u666F\u8272\u8C03\u3002\n */\nfunction sceneTone(indexes, sceneId) {\n    if (sceneId === undefined || sceneId === null) return "tone-other";\n    // \u573A\u666F\n    const scene = indexes.scenes.get(sceneId);\n    // \u65F6\u95F4\n    const value = typeof scene?.time_of_day === "string" ? scene.time_of_day.toLowerCase() : "";\n    if (value.includes("night") || value.includes("\u591C")) return "tone-night";\n    if (value.includes("dusk") || value.includes("\u9EC4\u660F")) return "tone-dusk";\n    if (value.includes("dawn") || value.includes("\u6668")) return "tone-dawn";\n    if (value.includes("day") || value.includes("\u65E5")) return "tone-day";\n    return "tone-other";\n}\n\n/**\n * \u56FE\u8C31\u884C\u3002\n */\nfunction mapRow(label, value) {\n    // \u884C\n    const row = createElement("div", "map-row");\n    row.append(createElement("span", "map-row-label", label));\n    row.append(createElement("span", "map-row-value", value));\n    return row;\n}\n\n/**\n * \u56FE\u8C31\u8BE6\u60C5\u3002\n */\nfunction renderMapDetail(container, map, refresh) {\n    // \u7D22\u5F15\n    const indexes = mapIndexes(map);\n    // \u9762\u677F\n    const panel = createElement("div", "map-detail");\n    if (mapFocus === null) {\n        panel.append(createElement("p", "muted", "\u70B9\u51FB\u89D2\u8272\u3001\u5F62\u6001\u6216\u573A\u666F\u8282\u70B9\u67E5\u770B\u8BE6\u60C5\uFF1B\u70B9\u51FB\u540E\u53EF\u5728\u65F6\u5E8F\u56FE\u4E2D\u7B5B\u9009\u3002"));\n        container.append(panel);\n        return;\n    }\n    // \u5934\u90E8\n    const head = createElement("div", "map-detail-head");\n    head.append(createElement("strong", "", mapFocusLabel(map, mapFocus)));\n    // \u6E05\u9664\n    const clear = createElement("button", "button ghost", "\u6E05\u9664\u7B5B\u9009");\n    clear.type = "button";\n    clear.addEventListener("click", () => {\n        mapFocus = null;\n        refresh();\n    });\n    head.append(clear);\n    // \u65F6\u5E8F\n    const timeline = createElement("button", "button", "\u5728\u65F6\u5E8F\u4E2D\u7B5B\u9009");\n    timeline.type = "button";\n    timeline.addEventListener("click", () => {\n        mapTab = "timeline";\n        refresh();\n    });\n    head.append(timeline);\n    panel.append(head);\n    if (mapFocus.kind === "scene") {\n        // \u573A\u666F\n        const scene = indexes.scenes.get(mapFocus.id);\n        if (scene === undefined) {\n            panel.append(createElement("p", "muted", "\u573A\u666F\u4E0D\u5728\u672C\u96C6\u8D44\u4EA7\u76EE\u5F55\u4E2D\u3002"));\n            container.append(panel);\n            return;\n        }\n        panel.append(mapRow("\u65F6\u95F4", `${scene.time_of_day ?? "\u672A\u6807\u6CE8"} \xB7 ${scene.interior_exterior ?? "\u672A\u6807\u6CE8"}`));\n        panel.append(mapRow("\u4F7F\u7528", `${scene.event_count} \u955C`));\n        panel.append(createElement("p", "map-detail-label", "\u4E3B\u53C2\u8003 / \u8D44\u4EA7"));\n        mapAssetList(\n            panel,\n            [scene.reference_asset, ...scene.assets.filter((asset) => asset.id !== scene.reference_asset?.id)].filter(\n                (asset) => asset !== null,\n            ),\n        );\n        // \u89D2\u8272\n        const graphScene = map.graph.scenes.find((node) => String(node.id) === scene.id);\n        // \u89D2\u8272\u540D\n        const names = (graphScene?.character_ids ?? [])\n            .map((id) => indexes.characters.get(String(id))?.name ?? String(id))\n            .join("\u3001");\n        panel.append(mapRow("\u51FA\u573A\u89D2\u8272", names === "" ? "\u65E0" : names));\n        container.append(panel);\n        return;\n    }\n    // \u89D2\u8272\n    const character = indexes.characters.get(mapFocus.id);\n    if (character === undefined) {\n        panel.append(createElement("p", "muted", "\u89D2\u8272\u4E0D\u5728\u672C\u96C6\u8D44\u4EA7\u76EE\u5F55\u4E2D\u3002"));\n        container.append(panel);\n        return;\n    }\n    panel.append(mapRow("\u89D2\u8272\u5B9A\u4F4D", character.role ?? "\u672A\u6807\u6CE8"));\n    // \u5F62\u6001\n    const forms =\n        mapFocus.form === null || mapFocus.form === undefined\n            ? character.forms\n            : character.forms.filter((form) => form.id === mapFocus.form);\n    for (const form of forms) {\n        const section = createElement("div", "map-detail-section");\n        section.append(\n            createElement(\n                "p",\n                "map-detail-label",\n                `${form.name} \xB7 ${form.id}${form.used ? `\uFF08${form.event_count} \u955C\uFF09` : "\uFF08\u672C\u96C6\u672A\u4F7F\u7528\uFF09"}`,\n            ),\n        );\n        section.append(mapRow("\u4E3B\u53C2\u8003", assetStatusLabel(assetStatus(form.reference_asset))));\n        mapAssetList(\n            section,\n            [form.reference_asset, ...form.assets.filter((asset) => asset.id !== form.reference_asset?.id)].filter(\n                (asset) => asset !== null,\n            ),\n        );\n        panel.append(section);\n    }\n    // \u573A\u666F\n    const graphCharacter = map.graph.characters.find((node) => String(node.id) === character.id);\n    // \u573A\u666F\u540D\n    const sceneNames = (graphCharacter?.scene_ids ?? [])\n        .map((id) => indexes.scenes.get(String(id))?.name ?? String(id))\n        .join("\u3001");\n    panel.append(mapRow("\u51FA\u73B0\u573A\u666F", sceneNames === "" ? "\u65E0" : sceneNames));\n    // \u5171\u73B0\n    const cooccur = map.graph.cooccurrence_edges.filter((edge) => edge.a === character.id || edge.b === character.id);\n    // \u5171\u73B0\u6587\u6848\n    const cooccurText = cooccur\n        .map((edge) => {\n            // \u5BF9\u65B9\n            const other = edge.a === character.id ? String(edge.b) : String(edge.a);\n            return `${indexes.characters.get(other)?.name ?? other}\uFF08${edge.event_count} \u955C\uFF09`;\n        })\n        .join("\u3001");\n    panel.append(mapRow("\u5171\u73B0\u89D2\u8272", cooccurText === "" ? "\u65E0" : cooccurText));\n    // \u751F\u6210\u4F7F\u7528\n    const related = map.generation.events.filter((event) => event.cast.some((cast) => cast.id === character.id));\n    // \u5C31\u7EEA\u6570\n    const ready = related.filter((event) => event.ready).length;\n    panel.append(mapRow("\u751F\u6210\u4E0A\u4E0B\u6587", `${related.length} \u955C\u76F8\u5173 \xB7 ${ready} \u53EF\u751F\u6210 \xB7 ${related.length - ready} \u963B\u585E`));\n    container.append(panel);\n}\n\n/**\n * \u62D3\u6251\u8282\u70B9\u3002\n */\nfunction renderTopologyNode(svg, x, y, node, refresh) {\n    // \u5206\u7EC4\n    const group = svgNode("g", {\n        class: `map-node status-${node.status}`,\n        tabindex: "0",\n        role: "button",\n        "aria-label": `${node.kind === "scene" ? "\u573A\u666F" : "\u89D2\u8272"} ${node.name}`,\n    });\n    // \u80CC\u666F\n    group.append(\n        svgNode("rect", { x, y, width: MAP_NODE_WIDTH, height: MAP_NODE_HEIGHT, rx: 10, class: "map-node-bg" }),\n    );\n    // \u5934\u50CF\n    group.append(svgNode("circle", { cx: x + 22, cy: y + 24, r: 13, class: "map-node-avatar" }));\n    // \u9996\u5B57\n    const initial = svgNode("text", { x: x + 22, y: y + 28, class: "map-node-initial", "text-anchor": "middle" });\n    initial.textContent = node.name.slice(0, 1);\n    group.append(initial);\n    // \u540D\u79F0\n    const name = svgNode("text", { x: x + 42, y: y + 21, class: "map-node-name" });\n    name.textContent = node.name;\n    group.append(name);\n    // \u526F\u6807\u9898\n    const subtitle = svgNode("text", { x: x + 42, y: y + 37, class: "map-node-sub" });\n    subtitle.textContent = node.subtitle;\n    group.append(subtitle);\n    // \u63D0\u793A\n    const title = svgNode("title");\n    title.textContent = `${node.name} \xB7 ${node.status === "warn" ? "\u8D44\u4EA7\u5F02\u5E38" : "\u5C31\u7EEA"}`;\n    group.append(title);\n    // \u7126\u70B9\n    const focus = () => {\n        mapFocus = { kind: node.kind === "scene" ? "scene" : "character", id: node.id, form: node.form ?? null };\n        refresh();\n    };\n    group.addEventListener("click", focus);\n    group.addEventListener("keydown", (event) => {\n        if (event.key === "Enter" || event.key === " ") {\n            event.preventDefault();\n            focus();\n        }\n    });\n    // \u805A\u7126 / \u6DE1\u51FA\n    if (node.kind === "scene") {\n        if (mapFocus !== null && mapFocus.kind === "scene")\n            group.classList.add(mapFocus.id === node.id ? "is-focus" : "is-dim");\n    } else if (mapFocus !== null && mapFocus.kind === "character") {\n        group.classList.add(mapFocus.id === node.id ? "is-focus" : "is-dim");\n    }\n    svg.append(group);\n}\n\n/**\n * \u62D3\u6251\u56FE\u3002\n */\nfunction renderMapTopology(container, map, refresh) {\n    // \u7D22\u5F15\n    const indexes = mapIndexes(map);\n    // \u5DE6\u5217\u8282\u70B9\n    const left = [];\n    for (const node of map.graph.characters) {\n        // \u89D2\u8272\n        const character = indexes.characters.get(String(node.id));\n        // \u5F62\u6001\u8282\u70B9\n        const forms = Array.isArray(node.forms) ? node.forms : [];\n        if (mapMode === "form") {\n            for (const formNode of forms) {\n                // \u5F62\u6001\n                const form = formOf(character, String(formNode.id));\n                left.push({\n                    key: `form:${node.id}/${formNode.id}`,\n                    kind: "form",\n                    id: String(node.id),\n                    form: String(formNode.id),\n                    name: `${String(node.name ?? node.id)} \xB7 ${String(formNode.name ?? formNode.id)}`,\n                    subtitle: character?.role ?? "",\n                    status:\n                        form !== null && form.used && assetStatus(form.reference_asset) !== "ready" ? "warn" : "ready",\n                });\n            }\n            continue;\n        }\n        // \u4F7F\u7528\u5F62\u6001\n        const usedForms = forms\n            .map((formNode) => formOf(character, String(formNode.id)))\n            .filter((form) => form !== null && form.used);\n        left.push({\n            key: `character:${node.id}`,\n            kind: "character",\n            id: String(node.id),\n            form: null,\n            name: String(node.name ?? node.id),\n            subtitle: forms.map((formNode) => String(formNode.name ?? formNode.id)).join(" / "),\n            status: usedForms.some((form) => assetStatus(form.reference_asset) !== "ready") ? "warn" : "ready",\n        });\n    }\n    // \u573A\u666F\u8282\u70B9\n    const scenes = map.graph.scenes.map((node) => {\n        // \u573A\u666F\n        const scene = indexes.scenes.get(String(node.id));\n        return {\n            key: `scene:${node.id}`,\n            kind: "scene",\n            id: String(node.id),\n            form: null,\n            name: String(node.name ?? node.id),\n            subtitle: scene?.time_of_day ?? "",\n            status:\n                scene !== undefined && scene.used && assetStatus(scene.reference_asset) !== "ready" ? "warn" : "ready",\n        };\n    });\n    // \u884C\u6570\n    const rows = Math.max(left.length, scenes.length);\n    // \u9AD8\u5EA6\n    const height = MAP_TOP * 2 + rows * MAP_ROW_HEIGHT;\n    // SVG\n    const svg = svgNode("svg", {\n        viewBox: `0 0 ${MAP_WIDTH} ${height}`,\n        class: "map-graph",\n        role: "img",\n        "aria-label": "\u89D2\u8272\u3001\u5F62\u6001\u4E0E\u573A\u666F\u5173\u7CFB\u56FE",\n    });\n    // \u5DE6\u5217\u4F4D\u7F6E\n    const leftPositions = new Map();\n    for (const [index, node] of left.entries()) {\n        leftPositions.set(node.key, { x: MAP_LEFT_X, y: MAP_TOP + index * MAP_ROW_HEIGHT, node });\n    }\n    // \u53F3\u5217\u4F4D\u7F6E\n    const rightPositions = new Map();\n    for (const [index, node] of scenes.entries()) {\n        rightPositions.set(node.key, { x: MAP_RIGHT_X, y: MAP_TOP + index * MAP_ROW_HEIGHT, node });\n    }\n    // \u8FB9\n    const edges = mapMode === "form" ? map.graph.form_scene_edges : map.graph.character_scene_edges;\n    for (const edge of edges) {\n        // \u5DE6\u952E\n        const leftKey =\n            mapMode === "form" ? `form:${edge.character_id}/${edge.form_id}` : `character:${edge.character_id}`;\n        // \u7AEF\u70B9\n        const from = leftPositions.get(leftKey);\n        const to = rightPositions.get(`scene:${edge.scene_id}`);\n        if (from === undefined || to === undefined) continue;\n        // \u6B21\u6570\n        const count = Number(edge.event_count) || 1;\n        // \u8DEF\u5F84\n        const path = svgNode("path", {\n            d: `M ${from.x + MAP_NODE_WIDTH} ${from.y + MAP_NODE_HEIGHT / 2} C ${(from.x + MAP_NODE_WIDTH + to.x) / 2} ${from.y + MAP_NODE_HEIGHT / 2}, ${(from.x + MAP_NODE_WIDTH + to.x) / 2} ${to.y + MAP_NODE_HEIGHT / 2}, ${to.x} ${to.y + MAP_NODE_HEIGHT / 2}`,\n            class: "map-edge",\n            "stroke-width": 1.5 + Math.min(4, Math.sqrt(count) * 1.2),\n            opacity: 0.25 + Math.min(0.55, count * 0.08),\n        });\n        // \u63D0\u793A\n        const title = svgNode("title");\n        title.textContent = `${from.node.name} \u2192 ${to.node.name}\uFF1A${count} \u955C`;\n        path.append(title);\n        // \u805A\u7126\n        if (mapFocus !== null) {\n            // \u662F\u5426\u76F8\u5173\n            const related = mapFocus.kind === "scene" ? to.node.id === mapFocus.id : from.node.id === mapFocus.id;\n            if (!related) path.classList.add("is-dim");\n        }\n        svg.append(path);\n    }\n    // \u5171\u73B0\u5F27\n    if (mapMode === "character") {\n        const arcs = map.graph.cooccurrence_edges.slice(0, MAP_MAX_ARCS);\n        for (const edge of arcs) {\n            // \u7AEF\u70B9\n            const from = leftPositions.get(`character:${edge.a}`);\n            const to = leftPositions.get(`character:${edge.b}`);\n            if (from === undefined || to === undefined) continue;\n            // \u8DEF\u5F84\n            const path = svgNode("path", {\n                d: `M ${from.x} ${from.y + MAP_NODE_HEIGHT / 2} C ${Math.max(4, from.x - 30)} ${from.y + MAP_NODE_HEIGHT / 2}, ${Math.max(4, to.x - 30)} ${to.y + MAP_NODE_HEIGHT / 2}, ${to.x} ${to.y + MAP_NODE_HEIGHT / 2}`,\n                class: "map-cooccur",\n            });\n            // \u63D0\u793A\n            const title = svgNode("title");\n            title.textContent = `\u5171\u73B0\uFF1A${from.node.name} / ${to.node.name}\uFF08${edge.event_count} \u955C\uFF09`;\n            path.append(title);\n            svg.append(path);\n        }\n        // \u53D9\u4E8B\u5173\u7CFB\n        for (const relation of map.relations.slice(0, MAP_MAX_ARCS)) {\n            // \u7AEF\u70B9\n            const from = leftPositions.get(`character:${relation.from}`);\n            const to = leftPositions.get(`character:${relation.to}`);\n            if (from === undefined || to === undefined) continue;\n            // \u8DEF\u5F84\n            const path = svgNode("path", {\n                d: `M ${from.x} ${from.y + MAP_NODE_HEIGHT / 2} C ${Math.max(4, from.x - 50)} ${from.y + MAP_NODE_HEIGHT / 2}, ${Math.max(4, to.x - 50)} ${to.y + MAP_NODE_HEIGHT / 2}, ${to.x} ${to.y + MAP_NODE_HEIGHT / 2}`,\n                class: "map-relation",\n            });\n            // \u6807\u7B7E\n            const label = svgNode("text", {\n                x: Math.max(12, MAP_LEFT_X - 120),\n                y: (from.y + to.y) / 2 + MAP_NODE_HEIGHT / 2,\n                class: "map-relation-label",\n            });\n            label.textContent = relation.label;\n            svg.append(path, label);\n        }\n    }\n    // \u8282\u70B9\n    for (const node of left) {\n        // \u4F4D\u7F6E\n        const position = leftPositions.get(node.key);\n        if (position !== undefined) renderTopologyNode(svg, position.x, position.y, node, refresh);\n    }\n    for (const node of scenes) {\n        // \u4F4D\u7F6E\n        const position = rightPositions.get(node.key);\n        if (position !== undefined) renderTopologyNode(svg, position.x, position.y, node, refresh);\n    }\n    // \u5BB9\u5668\n    const wrap = createElement("div", "map-graph-wrap");\n    wrap.append(svg);\n    container.append(wrap);\n    // \u56FE\u4F8B\n    const legend = createElement("div", "map-legend");\n    legend.append(createElement("span", "", "\u5B9E\u7EBF\uFF1A\u89D2\u8272 / \u5F62\u6001\u51FA\u73B0\u5728\u573A\u666F"));\n    legend.append(createElement("span", "", "\u865A\u7EBF\uFF1A\u5171\u73B0\u6216\u53D9\u4E8B\u5173\u7CFB"));\n    legend.append(createElement("span", "", "\u7EBF\u5BBD\uFF1A\u51FA\u573A\u955C\u5934\u6570"));\n    container.append(legend);\n    // \u8BE6\u60C5\n    renderMapDetail(container, map, refresh);\n}\n\n/**\n * \u65F6\u5E8F\u4E8B\u4EF6\u8BE6\u60C5\u3002\n */\nfunction renderTimelineDetail(container, event, gen, map, indexes) {\n    // \u5185\u5BB9\n    const body = createElement("div", "map-event-detail");\n    // workflow\n    body.append(mapRow("Workflow", gen?.assigned_workflow ?? "\u672A\u6307\u5B9A"));\n    body.append(mapRow("\u6765\u6E90", gen?.workflow_source ?? "none"));\n    // \u69FD\u4F4D\n    if (gen?.workflow !== null && gen?.workflow !== undefined) {\n        const slots = createElement("div", "map-slots");\n        for (const slot of gen.workflow.slots) {\n            // \u69FD\u4F4D\n            const row = createElement("div", "map-slot");\n            row.append(createElement("span", "mono", `${slot.slot} \u2192 ${slot.target}`));\n            row.append(createElement("span", "", `${slot.owner ?? "\u2014"} \xB7 ${slot.asset?.id ?? "\u2014"}`));\n            row.append(badge(slot.status, `map-slot-${slot.status}`));\n            slots.append(row);\n        }\n        if (gen.workflow.slots.length > 0) {\n            body.append(createElement("p", "map-detail-label", "\u8D44\u4EA7\u69FD\u4F4D"));\n            body.append(slots);\n        }\n    }\n    // \u5019\u9009 workflow\n    if (gen !== undefined && gen.candidate_workflows.length > 0) {\n        const section = createElement("div", "map-detail-section");\n        section.append(createElement("p", "map-detail-label", "\u5019\u9009 workflow"));\n        for (const candidate of gen.candidate_workflows) {\n            // \u5019\u9009\u884C\n            const row = createElement("div", "map-slot");\n            row.append(createElement("span", "mono", candidate.name));\n            row.append(badge(candidate.fit, `map-fit-${candidate.fit}`));\n            if (candidate.reasons.length > 0) row.append(createElement("span", "muted", candidate.reasons.join("\uFF1B")));\n            section.append(row);\n        }\n        body.append(section);\n    }\n    // \u89D2\u8272\u8D44\u4EA7\n    const cast = createElement("div", "map-detail-section");\n    cast.append(createElement("p", "map-detail-label", "\u89D2\u8272\u4E0E\u5F62\u6001"));\n    for (const item of event.characters) {\n        // \u89D2\u8272\n        const character = indexes.characters.get(item.id);\n        // \u5F62\u6001\n        const form = formOf(character, item.form);\n        cast.append(\n            mapRow(\n                `${item.name} \xB7 ${item.form_name}`,\n                `${assetStatusLabel(assetStatus(form?.reference_asset))} \xB7 ${form?.assets.length ?? 0} \u4E2A\u8D44\u4EA7`,\n            ),\n        );\n        mapAssetList(\n            cast,\n            [\n                form?.reference_asset,\n                ...(form?.assets ?? []).filter((asset) => asset.id !== form?.reference_asset?.id),\n            ].filter((asset) => asset !== null && asset !== undefined),\n        );\n    }\n    body.append(cast);\n    // \u573A\u666F\u8D44\u4EA7\n    const scene = indexes.scenes.get(event.scene?.id ?? "");\n    if (scene !== undefined) {\n        const section = createElement("div", "map-detail-section");\n        section.append(createElement("p", "map-detail-label", `\u573A\u666F \xB7 ${scene.name}`));\n        mapAssetList(\n            section,\n            [scene.reference_asset, ...scene.assets.filter((asset) => asset.id !== scene.reference_asset?.id)].filter(\n                (asset) => asset !== null,\n            ),\n        );\n        body.append(section);\n    }\n    // \u97F3\u8272\n    if (gen !== undefined && gen.voices.length > 0) {\n        const section = createElement("div", "map-detail-section");\n        section.append(createElement("p", "map-detail-label", "\u97F3\u8272"));\n        for (const voice of gen.voices)\n            section.append(mapRow(voice.voice_id, voice.reference_present ? "\u53C2\u8003\u97F3\u9891\u53EF\u7528" : "\u53C2\u8003\u97F3\u9891\u7F3A\u5931"));\n        body.append(section);\n    }\n    // \u8FDE\u7EED\u6027\n    if (gen !== undefined) {\n        const section = createElement("div", "map-detail-section");\n        section.append(createElement("p", "map-detail-label", "\u8FDE\u7EED\u6027"));\n        section.append(mapRow("\u573A\u666F", gen.continuity.scene_changed ? "\u5207\u6362" : "\u5EF6\u7EED"));\n        section.append(\n            mapRow(\n                "\u5F62\u6001\u53D8\u5316",\n                gen.continuity.form_changes.length === 0\n                    ? "\u65E0"\n                    : gen.continuity.form_changes\n                          .map((change) => `${change.character_id}: ${change.from} \u2192 ${change.to}`)\n                          .join("\uFF1B"),\n            ),\n        );\n        section.append(\n            mapRow(\n                "Relay",\n                `${gen.continuity.relay_from ?? "\u65E0"} \u2192 ${gen.continuity.relay_targets.join(" / ") || "\u65E0"}`,\n            ),\n        );\n        section.append(mapRow("Anchor", gen.continuity.anchor?.path ?? "\u65E0"));\n        body.append(section);\n    }\n    // \u6E32\u67D3\n    if (gen !== undefined) {\n        const section = createElement("div", "map-detail-section");\n        section.append(createElement("p", "map-detail-label", "\u6E32\u67D3"));\n        section.append(mapRow("Run", `${gen.render.runs_count} \u6B21 \xB7 ${gen.render.succeeded_count} \u6210\u529F`));\n        section.append(mapRow("\u6700\u65B0\u72B6\u6001", gen.render.latest_status ?? "\u672A\u751F\u6210"));\n        if (gen.render.finalized_run_id !== null && gen.render.finalized_run_id !== undefined) {\n            section.append(\n                mapRow("\u5B9A\u7A3F\u7A3F\u4EF6", `${gen.render.finalized_run_id} / ${gen.render.finalized_outputs[0]?.name ?? ""}`),\n            );\n        }\n        if (gen.render.latest_error !== null) section.append(mapRow("\u9519\u8BEF", gen.render.latest_error));\n        // \u4EA7\u7269\n        const outputs = createElement("div", "map-assets");\n        // \u5B9A\u7A3F\u7A3F\u4EF6\u4F18\u5148\u5C55\u793A\n        const renderOutputs =\n            gen.render.finalized_outputs !== undefined && gen.render.finalized_outputs.length > 0\n                ? gen.render.finalized_outputs\n                : gen.render.latest_outputs;\n        for (const output of renderOutputs) {\n            // \u6253\u5F00\u6309\u94AE\n            const button = createElement(\n                "button",\n                "button ghost",\n                `${output.kind === "video" ? "\u64AD\u653E" : output.kind === "image" ? "\u67E5\u770B" : "\u6253\u5F00"} ${output.name}`,\n            );\n            button.type = "button";\n            button.addEventListener("click", () => {\n                if (output.kind === "video" || output.kind === "audio")\n                    openPlayer([{ title: output.name, url: output.media_url, kind: output.kind }], 0);\n                else if (output.kind === "image") openImageUrl(output.media_url, output.name);\n                else window.open(output.media_url, "_blank", "noopener");\n            });\n            outputs.append(button);\n        }\n        if (outputs.childElementCount > 0) section.append(outputs);\n        body.append(section);\n    }\n    // \u7F3A\u53E3\n    if (gen !== undefined && gen.gaps.length > 0) {\n        const section = createElement("div", "map-detail-section");\n        section.append(createElement("p", "map-detail-label", "\u7F3A\u53E3"));\n        for (const gap of gen.gaps) {\n            // \u7F3A\u53E3\n            const row = createElement("div", `map-gap ${gap.severity === "blocker" ? "is-blocker" : ""}`);\n            row.append(createElement("span", "mono", gap.code));\n            row.append(createElement("span", "", gap.message));\n            row.append(createElement("span", "muted", gap.hint));\n            section.append(row);\n        }\n        body.append(section);\n    }\n    container.append(body);\n}\n\n/**\n * \u65F6\u5E8F\u4E8B\u4EF6\u3002\n */\nfunction renderTimelineEvent(event, gen, map, indexes, refresh) {\n    // \u5BB9\u5668\n    const item = createElement("article", "timeline-event");\n    if (event.importance === "major") item.classList.add("is-major");\n    if (gen !== undefined && !gen.ready) item.classList.add("is-blocked");\n    // \u65F6\u95F4\n    const time = createElement("div", "timeline-time");\n    // \u65F6\u95F4\u6587\u6848\n    const timecode =\n        map.time.basis === "order"\n            ? `#${event.shot_id}`\n            : `${event.at_estimated ? "~" : ""}${formatTimecode(event.at_seconds)}`;\n    time.append(createElement("span", "timeline-timecode mono", timecode));\n    time.append(\n        createElement(\n            "span",\n            "muted",\n            event.duration_seconds !== null ? formatSeconds(event.duration_seconds) : "\u65F6\u957F\u672A\u77E5",\n        ),\n    );\n    if (event.story_time !== null) time.append(createElement("span", "timeline-story-time", event.story_time));\n    item.append(time);\n    // \u4E3B\u4F53\n    const main = createElement("div", "timeline-main");\n    const titleRow = createElement("div", "timeline-title-row");\n    titleRow.append(createElement("span", "shot-id", event.shot_id));\n    titleRow.append(createElement("h4", "timeline-title", event.title));\n    titleRow.append(mapImportanceBadge(event.importance));\n    titleRow.append(badge(gen?.assigned_workflow ?? "\u672A\u6307\u5B9A", "map-workflow"));\n    titleRow.append(mapReadyBadge(gen));\n    titleRow.append(mapRenderBadge(gen));\n    main.append(titleRow);\n    main.append(createElement("p", "timeline-summary", event.summary));\n    // chips\n    const chips = createElement("div", "chip-row");\n    if (event.scene !== null) {\n        // \u573A\u666F chip\n        const sceneChip = createElement("button", "chip chip-scene map-chip-button", event.scene.name);\n        sceneChip.type = "button";\n        sceneChip.addEventListener("click", () => {\n            mapFocus = { kind: "scene", id: event.scene.id };\n            refresh();\n        });\n        chips.append(sceneChip);\n    }\n    for (const character of event.characters) {\n        // \u89D2\u8272 chip\n        const chip = createElement(\n            "button",\n            "chip chip-character map-chip-button",\n            `${character.name} \xB7 ${character.form_name}`,\n        );\n        chip.type = "button";\n        chip.addEventListener("click", () => {\n            mapFocus = { kind: "character", id: character.id };\n            refresh();\n        });\n        chips.append(chip);\n    }\n    for (const beat of event.beats) {\n        chips.append(badge(beat.id, "map-beat"));\n    }\n    if (event.dialogue_count > 0) chips.append(createElement("span", "muted", `${event.dialogue_count} \u53E5\u53F0\u8BCD`));\n    main.append(chips);\n    // \u64CD\u4F5C\n    const actions = createElement("div", "timeline-actions");\n    const locate = createElement("button", "button ghost", "\u5B9A\u4F4D\u5206\u955C");\n    locate.type = "button";\n    locate.addEventListener("click", () => {\n        // \u76EE\u6807\u4EFB\u52A1\n        const target = document.getElementById(`shot-${event.shot_id}`);\n        if (target !== null) target.scrollIntoView({ behavior: "smooth", block: "start" });\n    });\n    actions.append(locate);\n    main.append(actions);\n    // \u8BE6\u60C5\n    const details = createElement("details", "timeline-details");\n    details.append(createElement("summary", "", "\u751F\u6210\u4E0A\u4E0B\u6587"));\n    // \u8BE6\u60C5\u5BB9\u5668\n    const detailBody = createElement("div");\n    renderTimelineDetail(detailBody, event, gen, map, indexes);\n    details.append(detailBody);\n    main.append(details);\n    item.append(main);\n    return item;\n}\n\n/**\n * \u65F6\u5E8F\u56FE\u3002\n */\nfunction renderMapTimeline(container, map, refresh) {\n    // \u7D22\u5F15\n    const indexes = mapIndexes(map);\n    // \u8FC7\u6EE4\n    let events = map.events.slice();\n    if (mapFocus !== null && mapFocus.kind === "character")\n        events = events.filter((event) => event.characters.some((character) => character.id === mapFocus.id));\n    if (mapFocus !== null && mapFocus.kind === "scene")\n        events = events.filter((event) => event.scene?.id === mapFocus.id);\n    if (mapOnlyMajor) events = events.filter((event) => event.importance === "major");\n    if (mapBlockedOnly) events = events.filter((event) => indexes.generation.get(event.shot_id)?.ready !== true);\n    if (events.length === 0) {\n        container.append(emptyNode("\u5F53\u524D\u7B5B\u9009\u6CA1\u6709\u4E8B\u4EF6", "\u6E05\u9664\u7B5B\u9009\u540E\u67E5\u770B\u5168\u90E8\u4E8B\u4EF6\u3002"));\n        return;\n    }\n    // \u603B\u89C8\n    const overview = createElement("div", "timeline-overview");\n    for (const event of map.events) {\n        // \u7247\u6BB5\n        const segment = createElement("button", `timeline-seg ${sceneTone(indexes, event.scene?.id)}`);\n        segment.type = "button";\n        segment.style.flexGrow = String(event.duration_seconds ?? 1);\n        segment.title = `${formatTimecode(event.at_seconds)} ${event.title}`;\n        if (event.importance === "major") segment.classList.add("is-major");\n        segment.addEventListener("click", () => {\n            // \u76EE\u6807\u4EFB\u52A1\n            const target = document.getElementById(`map-event-${event.shot_id}`);\n            if (target !== null) target.scrollIntoView({ behavior: "smooth", block: "center" });\n        });\n        overview.append(segment);\n    }\n    container.append(overview);\n    // \u5217\u8868\n    const list = createElement("div", "timeline-list");\n    for (const event of events) {\n        // \u751F\u6210\u4E0A\u4E0B\u6587\n        const gen = indexes.generation.get(event.shot_id);\n        // \u4E8B\u4EF6\u8282\u70B9\n        const item = renderTimelineEvent(event, gen, map, indexes, refresh);\n        item.id = `map-event-${event.shot_id}`;\n        list.append(item);\n    }\n    container.append(list);\n}\n\n/**\n * \u5267\u60C5\u56FE\u8C31\u533A\u5757\u3002\n */\nfunction renderStoryMap(map) {\n    // \u533A\u5757\n    const section = createElement("section", "map-section");\n    if (map === null || map === undefined) {\n        section.append(emptyNode("\u5267\u60C5\u56FE\u8C31\u4E0D\u53EF\u7528", "\u5F53\u524D\u5267\u96C6\u8FD8\u6CA1\u6709\u53EF\u89E3\u6790\u7684\u56FE\u8C31\u6570\u636E\u3002"));\n        return section;\n    }\n    // \u5934\u90E8\n    const head = createElement("div", "section-head");\n    // \u6807\u9898\u533A\n    const heading = createElement("div");\n    heading.append(createElement("h3", "section-title", "\u5267\u60C5\u56FE\u8C31"));\n    // \u7EDF\u8BA1\n    const counts = map.generation.readiness.counts;\n    heading.append(\n        createElement(\n            "p",\n            "map-subtitle",\n            `${map.events.length} \u4E8B\u4EF6 \xB7 ${map.catalog.characters.length} \u89D2\u8272 \xB7 ${map.catalog.scenes.length} \u573A\u666F \xB7 \u53EF\u751F\u6210 ${counts.ready} / \u963B\u585E ${counts.blocked} / \u5DF2\u751F\u6210 ${counts.rendered}`,\n        ),\n    );\n    head.append(heading);\n    // Tab\n    const tabs = createElement("div", "map-tabs");\n    const graphTab = createElement("button", "map-tab", "\u62D3\u6251\u56FE");\n    graphTab.type = "button";\n    const timelineTab = createElement("button", "map-tab", "\u65F6\u5E8F\u56FE");\n    timelineTab.type = "button";\n    tabs.append(graphTab, timelineTab);\n    head.append(tabs);\n    section.append(head);\n    // \u6765\u6E90\n    const origin = createElement(\n        "p",\n        "map-origin",\n        `${map.origin.annotated ? `\u542B ${map.origin.author} \u53D9\u4E8B\u6807\u6CE8` : "dycli \u81EA\u52A8\u63A8\u5BFC"}${map.origin.stale ? " \xB7 \u6807\u6CE8\u57FA\u4E8E\u65E7\u5206\u955C" : ""}`,\n    );\n    section.append(origin);\n    // \u8B66\u544A\n    if (map.warnings.length > 0) {\n        const callout = createElement("div", "callout warn map-warning");\n        callout.append(createElement("strong", "", `\u56FE\u8C31\u63D0\u793A ${map.warnings.length} \u9879`));\n        const list = createElement("ul", "mini-list");\n        for (const warning of map.warnings.slice(0, 8)) list.append(createElement("li", "", warning.message));\n        callout.append(list);\n        section.append(callout);\n    }\n    // \u4E3B\u4F53\n    const body = createElement("div", "map-body");\n    section.append(body);\n    /**\n     * \u5237\u65B0\u4E3B\u4F53\u3002\n     */\n    function refresh() {\n        // Tab \u72B6\u6001\n        graphTab.classList.toggle("is-active", mapTab === "graph");\n        graphTab.setAttribute("aria-selected", mapTab === "graph" ? "true" : "false");\n        timelineTab.classList.toggle("is-active", mapTab === "timeline");\n        timelineTab.setAttribute("aria-selected", mapTab === "timeline" ? "true" : "false");\n        clearNode(body);\n        if (map.events.length === 0) {\n            body.append(emptyNode("\u8FD8\u6CA1\u6709\u53EF\u5206\u6790\u7684\u955C\u5934", "\u5148\u5199\u5165\u672C\u96C6\u5206\u955C\uFF0C\u518D\u67E5\u770B\u89D2\u8272\u3001\u5F62\u6001\u3001\u573A\u666F\u4E0E\u751F\u6210\u4E0A\u4E0B\u6587\u3002"));\n            return;\n        }\n        body.append(renderMapToolbar(map, refresh));\n        if (mapTab === "timeline") renderMapTimeline(body, map, refresh);\n        else renderMapTopology(body, map, refresh);\n    }\n    graphTab.addEventListener("click", () => {\n        mapTab = "graph";\n        refresh();\n    });\n    timelineTab.addEventListener("click", () => {\n        mapTab = "timeline";\n        refresh();\n    });\n    refresh();\n    return section;\n}\n\n/**\n * \u56FE\u8C31\u5DE5\u5177\u680F\u3002\n */\nfunction renderMapToolbar(map, refresh) {\n    // \u5DE5\u5177\u680F\n    const bar = createElement("div", "map-toolbar");\n    // \u7B5B\u9009 chip\n    if (mapFocus !== null) {\n        const chip = createElement("span", "map-filter", mapFocusLabel(map, mapFocus));\n        const clear = createElement("button", "map-filter-clear", "\xD7");\n        clear.type = "button";\n        clear.setAttribute("aria-label", "\u6E05\u9664\u56FE\u8C31\u7B5B\u9009");\n        clear.addEventListener("click", () => {\n            mapFocus = null;\n            refresh();\n        });\n        chip.append(clear);\n        bar.append(chip);\n    }\n    // \u6A21\u5F0F / \u8FC7\u6EE4\n    const group = createElement("div", "map-toolbar-group");\n    if (mapTab === "graph") {\n        const characterButton = createElement("button", "button ghost map-toggle", "\u6309\u89D2\u8272");\n        characterButton.type = "button";\n        characterButton.classList.toggle("is-active", mapMode === "character");\n        characterButton.addEventListener("click", () => {\n            mapMode = "character";\n            refresh();\n        });\n        const formButton = createElement("button", "button ghost map-toggle", "\u6309\u5F62\u6001");\n        formButton.type = "button";\n        formButton.classList.toggle("is-active", mapMode === "form");\n        formButton.addEventListener("click", () => {\n            mapMode = "form";\n            refresh();\n        });\n        group.append(characterButton, formButton);\n    } else {\n        const majorButton = createElement("button", "button ghost map-toggle", "\u53EA\u770B\u5173\u952E\u4E8B\u4EF6");\n        majorButton.type = "button";\n        majorButton.classList.toggle("is-active", mapOnlyMajor);\n        majorButton.addEventListener("click", () => {\n            mapOnlyMajor = !mapOnlyMajor;\n            refresh();\n        });\n        const blockedButton = createElement("button", "button ghost map-toggle", "\u53EA\u770B\u963B\u585E");\n        blockedButton.type = "button";\n        blockedButton.classList.toggle("is-active", mapBlockedOnly);\n        blockedButton.addEventListener("click", () => {\n            mapBlockedOnly = !mapBlockedOnly;\n            refresh();\n        });\n        group.append(majorButton, blockedButton);\n    }\n    bar.append(group);\n    return bar;\n}\n\n/**\n * \u89D2\u8272\u9875\u3002\n */\nfunction renderCharacters(data) {\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", "Characters"));\n    headText.append(createElement("h2", "page-title", "\u89D2\u8272\u4E0E\u5F62\u6001"));\n    headText.append(createElement("p", "page-subtitle", "\u8DE8\u96C6\u5171\u4EAB\u7684\u5168\u5C40\u8BBE\u5B9A\uFF1B\u4E3B\u53C2\u8003\u7531 AI / \u7528\u6237\u663E\u5F0F\u6307\u5B9A\u3002"));\n    head.append(headText);\n    viewRoot.append(head);\n    // \u89D2\u8272\n    const items = Array.isArray(data.items) ? data.items : [];\n    if (items.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u89D2\u8272", "\u4F7F\u7528 daoyan story characters set \u5199\u5165\u5168\u5C40\u89D2\u8272\u3002"));\n        return;\n    }\n    const grid = createElement("div", "grid");\n    for (const character of items) {\n        // \u5361\u7247\n        const card = createElement("article", "card entity-card");\n        const body = createElement("div", "card-body");\n        body.append(createElement("h3", "card-title", `${character.name} \xB7 ${character.id}`));\n        body.append(createElement("p", "muted", character.summary ?? ""));\n        for (const form of character.forms) {\n            // \u5F62\u6001\n            const block = createElement("div", "form-block");\n            block.append(createElement("h4", "form-title", `${form.name} \xB7 ${form.id}`));\n            // \u4E3B\u53C2\u8003\n            const reference = form.reference_asset\n                ? form.assets.find((asset) => asset.id === form.reference_asset)\n                : null;\n            block.append(assetNode(reference, false));\n            // \u5176\u5B83\u8D44\u4EA7\n            const more = createElement("div", "asset-row");\n            for (const asset of form.assets) {\n                if (reference !== null && asset.id === reference.id) continue;\n                more.append(assetNode(asset, true));\n            }\n            if (more.childElementCount > 0) block.append(more);\n            body.append(block);\n        }\n        card.append(body);\n        grid.append(card);\n    }\n    viewRoot.append(grid);\n}\n\n/**\n * \u573A\u666F\u9875\u3002\n */\nfunction renderScenes(data) {\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", "Scenes"));\n    headText.append(createElement("h2", "page-title", "\u573A\u666F"));\n    headText.append(createElement("p", "page-subtitle", "\u8DE8\u96C6\u5171\u4EAB\u7684\u573A\u666F\u53C2\u8003\u8D44\u4EA7\u3002"));\n    head.append(headText);\n    viewRoot.append(head);\n    // \u573A\u666F\n    const items = Array.isArray(data.items) ? data.items : [];\n    if (items.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u573A\u666F", "\u4F7F\u7528 daoyan story scenes set \u5199\u5165\u5168\u5C40\u573A\u666F\u3002"));\n        return;\n    }\n    const grid = createElement("div", "grid");\n    for (const scene of items) {\n        // \u5361\u7247\n        const card = createElement("article", "card entity-card");\n        const body = createElement("div", "card-body");\n        body.append(createElement("h3", "card-title", `${scene.name} \xB7 ${scene.id}`));\n        body.append(createElement("p", "muted", scene.description ?? ""));\n        const reference = scene.reference_asset\n            ? scene.assets.find((asset) => asset.id === scene.reference_asset)\n            : null;\n        body.append(assetNode(reference, false));\n        const more = createElement("div", "asset-row");\n        for (const asset of scene.assets) {\n            if (reference !== null && asset.id === reference.id) continue;\n            more.append(assetNode(asset, true));\n        }\n        if (more.childElementCount > 0) body.append(more);\n        card.append(body);\n        grid.append(card);\n    }\n    viewRoot.append(grid);\n}\n\n/**\n * \u97F3\u8272\u9875\u3002\n */\nfunction renderVoices(data) {\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", "Voices"));\n    headText.append(createElement("h2", "page-title", "\u97F3\u8272"));\n    headText.append(createElement("p", "page-subtitle", "\u89D2\u8272\u97F3\u8272\u6863\u6848\uFF1Breference \u6A21\u5F0F\u5FC5\u987B\u6709\u663E\u5F0F\u53C2\u8003\u97F3\u9891\u3002"));\n    head.append(headText);\n    viewRoot.append(head);\n    // \u97F3\u8272\n    const items = Array.isArray(data.items) ? data.items : [];\n    if (items.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u97F3\u8272", "\u4F7F\u7528 daoyan story voices set \u5199\u5165\u97F3\u8272\u3002"));\n        return;\n    }\n    const grid = createElement("div", "grid");\n    for (const voice of items) {\n        // \u5361\u7247\n        const card = createElement("article", "card entity-card");\n        const body = createElement("div", "card-body");\n        body.append(createElement("h3", "card-title", `${voice.name} \xB7 ${voice.id}`));\n        body.append(createElement("p", "muted", `${voice.character_id} \xB7 ${voice.mode}`));\n        body.append(createElement("p", "", voice.description ?? ""));\n        const reference = voice.reference_asset\n            ? voice.assets.find((asset) => asset.id === voice.reference_asset)\n            : null;\n        body.append(assetNode(reference, false));\n        if (voice.sample_text) body.append(createElement("blockquote", "quote", voice.sample_text));\n        card.append(body);\n        grid.append(card);\n    }\n    viewRoot.append(grid);\n}\n\n/**\n * \u8BBE\u5B9A\u8D44\u4EA7\u9875\u3002\n */\nfunction renderAssets(data) {\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", "Story assets"));\n    headText.append(createElement("h2", "page-title", "\u8BBE\u5B9A\u8D44\u4EA7"));\n    headText.append(createElement("p", "page-subtitle", "\u53C2\u8003\u56FE\u4E0E\u53C2\u8003\u97F3\u9891\uFF1B* \u8868\u793A\u5F53\u524D\u4E3B\u53C2\u8003\u3002"));\n    head.append(headText);\n    viewRoot.append(head);\n    // \u8D44\u4EA7\n    const items = Array.isArray(data.items) ? data.items : [];\n    if (items.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u8BBE\u5B9A\u8D44\u4EA7", "\u4F7F\u7528 daoyan story asset add \u5165\u5E93\u53C2\u8003\u56FE / \u97F3\u9891\u3002"));\n        return;\n    }\n    const grid = createElement("div", "grid");\n    for (const item of items) {\n        // \u5361\u7247\n        const card = createElement("article", "card entity-card");\n        const body = createElement("div", "card-body");\n        const owner = `${item.owner_kind}:${item.owner_id}${item.form_id !== null ? `/${item.form_id}` : ""}`;\n        body.append(createElement("h3", "card-title", `${item.reference ? "* " : ""}${item.asset.id}`));\n        body.append(createElement("p", "muted", `${owner} \xB7 ${item.owner_name}`));\n        body.append(assetNode(item.asset, false));\n        card.append(body);\n        grid.append(card);\n    }\n    viewRoot.append(grid);\n}\n\n/**\n * \u6982\u89C8\u9875\u3002\n */\nfunction renderOverview(data) {\n    // \u7EDF\u8BA1\n    const stats = data.stats ?? {};\n    // \u5206\u955C\u89C6\u56FE\n    const storyboard = data.storyboard !== undefined ? data.storyboard : null;\n    // \u7CFB\u5217\u72B6\u6001\n    const story = data.story !== undefined ? data.story : null;\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    // \u9875\u5934\u6587\u672C\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", "Overview"));\n    headText.append(createElement("h2", "page-title", data.project !== undefined ? data.project.name : "\u9879\u76EE\u6982\u89C8"));\n    // \u9879\u76EE\u6458\u8981\n    const subtitle = [`${data.mode ?? "\u672A\u7ED1\u5B9A\u672C\u673A"} \xB7 ${data.machine_id ?? "\u672C\u673A\u672A\u521D\u59CB\u5316"}`];\n    if (storyboard !== null && storyboard.summary !== undefined) {\n        subtitle.push(\n            `${storyboard.summary.shots_total} \u955C \xB7 ${storyboard.summary.characters_total} \u89D2\u8272 \xB7 ${storyboard.summary.scenes_total} \u573A\u666F`,\n        );\n    }\n    headText.append(createElement("p", "page-subtitle", subtitle.join(" \xB7 ")));\n    head.append(headText);\n    viewRoot.append(head);\n\n    if (data.machine === null) {\n        // \u672A\u521D\u59CB\u5316\u63D0\u793A\n        const callout = createElement("div", "callout");\n        callout.append(createElement("strong", "", "\u672C\u673A\u5C1A\u672A\u521D\u59CB\u5316\u3002"));\n        callout.append(document.createTextNode(" \u5F53\u524D\u4EC5\u5C55\u793A\u5171\u4EAB\u6570\u636E\uFF1B\u8FD0\u884C "));\n        callout.append(createElement("code", "mono", "daoyan init --mode=local|remote"));\n        callout.append(document.createTextNode(" \u7ED1\u5B9A\u672C\u673A\u540E\u5373\u53EF\u770B\u5230\u5F15\u64CE\u4E0E\u673A\u5668\u72B6\u6001\u3002"));\n        viewRoot.append(callout);\n    }\n\n    // \u7EDF\u8BA1\u7F51\u683C\n    const statsGrid = createElement("div", "stats-grid");\n    if (story !== null) {\n        statsGrid.append(\n            statCard(\n                "\u5267\u96C6",\n                `${story.series.episodes_ready ?? 0}/${story.series.episodes_total ?? 0}`,\n                "\u53EF\u62CD / \u603B\u96C6\u6570",\n            ),\n        );\n        statsGrid.append(statCard("\u89D2\u8272", stats.characters_total ?? 0, `${stats.forms_total ?? 0} \u4E2A\u5F62\u6001`));\n        statsGrid.append(statCard("\u573A\u666F", stats.scenes_total ?? 0, "\u5168\u5C40\u573A\u666F"));\n        statsGrid.append(statCard("\u97F3\u8272", stats.voices_total ?? 0, "\u5168\u5C40\u97F3\u8272"));\n        statsGrid.append(statCard("\u8BBE\u5B9A\u8D44\u4EA7", stats.assets_total ?? 0, "\u53C2\u8003\u56FE / \u97F3\u9891"));\n        statsGrid.append(statCard("\u955C\u5934", stats.shots_total ?? 0, `\u6210\u529F run ${stats.runs_succeeded ?? 0}`));\n    } else {\n        statsGrid.append(statCard("\u955C\u5934", `${stats.shots_done ?? 0}/${stats.shots_total ?? 0}`, "\u5DF2\u5B8C\u6210 / \u603B\u6570"));\n        statsGrid.append(statCard("\u4EBA\u7269", stats.characters_total ?? 0, "\u5DF2\u767B\u8BB0\u89D2\u8272"));\n        statsGrid.append(statCard("\u573A\u666F", stats.scenes_total ?? 0, "\u5DF2\u767B\u8BB0\u573A\u666F"));\n        statsGrid.append(statCard("\u4EA7\u51FA\u7269", stats.outputs_total ?? 0, formatBytes(stats.outputs_bytes ?? 0)));\n        statsGrid.append(\n            statCard(\n                "\u6210\u529F run",\n                `${stats.runs_succeeded ?? 0}/${stats.runs_total ?? 0}`,\n                `\u5931\u8D25 ${stats.runs_failed ?? 0}`,\n            ),\n        );\n        statsGrid.append(statCard("\u8FD0\u884C\u4E2D\u4EFB\u52A1", stats.tasks_active ?? 0, `\u5171 ${stats.tasks_total ?? 0} \u4E2A\u4EFB\u52A1`));\n    }\n    viewRoot.append(statsGrid);\n\n    if (story !== null) {\n        renderStorySeries(story);\n    } else if (storyboard !== null) {\n        viewRoot.append(renderProjectProfile(storyboard));\n        viewRoot.append(renderEntitySection("character", storyboard.characters));\n        viewRoot.append(renderEntitySection("scene", storyboard.scenes));\n        viewRoot.append(renderStoryboardPanel(storyboard));\n    } else {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u5206\u955C\u8BBE\u5B9A", "\u521B\u5EFA shots.json \u540E\uFF0C\u8FD9\u91CC\u4F1A\u5C55\u793A\u955C\u5934\u3001\u4EBA\u7269\u3001\u573A\u666F\u548C\u9010\u955C\u4EA7\u51FA\u3002"));\n    }\n\n    // \u4E24\u5217\u4FE1\u606F\n    const layout = createElement("div", "layout-two");\n    layout.append(renderEnginePanel(data));\n    layout.append(renderEnvironmentPanel(data));\n    viewRoot.append(layout);\n\n    // \u6700\u8FD1\u4EA7\u7269\n    const artifacts = Array.isArray(data.recent_artifacts) ? data.recent_artifacts : [];\n    // \u4EA7\u7269\u533A\u5757\u5934\n    const artifactHead = createElement("div", "section-head");\n    artifactHead.append(createElement("h3", "section-title", "\u6700\u8FD1\u4EA7\u51FA\u7269"));\n    artifactHead.append(createElement("span", "section-meta", `${artifacts.length} \u4E2A`));\n    viewRoot.append(artifactHead);\n    if (artifacts.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u4EA7\u51FA\u7269", "\u6267\u884C shot / run \u540E\uFF0C\u89C6\u9891\u4E0E\u56FE\u7247\u4F1A\u51FA\u73B0\u5728\u8FD9\u91CC\u3002"));\n    } else {\n        // \u4EA7\u7269\u7F51\u683C\n        const grid = createElement("div", "grid");\n        renderArtifactCards(grid, artifacts);\n        viewRoot.append(grid);\n    }\n\n    // \u6700\u8FD1\u4EFB\u52A1\n    const tasks = Array.isArray(data.recent_tasks) ? data.recent_tasks : [];\n    // \u4EFB\u52A1\u533A\u5757\u5934\n    const taskHead = createElement("div", "section-head");\n    taskHead.append(createElement("h3", "section-title", "\u6700\u8FD1\u4EFB\u52A1"));\n    taskHead.append(createElement("span", "section-meta", `${tasks.length} \u4E2A`));\n    viewRoot.append(taskHead);\n    if (tasks.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u4EFB\u52A1", "daoyan shot / batch \u521B\u5EFA\u7684\u4EFB\u52A1\u4F1A\u5728\u8FD9\u91CC\u51FA\u73B0\u3002"));\n    } else {\n        viewRoot.append(renderTaskList(tasks));\n    }\n}\n\n/**\n * \u9879\u76EE\u6863\u6848\u9762\u677F\u3002\n */\nfunction renderProjectProfile(storyboard) {\n    // \u9762\u677F\n    const panel = createElement("section", "panel profile-panel");\n    // \u9762\u677F\u5934\n    const head = createElement("div", "panel-head");\n    // \u6807\u9898\u5BB9\u5668\n    const titles = createElement("div");\n    titles.append(createElement("h3", "panel-title", "\u9879\u76EE\u6863\u6848"));\n    titles.append(createElement("p", "panel-sub", "\u5267\u60C5\u3001\u753B\u9762\u4E0E\u751F\u6210\u53C2\u6570"));\n    head.append(titles);\n    panel.append(head);\n\n    if (storyboard.synopsis !== null && storyboard.synopsis !== undefined) {\n        panel.append(createElement("p", "profile-synopsis", storyboard.synopsis));\n    }\n\n    // \u6458\u8981\n    const summary = storyboard.summary ?? {};\n    // \u9ED8\u8BA4\u53C2\u6570\n    const defaults = storyboard.defaults ?? {};\n    // \u952E\u503C\u5217\u8868\n    const kv = createElement("dl", "kv");\n    appendKv(kv, "\u7247\u540D", storyboard.title ?? "\u672A\u547D\u540D");\n    appendKv(kv, "\u5206\u8FA8\u7387", summary.resolution ?? "\u2014");\n    appendKv(kv, "\u5E27\u7387", summary.fps !== null && summary.fps !== undefined ? `${summary.fps} fps` : "\u672A\u8BBE\u7F6E");\n    appendKv(kv, "\u603B\u5E27\u6570", summary.total_frames ?? 0);\n    appendKv(\n        kv,\n        "\u603B\u65F6\u957F",\n        summary.total_duration_seconds !== null && summary.total_duration_seconds !== undefined\n            ? formatSeconds(summary.total_duration_seconds)\n            : "\u90E8\u5206\u955C\u5934\u672A\u77E5",\n    );\n    appendKv(kv, "\u98CE\u683C", storyboard.style_prefix ?? "\u2014");\n    appendKv(kv, "workflow", storyboard.workflow ?? "\u2014");\n    if (defaults.steps !== undefined) appendKv(kv, "\u9ED8\u8BA4 steps", defaults.steps);\n    if (defaults.cfg !== undefined) appendKv(kv, "\u9ED8\u8BA4 cfg", defaults.cfg);\n    if (defaults.negative !== undefined) appendKv(kv, "\u8D1F\u5411\u63D0\u793A\u8BCD", defaults.negative);\n    panel.append(kv);\n    return panel;\n}\n\n/**\n * \u4EBA\u7269 / \u573A\u666F\u533A\u5757\u3002\n */\nfunction renderEntitySection(kind, entities) {\n    // \u662F\u5426\u4EBA\u7269\n    const isCharacter = kind === "character";\n    // \u533A\u5757\n    const section = createElement("section", "entity-section");\n    // \u533A\u5757\u5934\n    const head = createElement("div", "section-head");\n    head.append(createElement("h3", "section-title", isCharacter ? "\u4EBA\u7269\u8BBE\u5B9A" : "\u573A\u666F\u8BBE\u5B9A"));\n    head.append(createElement("span", "section-meta", `${Array.isArray(entities) ? entities.length : 0} \u4E2A`));\n    section.append(head);\n    if (!Array.isArray(entities) || entities.length === 0) {\n        section.append(\n            emptyNode(\n                isCharacter ? "\u8FD8\u6CA1\u6709\u4EBA\u7269\u8BBE\u5B9A" : "\u8FD8\u6CA1\u6709\u573A\u666F\u8BBE\u5B9A",\n                isCharacter\n                    ? "\u5728 shots.json \u7684 meta.characters \u767B\u8BB0\u4EBA\u7269\uFF0C\u5E76\u5728\u955C\u5934\u7684 characters \u5B57\u6BB5\u5F15\u7528\u3002"\n                    : "\u5728 shots.json \u7684 meta.scenes \u767B\u8BB0\u573A\u666F\uFF0C\u5E76\u5728\u955C\u5934\u7684 scene \u5B57\u6BB5\u5F15\u7528\u3002",\n            ),\n        );\n        return section;\n    }\n    // \u5361\u7247\u7F51\u683C\n    const grid = createElement("div", "entity-grid");\n    for (const entity of entities) {\n        // \u5B9E\u4F53\u5361\u7247\n        const card = createElement("article", "entity-card");\n        // \u5361\u7247\u5934\n        const cardHead = createElement("div", "entity-head");\n        cardHead.append(createElement("h4", "entity-name", entity.name));\n        cardHead.append(\n            entity.count > 0\n                ? badge(`\u51FA\u573A ${entity.count} \u955C`, isCharacter ? "kind-image" : "kind-video")\n                : badge("\u672A\u51FA\u573A", ""),\n        );\n        card.append(cardHead);\n        if (entity.description) card.append(createElement("p", "entity-desc", entity.description));\n        if (entity.reference) card.append(createElement("p", "entity-ref mono", entity.reference));\n        // \u51FA\u573A\u955C\u53F7\n        const shots = createElement("div", "chip-row");\n        if (Array.isArray(entity.shots) && entity.shots.length > 0) {\n            for (const shotId of entity.shots) shots.append(createElement("span", "chip chip-small", `\u955C ${shotId}`));\n        } else {\n            shots.append(createElement("span", "muted", "\u6682\u65E0\u51FA\u573A\u955C\u5934"));\n        }\n        card.append(shots);\n        grid.append(card);\n    }\n    section.append(grid);\n    return section;\n}\n\n/**\n * \u5206\u955C\u4E00\u89C8\u9762\u677F\u3002\n */\nfunction renderStoryboardPanel(storyboard) {\n    // \u955C\u5934\n    const shots = Array.isArray(storyboard.shots) ? storyboard.shots : [];\n    // \u533A\u5757\n    const section = createElement("section", "storyboard-section");\n    // \u533A\u5757\u5934\n    const head = createElement("div", "section-head");\n    head.append(createElement("h3", "section-title", "\u5206\u955C\u4E00\u89C8"));\n    head.append(createElement("span", "section-meta", `${shots.length} \u955C`));\n    // \u67E5\u770B\u5168\u90E8\n    const more = createElement("button", "button ghost", "\u67E5\u770B\u5206\u955C\u8BE6\u60C5");\n    more.type = "button";\n    more.addEventListener("click", () => {\n        window.location.hash = `${HASH_PREFIX}shots`;\n    });\n    head.append(more);\n    section.append(head);\n    if (shots.length === 0) {\n        section.append(emptyNode("\u8FD8\u6CA1\u6709\u955C\u5934", "\u5728 shots.json \u7684 shots \u6570\u7EC4\u91CC\u6DFB\u52A0\u955C\u5934\u3002"));\n        return section;\n    }\n    // \u5206\u955C\u5217\u8868\n    const list = createElement("div", "storyboard-list");\n    // \u8868\u5934\n    const header = createElement("div", "storyboard-row storyboard-header");\n    for (const label of ["\u955C\u53F7", "\u5185\u5BB9", "\u573A\u666F", "\u4EBA\u7269", "\u4EA7\u51FA"]) header.append(createElement("span", "", label));\n    list.append(header);\n    for (const shot of shots) {\n        // \u6570\u636E\u884C\n        const row = createElement("div", "storyboard-row");\n        // \u955C\u53F7\n        const idCell = createElement("div", "storyboard-id-cell");\n        idCell.append(createElement("span", "storyboard-id", shot.id));\n        idCell.append(shotStatusBadge(shot));\n        row.append(idCell);\n        // \u5185\u5BB9\n        const content = createElement("div", "storyboard-content");\n        content.append(createElement("div", "storyboard-title", shot.title ?? shot.slug ?? `\u955C\u5934 ${shot.id}`));\n        content.append(createElement("p", "storyboard-summary", shot.summary));\n        row.append(content);\n        // \u573A\u666F\n        row.append(\n            shot.scene !== null && shot.scene !== undefined\n                ? entityChip(shot.scene, "chip-scene")\n                : createElement("span", "muted", "\u2014"),\n        );\n        // \u4EBA\u7269\n        const cast = createElement("div", "chip-row");\n        if (Array.isArray(shot.characters) && shot.characters.length > 0) {\n            for (const character of shot.characters) cast.append(entityChip(character, "chip-character"));\n        } else {\n            cast.append(createElement("span", "muted", "\u2014"));\n        }\n        row.append(cast);\n        // \u4EA7\u51FA\n        const artifacts = Array.isArray(shot.artifacts) ? shot.artifacts : [];\n        const artifactCell = createElement("div", "storyboard-artifacts");\n        artifactCell.append(createElement("span", "muted", `${artifacts.length} \u4E2A`));\n        // \u53EF\u64AD\u653E\u4EA7\u7269\n        const playable = artifacts.find(\n            (item) =>\n                item.output.present === true && item.output.lfs_pointer !== true && PREVIEW_KINDS.has(item.output.kind),\n        );\n        if (playable !== undefined) {\n            // \u64AD\u653E\u6309\u94AE\n            const play = createElement("button", "button ghost", "\u64AD\u653E");\n            play.type = "button";\n            play.addEventListener("click", () => openArtifact(playable, artifacts));\n            artifactCell.append(play);\n        }\n        row.append(artifactCell);\n        list.append(row);\n    }\n    section.append(list);\n    return section;\n}\n\n/**\n * \u5F15\u64CE\u9762\u677F\u3002\n */\nfunction renderEnginePanel(data) {\n    // \u9762\u677F\n    const panel = createElement("section", "panel");\n    // \u9762\u677F\u5934\n    const head = createElement("div", "panel-head");\n    // \u6807\u9898\u5BB9\u5668\n    const titles = createElement("div");\n    titles.append(createElement("h3", "panel-title", "\u5F15\u64CE"));\n    titles.append(createElement("p", "panel-sub", data.engine === null ? "\u672A\u7ED1\u5B9A\u672C\u673A" : data.engine.mode));\n    head.append(titles);\n    if (data.engine !== null) {\n        head.append(data.engine.up === true ? badge("\u53EF\u8FBE", "status-succeeded") : badge("\u4E0D\u53EF\u8FBE", "status-failed"));\n    }\n    panel.append(head);\n    if (data.engine === null) {\n        panel.append(createElement("p", "muted", "\u8FD0\u884C init \u7ED1\u5B9A\u672C\u673A\u540E\u663E\u793A\u5F15\u64CE\u72B6\u6001\u3002"));\n        return panel;\n    }\n    // \u952E\u503C\u5217\u8868\n    const kv = createElement("dl", "kv");\n    appendKv(kv, "\u5730\u5740", data.engine.url);\n    appendKv(kv, "PID", data.engine.pid);\n    if (data.engine.queue !== null && data.engine.queue !== undefined) {\n        appendKv(kv, "\u961F\u5217", `\u6267\u884C\u4E2D ${data.engine.queue.running} / \u7B49\u5F85 ${data.engine.queue.pending}`);\n    }\n    appendKv(kv, "\u6A21\u5F0F", data.mode);\n    panel.append(kv);\n    return panel;\n}\n\n/**\n * \u673A\u5668 / GPU / Skill \u9762\u677F\u3002\n */\nfunction renderEnvironmentPanel(data) {\n    // \u9762\u677F\n    const panel = createElement("section", "panel");\n    // \u9762\u677F\u5934\n    const head = createElement("div", "panel-head");\n    // \u6807\u9898\u5BB9\u5668\n    const titles = createElement("div");\n    titles.append(createElement("h3", "panel-title", "\u673A\u5668\u4E0E\u8FD0\u884C\u73AF\u5883"));\n    titles.append(createElement("p", "panel-sub", data.machine_id ?? "\u672C\u673A\u672A\u521D\u59CB\u5316"));\n    head.append(titles);\n    panel.append(head);\n\n    // \u952E\u503C\u5217\u8868\n    const kv = createElement("dl", "kv");\n    // \u673A\u5668\u9501\u72B6\u6001\n    const lock = data.machine_lock;\n    if (lock === null || lock === undefined) {\n        appendKv(kv, "\u673A\u5668\u9501", "\u2014");\n    } else if (lock.status === "held" && lock.owner !== undefined) {\n        appendKv(kv, "\u673A\u5668\u9501", `${lock.owner.command}\uFF08task ${lock.owner.task_id}\uFF0Cpid ${lock.owner.pid}\uFF09`);\n    } else {\n        appendKv(kv, "\u673A\u5668\u9501", STATUS_LABEL[lock.status] ?? lock.status);\n    }\n\n    // GPU \u72B6\u6001\n    const gpu = data.gpu;\n    if (gpu === null || gpu === undefined) {\n        appendKv(kv, "GPU", "\u2014");\n    } else if (gpu.supported === true && Array.isArray(gpu.devices) && gpu.devices.length > 0) {\n        appendKv(kv, "GPU", `${gpu.devices[0].usedMb} MiB / ${gpu.devices[0].totalMb} MiB`);\n    } else {\n        appendKv(kv, "GPU", gpu.reason ?? "\u4E0D\u53EF\u7528");\n    }\n\n    // Skill \u72B6\u6001\n    const skill = data.skill;\n    if (skill === null || skill === undefined) {\n        appendKv(kv, "Skill", "\u2014");\n    } else if (skill.present !== true) {\n        appendKv(kv, "Skill", "\u7F3A\u5931\uFF08\u8FD0\u884C daoyan skill update\uFF09");\n    } else {\n        appendKv(kv, "Skill", skill.stale === true ? "\u9700\u8981\u66F4\u65B0" : "\u5DF2\u5C31\u7EEA");\n    }\n    panel.append(kv);\n\n    // \u4E0B\u4E00\u6B65\u52A8\u4F5C\n    const actions = Array.isArray(data.next_actions) ? data.next_actions : [];\n    if (actions.length > 0) {\n        // \u4E0B\u4E00\u6B65\n        const next = createElement("div", "card-actions");\n        for (const action of actions) next.append(createElement("code", "mono", action));\n        panel.append(next);\n    }\n    return panel;\n}\n\n/**\n * \u5206\u955C\u9875\u3002\n */\nfunction renderShots(data) {\n    if (data === null) {\n        // \u9875\u5934\n        const head = createElement("div", "view-head");\n        head.append(createElement("h2", "page-title", "\u5206\u955C"));\n        viewRoot.append(head);\n        viewRoot.append(emptyNode("\u672A\u914D\u7F6E shots.json", "\u5728\u9879\u76EE\u6839\u521B\u5EFA shots.json \u540E\u5237\u65B0\u3002"));\n        return;\n    }\n    // \u9875\u9762\u6807\u9898\n    const title = data.title !== null && data.title !== undefined ? data.title : "\u5206\u955C";\n    // \u7EDF\u8BA1\n    const stats = data.summary ?? {};\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    // \u9875\u5934\u6587\u672C\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", "Storyboard"));\n    headText.append(createElement("h2", "page-title", title));\n    // \u9875\u5934\u526F\u6807\u9898\n    const subtitle = [];\n    if (data.style_prefix) subtitle.push(`\u98CE\u683C ${data.style_prefix}`);\n    if (data.workflow) subtitle.push(`workflow ${data.workflow}`);\n    if (stats.resolution) subtitle.push(stats.resolution);\n    if (stats.fps) subtitle.push(`${stats.fps} fps`);\n    headText.append(createElement("p", "page-subtitle", subtitle.join(" \xB7 ") || "\u6309\u955C\u5934\u67E5\u770B\u5185\u5BB9\u3001\u4EBA\u7269\u3001\u573A\u666F\u4E0E\u4EA7\u51FA"));\n    head.append(headText);\n    viewRoot.append(head);\n\n    if (data.synopsis !== null && data.synopsis !== undefined) {\n        viewRoot.append(createElement("p", "profile-synopsis", data.synopsis));\n    }\n\n    // \u7EDF\u8BA1\u5361\u7247\n    const statsGrid = createElement("div", "stats-grid");\n    statsGrid.append(statCard("\u955C\u5934", `${stats.shots_done ?? 0}/${stats.shots_total ?? 0}`, "\u5DF2\u5B8C\u6210 / \u603B\u6570"));\n    statsGrid.append(statCard("\u4EBA\u7269", stats.characters_total ?? 0, "\u5168\u7247\u89D2\u8272"));\n    statsGrid.append(statCard("\u573A\u666F", stats.scenes_total ?? 0, "\u5168\u7247\u573A\u666F"));\n    statsGrid.append(\n        statCard(\n            "\u4EA7\u51FA\u7269",\n            stats.artifacts_total ?? 0,\n            `${stats.total_frames ?? 0} \u5E27 \xB7 ${\n                stats.total_duration_seconds !== null && stats.total_duration_seconds !== undefined\n                    ? formatSeconds(stats.total_duration_seconds)\n                    : "\u90E8\u5206\u955C\u5934\u672A\u77E5"\n            }`,\n        ),\n    );\n    viewRoot.append(statsGrid);\n\n    // \u955C\u5934\u5217\u8868\n    const shots = Array.isArray(data.shots) ? data.shots : [];\n    if (shots.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u955C\u5934", "\u5728 shots.json \u7684 shots \u6570\u7EC4\u91CC\u6DFB\u52A0\u955C\u5934\u3002"));\n        return;\n    }\n\n    // \u4EBA\u7269\u7B5B\u9009\u503C -> \u540D\u79F0\n    const characterOptions = {};\n    for (const entity of Array.isArray(data.characters) ? data.characters : []) {\n        characterOptions[entityKey(entity)] = entity.name;\n    }\n    // \u573A\u666F\u7B5B\u9009\u503C -> \u540D\u79F0\n    const sceneOptions = {};\n    for (const entity of Array.isArray(data.scenes) ? data.scenes : []) {\n        sceneOptions[entityKey(entity)] = entity.name;\n    }\n    // \u72B6\u6001\u6587\u6848\n    const statusLabels = { done: "\u5DF2\u5B8C\u6210", pending: "\u672A\u5B8C\u6210", failed: "\u5931\u8D25", running: "\u8FD0\u884C\u4E2D" };\n\n    // \u7B5B\u9009\u680F\n    const filters = createElement("div", "filter-bar");\n    filters.append(\n        buildSelect(\n            "\u4EBA\u7269",\n            Object.keys(characterOptions),\n            shotFilters.character,\n            (value) => {\n                shotFilters.character = value;\n                refresh();\n            },\n            "\u5168\u90E8\u4EBA\u7269",\n            characterOptions,\n        ),\n    );\n    filters.append(\n        buildSelect(\n            "\u573A\u666F",\n            Object.keys(sceneOptions),\n            shotFilters.scene,\n            (value) => {\n                shotFilters.scene = value;\n                refresh();\n            },\n            "\u5168\u90E8\u573A\u666F",\n            sceneOptions,\n        ),\n    );\n    filters.append(\n        buildSelect(\n            "\u72B6\u6001",\n            ["done", "pending", "failed", "running"],\n            shotFilters.status,\n            (value) => {\n                shotFilters.status = value;\n                refresh();\n            },\n            "\u5168\u90E8\u72B6\u6001",\n            statusLabels,\n        ),\n    );\n    // \u641C\u7D22\u6846\n    const search = createElement("input", "input search");\n    search.type = "search";\n    search.placeholder = "\u641C\u7D22\u955C\u53F7 / \u5185\u5BB9 / \u4EBA\u7269 / \u573A\u666F";\n    search.value = shotFilters.search;\n    search.addEventListener("input", () => {\n        shotFilters.search = search.value;\n        refresh();\n    });\n    filters.append(search);\n    viewRoot.append(filters);\n\n    // \u7ED3\u679C\u5934\n    const listHead = createElement("div", "section-head");\n    listHead.append(createElement("h3", "section-title", "\u5206\u955C\u5217\u8868"));\n    // \u7ED3\u679C\u6458\u8981\n    const resultMeta = createElement("span", "section-meta", "");\n    listHead.append(resultMeta);\n    viewRoot.append(listHead);\n\n    // \u955C\u5934\u7F51\u683C\n    const grid = createElement("div", "grid shot-grid");\n    viewRoot.append(grid);\n\n    /**\n     * \u6309\u7B5B\u9009\u6761\u4EF6\u5237\u65B0\u955C\u5934\u5361\u7247\u3002\n     */\n    function refresh() {\n        // \u8FC7\u6EE4\u7ED3\u679C\n        const filtered = filterShots(shots);\n        resultMeta.textContent = `\u663E\u793A ${filtered.length} / ${shots.length}`;\n        clearNode(grid);\n        if (filtered.length === 0) {\n            grid.append(emptyNode("\u6CA1\u6709\u5339\u914D\u7684\u955C\u5934", "\u8C03\u6574\u4EBA\u7269\u3001\u573A\u666F\u3001\u72B6\u6001\u6216\u641C\u7D22\u6761\u4EF6\u3002"));\n            return;\n        }\n        for (const shot of filtered) grid.append(renderShotCard(shot));\n    }\n\n    refresh();\n}\n\n/**\n * \u6309\u5F53\u524D\u7B5B\u9009\u6761\u4EF6\u8FC7\u6EE4\u955C\u5934\u3002\n */\nfunction filterShots(shots) {\n    // \u641C\u7D22\u8BCD\n    const search = shotFilters.search.trim().toLowerCase();\n    return shots.filter((shot) => {\n        if (\n            shotFilters.character !== "" &&\n            !(\n                Array.isArray(shot.characters) &&\n                shot.characters.some((entity) => entityKey(entity) === shotFilters.character)\n            )\n        ) {\n            return false;\n        }\n        if (\n            shotFilters.scene !== "" &&\n            (shot.scene === null || shot.scene === undefined || entityKey(shot.scene) !== shotFilters.scene)\n        ) {\n            return false;\n        }\n        if (shotFilters.status === "done" && shot.done !== true) return false;\n        if (shotFilters.status === "pending" && shot.done === true) return false;\n        if (shotFilters.status === "failed" && shot.latest_status !== "failed") return false;\n        if (shotFilters.status === "running" && shot.latest_status !== "running" && shot.latest_status !== "queued") {\n            return false;\n        }\n        if (search !== "") {\n            // \u641C\u7D22\u6587\u672C\n            const haystack = `${shot.id} ${shot.title ?? ""} ${shot.slug ?? ""} ${shot.summary} ${shot.prompt} ${(\n                shot.characters ?? []\n            )\n                .map((entity) => entity.name)\n                .join(" ")} ${shot.scene !== null && shot.scene !== undefined ? shot.scene.name : ""}`.toLowerCase();\n            if (!haystack.includes(search)) return false;\n        }\n        return true;\n    });\n}\n\n/**\n * \u53C2\u8003\u9879\u7C7B\u578B\u6587\u6848\u3002\n */\nconst SHOT_REF_KIND_LABEL = { character: "\u89D2\u8272", scene: "\u573A\u666F", voice: "\u97F3\u8272" };\n\n/**\n * \u53C2\u8003\u9879\u5C55\u793A\u540D\u3002\n */\nfunction shotRefLabel(ref) {\n    // \u7C7B\u578B\n    const kind = SHOT_REF_KIND_LABEL[ref.kind] ?? "\u53C2\u8003";\n    // \u5F62\u6001\n    const form = ref.kind === "character" && ref.form_name ? ` \xB7 ${ref.form_name}` : "";\n    return `${kind} \xB7 ${ref.name}${form}`;\n}\n\n/**\n * \u53C2\u8003\u9879\u6CE8\u5165\u8BF4\u660E\u3002\n */\nfunction shotRefWireLabel(ref) {\n    if (ref.status === "ready") {\n        return ref.slot !== null && ref.target !== null ? `${ref.slot} \u2192 ${ref.target}` : "\u5DF2\u6CE8\u5165";\n    }\n    if (ref.status === "missing") return "\u7F3A\u4E3B\u53C2\u8003";\n    return "\u672A\u63A5\u5165 workflow";\n}\n\n/**\n * \u53C2\u8003\u9879\u662F\u5426\u53EF\u9884\u89C8\u3002\n */\nfunction shotRefAvailable(ref) {\n    return ref.asset !== null && ref.asset.present === true && ref.asset.lfs_pointer !== true;\n}\n\n/**\n * \u6253\u5F00\u53C2\u8003\u56FE / \u53C2\u8003\u97F3\u9891\u3002\n */\nfunction previewShotRef(ref) {\n    // \u5C55\u793A\u540D\n    const label = shotRefLabel(ref);\n    if (ref.asset === null) {\n        showToast(`${label} \u7F3A\u5C11\u4E3B\u53C2\u8003`, true);\n        return;\n    }\n    if (ref.asset.present !== true) {\n        showToast(`${label} \u53C2\u8003\u6587\u4EF6\u4E0D\u5B58\u5728\uFF1A${ref.asset.path}`, true);\n        return;\n    }\n    if (ref.asset.lfs_pointer === true) {\n        showToast(`${label} \u4ECD\u662F Git LFS pointer\uFF0C\u5148\u6267\u884C git lfs pull`, true);\n        return;\n    }\n    if (ref.asset.kind === "image") {\n        openImageUrl(ref.asset.media_url, ref.asset.path);\n        return;\n    }\n    if (ref.asset.kind === "audio") {\n        openPlayer([{ title: ref.asset.path, url: ref.asset.media_url, kind: "audio" }], 0);\n        return;\n    }\n    window.open(ref.asset.media_url, "_blank", "noopener");\n}\n\n/**\n * \u5355\u4E2A\u53C2\u8003\u9879\u3002\n */\nfunction renderShotRef(ref) {\n    // \u53EF\u9884\u89C8\n    const available = shotRefAvailable(ref);\n    // \u5BB9\u5668\uFF08\u53EF\u9884\u89C8\u65F6\u7528 button\uFF09\n    const item = createElement(available ? "button" : "span", `shot-ref shot-ref-${ref.kind} shot-ref-${ref.status}`);\n    if (available) {\n        item.type = "button";\n        item.title = `\u9884\u89C8 ${shotRefLabel(ref)} \xB7 ${ref.asset.path}`;\n        item.setAttribute("aria-label", `\u9884\u89C8 ${shotRefLabel(ref)}`);\n        item.addEventListener("click", () => previewShotRef(ref));\n    } else {\n        item.title = ref.asset === null ? `${shotRefLabel(ref)} \u7F3A\u5C11\u4E3B\u53C2\u8003` : `${shotRefLabel(ref)} \u53C2\u8003\u6587\u4EF6\u4E0D\u53EF\u7528`;\n    }\n    // \u7F29\u7565\u56FE\n    const thumb = createElement("span", "shot-ref-thumb");\n    if (available && ref.asset.kind === "image") {\n        const image = document.createElement("img");\n        image.src = ref.asset.media_url;\n        image.alt = shotRefLabel(ref);\n        image.loading = "lazy";\n        thumb.append(image);\n    } else if (available && ref.asset.kind === "audio") {\n        thumb.append(createElement("span", "shot-ref-glyph", "\u266A"));\n    } else if (ref.asset !== null && ref.asset.lfs_pointer === true) {\n        thumb.append(createElement("span", "shot-ref-glyph", "LFS"));\n    } else {\n        thumb.append(createElement("span", "shot-ref-glyph", "\u7F3A\u56FE"));\n    }\n    item.append(thumb);\n    // \u6587\u672C\n    const copy = createElement("span", "shot-ref-copy");\n    copy.append(createElement("span", "shot-ref-name", shotRefLabel(ref)));\n    copy.append(createElement("span", "shot-ref-wire mono", shotRefWireLabel(ref)));\n    item.append(copy);\n    return item;\n}\n\n/**\n * \u955C\u5934\u53C2\u8003\u56FE\u884C\u3002\n */\nfunction renderShotReferences(shot) {\n    // \u4EC5 story \u6A21\u5F0F\u6709\u89E3\u6790\u7ED3\u679C\n    if (!Array.isArray(shot.references)) return null;\n    // \u5BB9\u5668\n    const row = createElement("div", "shot-line shot-refs");\n    row.append(createElement("span", "shot-line-label", "\u53C2\u8003\u56FE"));\n    // \u5185\u5BB9\n    const body = createElement("div", "shot-refs-body");\n    if (shot.references.length === 0) {\n        body.append(createElement("span", "muted", "\u672C\u955C\u6CA1\u6709\u89D2\u8272 / \u573A\u666F\u53C2\u8003\u56FE\u3002"));\n        row.append(body);\n        return row;\n    }\n    // \u5217\u8868\n    const list = createElement("div", "shot-ref-list");\n    for (const ref of shot.references) list.append(renderShotRef(ref));\n    body.append(list);\n    // \u672A\u63A5\u5165\u63D0\u793A\n    const unwired = shot.references.filter((ref) => ref.status === "unwired");\n    if (unwired.length > 0) {\n        body.append(\n            createElement(\n                "p",\n                "shot-ref-warning",\n                `\u672A\u63A5\u5165\u5F53\u524D workflow\uFF1A${unwired.map((ref) => ref.name).join("\u3001")}\u3002\u5728 workflows/<name>.assets.json \u589E\u52A0\u69FD\u4F4D\u540E\u624D\u4F1A\u53C2\u4E0E\u751F\u6210\u3002`,\n            ),\n        );\n    }\n    row.append(body);\n    return row;\n}\n\n/**\n * \u6B63\u5219\u8F6C\u4E49\u3002\n */\nfunction escapeRegExp(value) {\n    return value.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&");\n}\n\n/**\n * \u63D0\u793A\u8BCD\u5185\u8054\u53C2\u8003\u9879\u6309\u94AE\u3002\n */\nfunction promptRefButton(text, ref) {\n    // \u6309\u94AE\n    const button = createElement(\n        "button",\n        `prompt-ref prompt-ref-${ref.kind}${shotRefAvailable(ref) ? "" : " prompt-ref-missing"}`,\n        text,\n    );\n    button.type = "button";\n    button.title = shotRefAvailable(ref) ? `\u9884\u89C8 ${shotRefLabel(ref)}` : `${shotRefLabel(ref)} \u53C2\u8003\u56FE\u4E0D\u53EF\u7528`;\n    button.addEventListener("click", () => previewShotRef(ref));\n    return button;\n}\n\n/**\n * \u63D0\u793A\u8BCD\u6587\u672C\uFF08\u89D2\u8272 / \u573A\u666F\u540D\u9AD8\u4EAE\u4E3A\u53C2\u8003\u9879\uFF09\u3002\n */\nfunction renderPromptText(shot) {\n    // \u6BB5\u843D\n    const paragraph = createElement("p", "");\n    // \u63D0\u793A\u8BCD\n    const prompt = typeof shot.prompt === "string" ? shot.prompt : "";\n    // \u53C2\u4E0E\u9AD8\u4EAE\u7684\u53C2\u8003\u9879\uFF08\u89D2\u8272 / \u573A\u666F\uFF09\n    const refs = Array.isArray(shot.references)\n        ? shot.references.filter(\n              (ref) =>\n                  (ref.kind === "character" || ref.kind === "scene") && typeof ref.name === "string" && ref.name !== "",\n          )\n        : [];\n    if (prompt === "" || refs.length === 0) {\n        paragraph.textContent = prompt;\n        return paragraph;\n    }\n    // \u540D\u79F0 -> \u53C2\u8003\u9879\uFF08\u4F18\u5148\u53EF\u7528\u8D44\u4EA7\uFF09\n    const byName = new Map();\n    for (const ref of refs) {\n        // \u5DF2\u6709\u9879\n        const existing = byName.get(ref.name);\n        if (existing === undefined || (!shotRefAvailable(existing) && shotRefAvailable(ref))) byName.set(ref.name, ref);\n    }\n    // \u6700\u957F\u540D\u79F0\u4F18\u5148\uFF0C\u907F\u514D\u77ED\u540D\u622A\u65AD\u957F\u540D\n    const names = Array.from(byName.keys()).sort((a, b) => b.length - a.length);\n    // \u5339\u914D\u6A21\u5F0F\n    const pattern = new RegExp(`(${names.map(escapeRegExp).join("|")})`, "g");\n    // \u6E38\u6807\n    let cursor = 0;\n    for (const match of prompt.matchAll(pattern)) {\n        // \u547D\u4E2D\u4F4D\u7F6E\n        const index = match.index ?? 0;\n        if (index > cursor) paragraph.append(document.createTextNode(prompt.slice(cursor, index)));\n        // \u53C2\u8003\u9879\n        const ref = byName.get(match[0]);\n        paragraph.append(promptRefButton(match[0], ref));\n        cursor = index + match[0].length;\n    }\n    if (cursor === 0) {\n        paragraph.textContent = prompt;\n        return paragraph;\n    }\n    if (cursor < prompt.length) paragraph.append(document.createTextNode(prompt.slice(cursor)));\n    return paragraph;\n}\n\n/**\n * \u8BF7\u6C42\u751F\u6210 / \u91CD\u65B0\u751F\u6210\u955C\u5934\u3002\n */\nasync function requestShotGeneration(shot, regenerate) {\n    // story \u6A21\u5F0F\u6309\u96C6\u63D0\u4EA4\uFF1Blegacy \u8D70\u6839\u5206\u955C\n    if (currentEpisodeId !== null) {\n        return postJson(\n            `/api/episodes/${encodeURIComponent(currentEpisodeId)}/shots/${encodeURIComponent(shot.id)}/generate`,\n            { regenerate },\n        );\n    }\n    return postJson("/api/shots/generate", { shot_id: shot.id, regenerate });\n}\n\n/**\n * \u5355\u4E2A\u5206\u955C\u5361\u7247\u3002\n */\nfunction renderShotCard(shot) {\n    // \u5361\u7247\n    const card = createElement("article", "card shot-card shot-card-rich");\n    card.id = `shot-${shot.id}`;\n    // \u5361\u7247\u5934\n    const cardHead = createElement("div", "shot-head");\n    // \u6807\u9898\u5BB9\u5668\n    const titles = createElement("div", "shot-title");\n    titles.append(createElement("span", "shot-id", shot.id));\n    titles.append(createElement("span", "shot-title-text", shot.title ?? shot.slug ?? `\u955C\u5934 ${shot.id}`));\n    if (shot.slug && shot.title) titles.append(createElement("span", "shot-slug", shot.slug));\n    cardHead.append(titles);\n    // \u72B6\u6001\u4E0E\u573A\u666F\n    const headBadges = createElement("div", "chip-row");\n    headBadges.append(shotStatusBadge(shot));\n    if (shot.finalized_run !== null && shot.finalized_run !== undefined) {\n        headBadges.append(createElement("span", "chip chip-final", `\u5DF2\u5B9A\u7A3F ${shortId(shot.finalized_run)}`));\n    } else if (shot.succeeded_count > 0) {\n        headBadges.append(createElement("span", "chip chip-pending", "\u5F85\u5B9A\u7A3F"));\n    }\n    if (shot.scene !== null && shot.scene !== undefined) headBadges.append(entityChip(shot.scene, "chip-scene"));\n    cardHead.append(headBadges);\n    card.append(cardHead);\n\n    // \u5185\u5BB9\u6458\u8981\n    const summary = createElement("p", "shot-summary", shot.summary);\n    card.append(summary);\n\n    // \u4EBA\u7269\n    const cast = createElement("div", "shot-line");\n    cast.append(createElement("span", "shot-line-label", "\u4EBA\u7269"));\n    cast.append(entityChips(shot.characters, "chip-character"));\n    card.append(cast);\n\n    // \u53C2\u8003\u56FE\n    const references = renderShotReferences(shot);\n    if (references !== null) card.append(references);\n\n    // \u5236\u4F5C\u53C2\u6570\n    const meta = createElement("div", "shot-meta-grid");\n    meta.append(createElement("span", "", `seed ${shot.seed}`));\n    meta.append(createElement("span", "", shot.length !== null ? `${shot.length} \u5E27` : "\u5E27\u6570\u672A\u77E5"));\n    meta.append(\n        createElement("span", "", shot.duration_seconds !== null ? formatSeconds(shot.duration_seconds) : "\u65F6\u957F\u672A\u77E5"),\n    );\n    meta.append(createElement("span", "", `${shot.width}x${shot.height}`));\n    meta.append(createElement("span", "", shot.steps !== null ? `steps ${shot.steps}` : "steps \u9ED8\u8BA4"));\n    meta.append(createElement("span", "", shot.cfg !== null ? `cfg ${shot.cfg}` : "cfg \u9ED8\u8BA4"));\n    meta.append(createElement("span", "", `\u9996\u5E27 ${shot.first_frame ?? "\u65E0"}`));\n    meta.append(createElement("span", "", shot.workflow ?? "\u9ED8\u8BA4 workflow"));\n    meta.append(createElement("span", "", `${shot.runs_count} run / ${shot.succeeded_count} \u6210\u529F`));\n    card.append(meta);\n\n    // \u751F\u6210 / \u91CD\u65B0\u751F\u6210\n    const activeTask = shot.active_task ?? null;\n    const running = activeTask !== null || shot.latest_status === "running" || shot.latest_status === "queued";\n    const regenerate = shot.done === true;\n    const actions = createElement("div", "card-actions shot-actions");\n    const generate = createElement(\n        "button",\n        "button",\n        running ? (activeTask !== null ? `${activeTask.label}\u2026` : "\u751F\u6210\u4E2D\u2026") : regenerate ? "\u91CD\u65B0\u751F\u6210" : "\u751F\u6210",\n    );\n    generate.type = "button";\n    generate.disabled = running;\n    if (running) generate.title = activeTask !== null ? `\u4EFB\u52A1 ${activeTask.task_id}` : "\u5DF2\u6709\u955C\u5934\u5728\u751F\u6210";\n    generate.addEventListener("click", async () => {\n        if (generate.disabled) return;\n        if (regenerate && !window.confirm(`\u91CD\u65B0\u751F\u6210\u955C\u5934 ${shot.id}\uFF1F\u4F1A\u521B\u5EFA\u65B0\u7684\u62CD\u6444\u4EFB\u52A1\u3002`)) return;\n        generate.disabled = true;\n        const label = generate.textContent;\n        generate.textContent = "\u63D0\u4EA4\u4E2D\u2026";\n        try {\n            const data = await requestShotGeneration(shot, regenerate);\n            showToast(`\u5DF2\u521B\u5EFA\u4EFB\u52A1 ${shortId(data.task_id ?? "")}`);\n            await reloadView();\n        } catch (error) {\n            showToast(error instanceof Error ? error.message : "\u521B\u5EFA\u4EFB\u52A1\u5931\u8D25", true);\n            generate.disabled = false;\n            generate.textContent = label;\n        }\n    });\n    actions.append(generate);\n    if (activeTask !== null) {\n        const progressLink = createElement("button", "button ghost", "\u67E5\u770B\u4EFB\u52A1");\n        progressLink.type = "button";\n        progressLink.addEventListener("click", () => {\n            window.location.hash = `${HASH_PREFIX}tasks`;\n        });\n        actions.append(progressLink);\n    }\n    card.append(actions);\n\n    // \u5B8C\u6574\u63D0\u793A\u8BCD\n    const promptDetails = createElement("details", "shot-prompt");\n    const referenceCount = Array.isArray(shot.references) ? shot.references.length : 0;\n    promptDetails.append(\n        createElement("summary", "", referenceCount > 0 ? `\u5B8C\u6574\u63D0\u793A\u8BCD \xB7 \u53C2\u8003\u56FE ${referenceCount}` : "\u5B8C\u6574\u63D0\u793A\u8BCD"),\n    );\n    promptDetails.append(renderPromptText(shot));\n    card.append(promptDetails);\n\n    if (shot.notes) card.append(createElement("p", "shot-notes", `\u5907\u6CE8\uFF1A${shot.notes}`));\n\n    // \u4EA7\u7269\u533A\u5757\n    const artifacts = Array.isArray(shot.artifacts) ? shot.artifacts : [];\n    const artifactHead = createElement("div", "shot-section-head");\n    artifactHead.append(createElement("h4", "", `\u4EA7\u51FA\u7269\uFF08${artifacts.length}\uFF09`));\n    artifactHead.append(createElement("span", "muted", `${shot.runs_count} run / ${shot.succeeded_count} \u6210\u529F`));\n    card.append(artifactHead);\n    if (artifacts.length === 0) {\n        card.append(createElement("p", "muted", "\u8FD8\u6CA1\u6709\u4EA7\u51FA\u7269\u3002"));\n    } else {\n        // \u5B9A\u7A3F\u7A3F\u4EF6\u6392\u5728\u6700\u524D\n        const ordered = [...artifacts].sort((a, b) => (a.finalized === true ? 0 : 1) - (b.finalized === true ? 0 : 1));\n        // \u4EA7\u7269\u5217\u8868\n        const list = createElement("div", "artifact-list");\n        for (const item of ordered) list.append(renderShotArtifactRow(item, artifacts, shot));\n        card.append(list);\n    }\n\n    card.append(renderShotRunHistory(shot));\n    return card;\n}\n\n/**\n * \u5206\u955C\u4EA7\u7269\u7684\u5355\u884C\u5C55\u793A\u3002\n */\nfunction renderShotArtifactRow(item, all, shot) {\n    // \u4EA7\u7269\n    const output = item.output;\n    // \u884C\n    const row = createElement("div", "artifact-row");\n    // \u7F29\u7565\u56FE\n    const thumb = createElement("div", "artifact-thumb");\n    // \u662F\u5426\u53EF\u7528\n    const available = output.present === true && output.lfs_pointer !== true;\n    if (available && output.kind === "video") {\n        // \u89C6\u9891\u9996\u5E27\n        const video = document.createElement("video");\n        video.src = `${output.media_url}#t=0.1`;\n        video.muted = true;\n        video.playsInline = true;\n        video.preload = "metadata";\n        thumb.append(video);\n    } else if (available && output.kind === "image") {\n        // \u56FE\u7247\u7F29\u7565\u56FE\n        const image = document.createElement("img");\n        image.src = output.media_url;\n        image.alt = output.name;\n        image.loading = "lazy";\n        thumb.append(image);\n    } else {\n        thumb.append(createElement("span", "artifact-thumb-icon", KIND_ICON[output.kind] ?? "\u2193"));\n    }\n    if (!output.present) thumb.append(createElement("span", "artifact-thumb-note", "\u7F3A\u5931"));\n    else if (output.lfs_pointer) thumb.append(createElement("span", "artifact-thumb-note", "LFS"));\n    row.append(thumb);\n\n    // \u4FE1\u606F\n    const info = createElement("div", "artifact-info");\n    info.append(createElement("div", "artifact-name", output.name));\n    // \u5143\u4FE1\u606F\n    const meta = createElement("div", "artifact-meta");\n    meta.append(kindBadge(output.kind));\n    meta.append(statusBadge(item.run_status));\n    meta.append(createElement("span", "", shortId(item.run_id)));\n    meta.append(createElement("span", "", formatTime(item.started_at)));\n    meta.append(createElement("span", "", formatBytes(output.bytes)));\n    if (item.finalized === true) meta.append(createElement("span", "chip chip-final", "\u5B9A\u7A3F\u7A3F\u4EF6"));\n    info.append(meta);\n    row.append(info);\n\n    // \u64CD\u4F5C\n    const actions = createElement("div", "artifact-row-actions");\n    if (available && PREVIEW_KINDS.has(output.kind)) {\n        // \u9884\u89C8\u6309\u94AE\n        const preview = createElement("button", "button ghost", output.kind === "video" ? "\u64AD\u653E" : "\u67E5\u770B");\n        preview.type = "button";\n        preview.addEventListener("click", () => openArtifact(item, all));\n        actions.append(preview);\n    }\n    // \u4E0B\u8F7D\u94FE\u63A5\n    const download = createElement("a", "button ghost", "\u4E0B\u8F7D");\n    download.href = output.download_url;\n    actions.append(download);\n    // \u5B9A\u7A3F\u6309\u94AE\uFF08\u4EC5\u89C6\u9891\u4EA7\u7269\u4E14\u6587\u4EF6\u5728\u5DE5\u4F5C\u533A\uFF09\n    if (shot !== undefined && output.kind === "video" && available) {\n        // \u5B9A\u7A3F / \u64A4\u9500\u6309\u94AE\n        const takeButton = createElement("button", "button ghost", item.finalized === true ? "\u64A4\u9500\u5B9A\u7A3F" : "\u5B9A\u7A3F");\n        takeButton.type = "button";\n        takeButton.addEventListener("click", () => submitTake(shot, item, takeButton));\n        actions.append(takeButton);\n    }\n    row.append(actions);\n    return row;\n}\n\n/**\n * \u63D0\u4EA4\u955C\u5934\u5B9A\u7A3F\u6216\u64A4\u9500\u3002\n */\nasync function submitTake(shot, item, button) {\n    // \u8BF7\u6C42\u4F53\n    const body = { shot_id: shot.id };\n    if (currentEpisodeId !== null) body.episode_id = currentEpisodeId;\n    button.disabled = true;\n    try {\n        if (item.finalized === true) {\n            await postJson(API.takeRevoke, body);\n            showToast(`\u955C ${shot.id} \u5DF2\u64A4\u9500\u5B9A\u7A3F`);\n        } else {\n            body.run_id = item.run_id;\n            body.output = item.output.name;\n            await postJson(API.takeFinalize, body);\n            showToast(`\u955C ${shot.id} \u5DF2\u5B9A\u7A3F\uFF1A${item.output.name}`);\n        }\n        await reloadView();\n    } catch (error) {\n        showToast(error instanceof Error ? error.message : "\u5B9A\u7A3F\u5931\u8D25", true);\n        button.disabled = false;\n    }\n}\n\n/**\n * \u5386\u53F2 run \u6298\u53E0\u533A\u3002\n */\nfunction renderShotRunHistory(shot) {\n    // run \u5217\u8868\n    const runs = Array.isArray(shot.runs) ? shot.runs : [];\n    // \u6298\u53E0\u533A\n    const details = createElement("details", "shot-runs");\n    details.append(createElement("summary", "", `\u5386\u53F2 run\uFF08${runs.length}\uFF09`));\n    if (runs.length === 0) {\n        details.append(createElement("p", "muted", "\u8FD8\u6CA1\u6709 run\u3002"));\n        return details;\n    }\n    // \u5217\u8868\n    const list = createElement("ul", "run-list");\n    for (const run of runs) {\n        // run \u884C\n        const item = createElement("li", "run-item");\n        // \u4E3B\u4FE1\u606F\n        const main = createElement("div", "run-main");\n        main.append(statusBadge(run.status));\n        main.append(createElement("code", "mono", shortId(run.run_id)));\n        if (run.finalized === true) main.append(createElement("span", "chip chip-final", "\u5B9A\u7A3F"));\n        main.append(createElement("span", "", `${run.outputs.length} \u4E2A\u4EA7\u7269`));\n        main.append(\n            createElement("span", "muted", `${formatDuration(run.duration_ms)} \xB7 ${formatTime(run.started_at)}`),\n        );\n        item.append(main);\n        list.append(item);\n    }\n    details.append(list);\n    return details;\n}\n\n/**\n * \u4EA7\u51FA\u7269\u9875\u3002\n */\nfunction renderArtifacts(data) {\n    // \u5168\u90E8\u6761\u76EE\n    const items = Array.isArray(data.items) ? data.items : [];\n    // label \u5019\u9009\n    const labels = Array.isArray(data.labels) ? data.labels : [];\n    // \u7C7B\u578B\u5019\u9009\n    const kinds = Array.isArray(data.kinds) ? data.kinds : [];\n    // \u603B\u6570\n    const total = Number(data.total ?? items.length);\n\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    // \u9875\u5934\u6587\u672C\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", "Artifacts"));\n    headText.append(createElement("h2", "page-title", "\u4EA7\u51FA\u7269"));\n    headText.append(createElement("p", "page-subtitle", "\u70B9\u51FB\u89C6\u9891\u6216\u56FE\u7247\u9884\u89C8\uFF1B\u652F\u6301\u62D6\u52A8\u8FDB\u5EA6\u6761\u64AD\u653E\u3002"));\n    head.append(headText);\n    viewRoot.append(head);\n\n    // \u7B5B\u9009\u680F\n    const filters = createElement("div", "filter-bar");\n    filters.append(\n        buildSelect(\n            "\u955C\u5934",\n            labels,\n            artifactFilters.label,\n            (value) => {\n                artifactFilters.label = value;\n                refresh();\n            },\n            "\u5168\u90E8\u955C\u5934",\n        ),\n    );\n    filters.append(\n        buildSelect(\n            "\u72B6\u6001",\n            ["queued", "running", "succeeded", "failed", "cancelled", "interrupted"],\n            artifactFilters.status,\n            (value) => {\n                artifactFilters.status = value;\n                refresh();\n            },\n            "\u5168\u90E8\u72B6\u6001",\n            STATUS_LABEL,\n        ),\n    );\n    filters.append(\n        buildSelect(\n            "\u7C7B\u578B",\n            kinds,\n            artifactFilters.kind,\n            (value) => {\n                artifactFilters.kind = value;\n                refresh();\n            },\n            "\u5168\u90E8\u7C7B\u578B",\n            KIND_LABEL,\n        ),\n    );\n    // \u641C\u7D22\u6846\n    const search = createElement("input", "input search");\n    search.type = "search";\n    search.placeholder = "\u641C\u7D22 run / label / prompt / \u6587\u4EF6\u540D";\n    search.value = artifactFilters.search;\n    search.addEventListener("input", () => {\n        artifactFilters.search = search.value;\n        refresh();\n    });\n    filters.append(search);\n    viewRoot.append(filters);\n\n    // \u7ED3\u679C\u6458\u8981\n    const summaryHead = createElement("div", "section-head");\n    summaryHead.append(createElement("h3", "section-title", "\u5168\u90E8\u4EA7\u51FA\u7269"));\n    // \u6458\u8981\n    const summary = createElement("span", "section-meta", "");\n    summaryHead.append(summary);\n    viewRoot.append(summaryHead);\n\n    // \u7F51\u683C\n    const grid = createElement("div", "grid");\n    viewRoot.append(grid);\n\n    /**\n     * \u6309\u5F53\u524D\u7B5B\u9009\u5237\u65B0\u7F51\u683C\u3002\n     */\n    function refresh() {\n        // \u8FC7\u6EE4\u7ED3\u679C\n        const filtered = filterArtifacts(items);\n        summary.textContent = `\u663E\u793A ${filtered.length} / ${total}`;\n        clearNode(grid);\n        if (filtered.length === 0) {\n            grid.append(emptyNode("\u6CA1\u6709\u5339\u914D\u7684\u4EA7\u51FA\u7269", "\u8C03\u6574\u7B5B\u9009\u6761\u4EF6\u6216\u5148\u6267\u884C\u751F\u6210\u4EFB\u52A1\u3002"));\n            return;\n        }\n        renderArtifactCards(grid, filtered);\n    }\n\n    refresh();\n}\n\n/**\n * \u6784\u9020\u4E0B\u62C9\u7B5B\u9009\u3002\n */\nfunction buildSelect(label, options, value, onChange, allLabel, labels) {\n    // \u5B57\u6BB5\u5BB9\u5668\n    const field = createElement("label", "field");\n    field.append(createElement("span", "field-label", label));\n    // \u4E0B\u62C9\u6846\n    const select = createElement("select", "select");\n    select.append(new Option(allLabel, ""));\n    for (const option of options) {\n        // \u9009\u9879\u6587\u6848\n        const text = labels !== undefined ? (labels[option] ?? option) : option;\n        select.append(new Option(text, option));\n    }\n    select.value = value;\n    select.addEventListener("change", () => onChange(select.value));\n    field.append(select);\n    return field;\n}\n\n/**\n * \u6309\u7B5B\u9009\u6761\u4EF6\u8FC7\u6EE4\u4EA7\u7269\u3002\n */\nfunction filterArtifacts(items) {\n    // \u641C\u7D22\u8BCD\n    const search = artifactFilters.search.trim().toLowerCase();\n    return items.filter((item) => {\n        if (artifactFilters.label !== "" && item.label !== artifactFilters.label) return false;\n        if (artifactFilters.status !== "" && item.run_status !== artifactFilters.status) return false;\n        if (artifactFilters.kind !== "" && item.output.kind !== artifactFilters.kind) return false;\n        if (search !== "") {\n            // \u641C\u7D22\u6587\u672C\n            const haystack =\n                `${item.run_id} ${item.label ?? ""} ${item.prompt ?? ""} ${item.output.name}`.toLowerCase();\n            if (!haystack.includes(search)) return false;\n        }\n        return true;\n    });\n}\n\n/**\n * \u6E32\u67D3\u4EA7\u7269\u5361\u7247\u5217\u8868\u3002\n */\nfunction renderArtifactCards(container, items) {\n    for (const item of items) container.append(renderArtifactCard(item, items));\n}\n\n/**\n * \u5355\u4E2A\u4EA7\u7269\u5361\u7247\u3002\n */\nfunction renderArtifactCard(item, items) {\n    // \u4EA7\u7269\n    const output = item.output;\n    // \u5361\u7247\n    const card = createElement("article", "card artifact-card");\n    // \u9884\u89C8\u533A\n    const preview = createElement("div", "artifact-preview");\n    // \u662F\u5426\u53EF\u9884\u89C8\n    const available = output.present === true && output.lfs_pointer !== true;\n    if (available && (output.kind === "video" || output.kind === "image")) {\n        if (output.kind === "video") {\n            // \u89C6\u9891\u9996\u5E27\n            const video = document.createElement("video");\n            video.src = `${output.media_url}#t=0.1`;\n            video.muted = true;\n            video.playsInline = true;\n            video.preload = "metadata";\n            preview.append(video);\n        } else {\n            // \u56FE\u7247\u7F29\u7565\u56FE\n            const image = document.createElement("img");\n            image.src = output.media_url;\n            image.alt = output.name;\n            image.loading = "lazy";\n            preview.append(image);\n        }\n    } else {\n        preview.append(createElement("span", "preview-icon", KIND_ICON[output.kind] ?? "\u2193"));\n    }\n    if (!output.present) preview.append(createElement("span", "preview-note", "\u6587\u4EF6\u7F3A\u5931"));\n    else if (output.lfs_pointer) preview.append(createElement("span", "preview-note", "LFS \u672A\u62C9\u53D6"));\n    if (available && PREVIEW_KINDS.has(output.kind)) {\n        // \u64AD\u653E/\u9884\u89C8\u6309\u94AE\n        const open = createElement("button", "play-button", output.kind === "video" ? "\u25B6" : "\u2315");\n        open.type = "button";\n        open.title = output.kind === "video" ? "\u64AD\u653E" : "\u9884\u89C8";\n        open.addEventListener("click", (event) => {\n            event.stopPropagation();\n            openArtifact(item, items);\n        });\n        preview.append(open);\n    }\n    card.append(preview);\n\n    // \u5361\u7247\u5185\u5BB9\n    const body = createElement("div", "card-body");\n    // \u6807\u9898\u884C\n    const titleRow = createElement("div", "card-meta");\n    titleRow.append(createElement("h3", "card-title", output.name));\n    titleRow.append(kindBadge(output.kind));\n    body.append(titleRow);\n\n    // \u5143\u4FE1\u606F\n    const meta = createElement("div", "card-meta");\n    meta.append(createElement("span", "", item.label ?? shortId(item.run_id)));\n    meta.append(createElement("span", "", formatTime(item.started_at)));\n    meta.append(createElement("span", "", formatBytes(output.bytes)));\n    body.append(meta);\n\n    // \u64CD\u4F5C\u533A\n    const actions = createElement("div", "card-actions");\n    if (available && PREVIEW_KINDS.has(output.kind)) {\n        // \u6253\u5F00\u6309\u94AE\n        const open = createElement(\n            "button",\n            "button",\n            output.kind === "video" ? "\u64AD\u653E" : output.kind === "image" ? "\u67E5\u770B" : "\u9884\u89C8",\n        );\n        open.type = "button";\n        open.addEventListener("click", () => openArtifact(item, items));\n        actions.append(open);\n    }\n    // \u4E0B\u8F7D\u94FE\u63A5\n    const download = createElement("a", "button ghost", "\u4E0B\u8F7D");\n    download.href = output.download_url;\n    actions.append(download);\n    body.append(actions);\n    card.append(body);\n    return card;\n}\n\n/**\n * \u6253\u5F00\u4EA7\u7269\u3002\n */\nfunction openArtifact(item, list) {\n    // \u4EA7\u7269\n    const output = item.output;\n    if (output.present !== true) {\n        showToast("\u6587\u4EF6\u4E0D\u5B58\u5728\uFF0C\u53EF\u80FD\u5C1A\u672A\u4ECE Git LFS \u62C9\u53D6", true);\n        return;\n    }\n    if (output.lfs_pointer === true) {\n        showToast("\u8FD9\u662F Git LFS pointer\uFF0C\u8BF7\u5148\u6267\u884C git lfs pull", true);\n        return;\n    }\n    if (output.kind === "video" || output.kind === "audio") {\n        // \u53EF\u64AD\u653E\u6761\u76EE\n        const playable = playableItems(list ?? [item]);\n        // \u5F53\u524D\u7D22\u5F15\n        const index = playable.findIndex((entry) => entry.url === output.media_url);\n        openPlayer(playable, Math.max(index, 0));\n        return;\n    }\n    if (output.kind === "image") {\n        openImage(item);\n        return;\n    }\n    if (output.kind === "json" || output.kind === "text") {\n        void openText(item);\n        return;\n    }\n    window.location.href = output.download_url;\n}\n\n/**\n * \u53EF\u64AD\u653E\u5217\u8868\u3002\n */\nfunction playableItems(items) {\n    // \u7ED3\u679C\n    const out = [];\n    for (const item of items) {\n        // \u4EA7\u7269\n        const output = item.output;\n        if (output === undefined || output.present !== true || output.lfs_pointer === true) continue;\n        if (!PLAYABLE_KINDS.has(output.kind)) continue;\n        out.push({\n            title: `${item.label ?? item.run_id} \xB7 ${output.name}`,\n            url: output.media_url,\n            kind: output.kind,\n        });\n    }\n    return out;\n}\n\n/**\n * \u4EFB\u52A1\u9875\u3002\n */\nfunction renderTasks(data) {\n    // \u4EFB\u52A1\u5217\u8868\n    const tasks = Array.isArray(data.items) ? data.items : [];\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    // \u9875\u5934\u6587\u672C\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", "Tasks"));\n    headText.append(createElement("h2", "page-title", "\u4EFB\u52A1"));\n    headText.append(\n        createElement("p", "page-subtitle", `\u5171 ${data.total ?? tasks.length} \u4E2A\u4EFB\u52A1\uFF1B\u70B9\u51FB\u8BE6\u60C5\u67E5\u770B run \u4E0E\u4E8B\u4EF6\u3002`),\n    );\n    head.append(headText);\n    viewRoot.append(head);\n    if (tasks.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u4EFB\u52A1", "daoyan run / shot / batch \u521B\u5EFA\u7684\u4EFB\u52A1\u4F1A\u5728\u8FD9\u91CC\u51FA\u73B0\u3002"));\n        return;\n    }\n    viewRoot.append(renderTaskList(tasks));\n    tickTaskElapsed();\n}\n\n/**\n * \u6E32\u67D3\u4EFB\u52A1\u5217\u8868\u3002\n */\nfunction renderTaskList(tasks) {\n    // \u5BB9\u5668\n    const list = createElement("div", "task-list");\n    for (const task of tasks) {\n        // \u4EFB\u52A1\u5361\u7247\n        const card = renderTaskCard(task);\n        list.append(card);\n        if (openTaskId === task.task_id) {\n            // \u8BE6\u60C5\u5BB9\u5668\n            const detail = card.querySelector(".task-detail");\n            void loadTaskDetail(task.task_id, detail);\n        }\n    }\n    return list;\n}\n\n/**\n * \u5355\u4E2A\u4EFB\u52A1\u5361\u7247\u3002\n */\nfunction renderTaskCard(task) {\n    // \u5361\u7247\n    const card = createElement("article", "task-card");\n    // \u5934\u90E8\n    const head = createElement("div", "task-head");\n    // \u6807\u9898\u533A\n    const title = createElement("div", "task-title");\n    title.append(statusBadge(task.status));\n    title.append(createElement("h3", "task-command", task.command));\n    title.append(badge(TASK_KIND_LABEL[task.kind] ?? task.kind, ""));\n    head.append(title);\n\n    // \u8BE6\u60C5\u6309\u94AE\n    const toggle = createElement("button", "button ghost task-toggle", openTaskId === task.task_id ? "\u6536\u8D77" : "\u8BE6\u60C5");\n    toggle.type = "button";\n    head.append(toggle);\n    card.append(head);\n\n    // \u5143\u4FE1\u606F\n    const meta = createElement("div", "task-meta");\n    meta.append(createElement("span", "", `task ${shortId(task.task_id)}`));\n    meta.append(createElement("span", "", `machine ${task.machine_id}`));\n    meta.append(createElement("span", "", `${task.run_count ?? 0} run`));\n    meta.append(createElement("span", "", formatTime(task.created_at)));\n    if (task.error !== null && task.error !== undefined) {\n        meta.append(createElement("span", "", `${task.error.code}: ${task.error.message}`));\n    }\n    card.append(meta);\n\n    // \u5B9E\u65F6\u8FDB\u5EA6\n    const progress = task.progress;\n    if (progress !== null && progress !== undefined) {\n        // \u8FDB\u5EA6\u5BB9\u5668\n        const block = createElement("div", "task-progress");\n        // \u4E00\u884C\u6458\u8981\n        const line = createElement("div", "task-progress-line");\n        if (task.active === true) line.append(createElement("span", "task-pulse"));\n        line.append(createElement("span", "task-progress-label", progress.label ?? "\u2014"));\n        if (progress.run_id !== null && progress.run_id !== undefined) {\n            line.append(createElement("code", "mono task-progress-run", shortId(progress.run_id)));\n        }\n        // \u8FD0\u884C\u65F6\u957F\uFF08\u6BCF\u79D2\u5237\u65B0\uFF09\n        const elapsed = createElement("span", "task-progress-elapsed", "");\n        elapsed.dataset.taskElapsed = "1";\n        const started = task.started_at ?? task.created_at;\n        if (started !== null && started !== undefined) elapsed.dataset.started = started;\n        if (task.active !== true) {\n            const finished = task.finished_at ?? progress.updated_at;\n            if (finished !== null && finished !== undefined) elapsed.dataset.finished = finished;\n        }\n        line.append(elapsed);\n        line.append(createElement("span", "muted", `${progress.event_count ?? 0} \u4E2A\u4E8B\u4EF6`));\n        block.append(line);\n        // \u6D3B\u52A8\u4EFB\u52A1\u663E\u793A\u6D41\u52A8\u8FDB\u5EA6\u6761\n        if (task.active === true) {\n            const bar = createElement("div", "task-progress-bar");\n            bar.append(createElement("span"));\n            block.append(bar);\n        }\n        card.append(block);\n    }\n\n    // \u8BE6\u60C5\u5BB9\u5668\n    const detail = createElement("div", "task-detail");\n    detail.hidden = openTaskId !== task.task_id;\n    card.append(detail);\n    toggle.addEventListener("click", () => {\n        if (openTaskId === task.task_id) {\n            openTaskId = null;\n            detail.hidden = true;\n            toggle.textContent = "\u8BE6\u60C5";\n            return;\n        }\n        openTaskId = task.task_id;\n        for (const other of viewRoot.querySelectorAll(".task-detail")) other.hidden = true;\n        for (const button of viewRoot.querySelectorAll(".task-toggle")) button.textContent = "\u8BE6\u60C5";\n        detail.hidden = false;\n        toggle.textContent = "\u6536\u8D77";\n        void loadTaskDetail(task.task_id, detail);\n    });\n    return card;\n}\n\n/**\n * \u52A0\u8F7D\u4EFB\u52A1\u8BE6\u60C5\u3002\n */\nasync function loadTaskDetail(taskId, container) {\n    if (container === null) return;\n    container.hidden = false;\n    // \u7F13\u5B58\u9879\n    const cached = taskDetailCache.get(taskId);\n    const force = taskDetailRefresh;\n    // \u6709\u7F13\u5B58\u4E14\u65E0\u9700\u5F3A\u5236\u5237\u65B0\uFF1A\u76F4\u63A5\u590D\u7528\n    if (cached !== undefined && !force && Date.now() - cached.at < TASK_DETAIL_CACHE_MS) {\n        renderTaskDetail(container, cached.data);\n        return;\n    }\n    // \u5F3A\u5236\u5237\u65B0\u65F6\u5148\u663E\u793A\u65E7\u5185\u5BB9\uFF0C\u907F\u514D\u6BCF\u6B21\u4E8B\u4EF6\u90FD\u95EA"\u52A0\u8F7D\u4E2D"\n    if (cached !== undefined) renderTaskDetail(container, cached.data);\n    else container.textContent = "\u52A0\u8F7D\u4E2D\u2026";\n    try {\n        // \u8BE6\u60C5\u6570\u636E\n        const data = await requestJson(`/api/tasks/${encodeURIComponent(taskId)}`);\n        taskDetailCache.set(taskId, { at: Date.now(), data });\n        taskDetailRefresh = false;\n        renderTaskDetail(container, data);\n    } catch (error) {\n        if (cached === undefined)\n            container.textContent = `\u52A0\u8F7D\u5931\u8D25\uFF1A${error instanceof Error ? error.message : String(error)}`;\n    }\n}\n\n/**\n * \u6E32\u67D3\u4EFB\u52A1\u8BE6\u60C5\u3002\n */\nfunction renderTaskDetail(container, data) {\n    clearNode(container);\n    // \u5B9E\u65F6\u8FDB\u5EA6\n    const progress = data.progress;\n    if (progress !== null && progress !== undefined) {\n        // \u8FDB\u5EA6\u6761\n        const head = createElement("div", "task-progress task-progress-detail");\n        const line = createElement("div", "task-progress-line");\n        if (data.active === true) line.append(createElement("span", "task-pulse"));\n        line.append(createElement("span", "task-progress-label", progress.label ?? "\u2014"));\n        if (progress.run_id !== null && progress.run_id !== undefined) {\n            line.append(createElement("code", "mono task-progress-run", shortId(progress.run_id)));\n        }\n        const elapsed = createElement("span", "task-progress-elapsed", "");\n        elapsed.dataset.taskElapsed = "1";\n        const started = data.started_at ?? data.created_at;\n        if (started !== null && started !== undefined) elapsed.dataset.started = started;\n        if (data.active !== true) {\n            const finished = data.finished_at ?? progress.updated_at;\n            if (finished !== null && finished !== undefined) elapsed.dataset.finished = finished;\n        }\n        line.append(elapsed);\n        line.append(createElement("span", "muted", `${progress.event_count ?? 0} \u4E2A\u4E8B\u4EF6`));\n        head.append(line);\n        if (data.active === true) {\n            const bar = createElement("div", "task-progress-bar");\n            bar.append(createElement("span"));\n            head.append(bar);\n        }\n        container.append(head);\n        tickTaskElapsed();\n    }\n    // run \u5217\u8868\n    const runs = Array.isArray(data.runs_detail) ? data.runs_detail : [];\n    container.append(createElement("h4", "", `Runs\uFF08${runs.length}\uFF09`));\n    if (runs.length === 0) {\n        container.append(createElement("p", "muted", "\u8FD8\u6CA1\u6709 run\u3002"));\n    } else {\n        // run \u5217\u8868\u8282\u70B9\n        const list = createElement("ul", "run-list");\n        for (const run of runs) {\n            // run \u884C\n            const item = createElement("li", "run-item");\n            // run \u4E3B\u4FE1\u606F\n            const main = createElement("div", "run-main");\n            main.append(statusBadge(run.status));\n            main.append(createElement("code", "mono", shortId(run.run_id)));\n            main.append(createElement("span", "", run.label ?? "\u65E0 label"));\n            main.append(\n                createElement("span", "muted", `${run.outputs.length} \u4E2A\u4EA7\u7269 \xB7 ${formatDuration(run.duration_ms)}`),\n            );\n            item.append(main);\n\n            // run \u64CD\u4F5C\n            const actions = createElement("div", "card-actions");\n            // \u9996\u4E2A\u4EA7\u7269\n            const firstOutput = run.outputs[0];\n            if (\n                firstOutput !== undefined &&\n                firstOutput.present === true &&\n                firstOutput.lfs_pointer !== true &&\n                PREVIEW_KINDS.has(firstOutput.kind)\n            ) {\n                // \u9884\u89C8\u6309\u94AE\n                const preview = createElement("button", "button ghost", "\u9884\u89C8");\n                preview.type = "button";\n                preview.addEventListener("click", () => {\n                    openArtifact(artifactItemFromRun(run, firstOutput));\n                });\n                actions.append(preview);\n            }\n            item.append(actions);\n            list.append(item);\n        }\n        container.append(list);\n    }\n\n    // \u4E8B\u4EF6\n    const events = Array.isArray(data.events) ? data.events : [];\n    container.append(createElement("h4", "", `\u4E8B\u4EF6\uFF08${events.length}\uFF09`));\n    if (events.length === 0) {\n        container.append(createElement("p", "muted", "\u6682\u65E0\u4E8B\u4EF6\u3002"));\n        return;\n    }\n    // \u4E8B\u4EF6\u5217\u8868\n    const eventList = createElement("ul", "events");\n    for (const event of events) {\n        // \u4E8B\u4EF6\u884C\n        const item = createElement("li", "event");\n        item.append(createElement("span", "event-time", event.ts.slice(11, 19)));\n        item.append(createElement("span", "event-type", event.type));\n        // \u4E8B\u4EF6\u6570\u636E\u6587\u672C\n        const dataText = JSON.stringify(event.data ?? {});\n        item.append(\n            createElement("span", "event-data", dataText.length > 220 ? `${dataText.slice(0, 220)}\u2026` : dataText),\n        );\n        eventList.append(item);\n    }\n    container.append(eventList);\n    // \u8FD0\u884C\u4E2D\u81EA\u52A8\u8DDF\u968F\u6700\u65B0\u4E8B\u4EF6\n    if (data.active === true) {\n        window.requestAnimationFrame(() => {\n            eventList.scrollTop = eventList.scrollHeight;\n        });\n    }\n}\n\n/**\n * \u7528 run \u4FE1\u606F\u6784\u9020\u4EA7\u7269\u6761\u76EE\u3002\n */\nfunction artifactItemFromRun(run, output) {\n    return {\n        run_id: run.run_id,\n        task_id: run.task_id,\n        machine_id: run.machine_id,\n        label: run.label,\n        run_status: run.status,\n        started_at: run.started_at,\n        finished_at: run.finished_at,\n        workflow: run.workflow.path,\n        prompt: run.prompt,\n        output,\n    };\n}\n\n/**\n * \u6210\u7247\u9875\u3002\n */\nfunction renderFinals(data) {\n    // \u6210\u7247\u5217\u8868\n    const items = Array.isArray(data) ? data : [];\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    // \u9875\u5934\u6587\u672C\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", "Final cuts"));\n    headText.append(createElement("h2", "page-title", "\u6210\u7247"));\n    headText.append(createElement("p", "page-subtitle", "daoyan wrap \u751F\u6210\u7684 final/cut-* \u6587\u4EF6\u3002"));\n    head.append(headText);\n    viewRoot.append(head);\n    if (items.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u6210\u7247", "\u5B8C\u6210\u81F3\u5C11\u4E24\u4E2A\u955C\u5934\u540E\u8FD0\u884C daoyan wrap\u3002"));\n        return;\n    }\n    // \u7F51\u683C\n    const grid = createElement("div", "grid");\n    for (const item of items) {\n        // \u5361\u7247\n        const card = createElement("article", "card final-card");\n        // \u9884\u89C8\u533A\n        const preview = createElement("div", "artifact-preview");\n        if (item.present === true && item.lfs_pointer !== true) {\n            // \u89C6\u9891\u9996\u5E27\n            const video = document.createElement("video");\n            video.src = `${item.media_url}#t=0.1`;\n            video.muted = true;\n            video.playsInline = true;\n            video.preload = "metadata";\n            preview.append(video);\n            // \u64AD\u653E\u6309\u94AE\n            const play = createElement("button", "play-button", "\u25B6");\n            play.type = "button";\n            play.title = "\u64AD\u653E\u6210\u7247";\n            play.addEventListener("click", () => {\n                openPlayer([{ title: item.name, url: item.media_url, kind: "video" }], 0);\n            });\n            preview.append(play);\n        } else {\n            preview.append(createElement("span", "preview-icon", "\u25B6"));\n            preview.append(\n                createElement("span", "preview-note", item.lfs_pointer === true ? "LFS \u672A\u62C9\u53D6" : "\u6587\u4EF6\u7F3A\u5931"),\n            );\n        }\n        card.append(preview);\n\n        // \u5361\u7247\u5185\u5BB9\n        const body = createElement("div", "card-body");\n        body.append(createElement("h3", "card-title", item.name));\n        // \u5143\u4FE1\u606F\n        const meta = createElement("div", "card-meta");\n        meta.append(createElement("span", "", item.created_at !== null ? formatTime(item.created_at) : "\u65E0 manifest"));\n        meta.append(createElement("span", "", formatBytes(item.bytes)));\n        meta.append(createElement("span", "", `${item.clips.length} \u6BB5`));\n        if (item.missing.length > 0) meta.append(createElement("span", "", `\u7F3A ${item.missing.length} \u955C`));\n        body.append(meta);\n\n        // \u64CD\u4F5C\u533A\n        const actions = createElement("div", "card-actions");\n        if (item.present === true && item.lfs_pointer !== true) {\n            // \u64AD\u653E\u6309\u94AE\n            const play = createElement("button", "button", "\u64AD\u653E");\n            play.type = "button";\n            play.addEventListener("click", () => {\n                openPlayer([{ title: item.name, url: item.media_url, kind: "video" }], 0);\n            });\n            actions.append(play);\n        }\n        // \u4E0B\u8F7D\u94FE\u63A5\n        const download = createElement("a", "button ghost", "\u4E0B\u8F7D");\n        download.href = item.download_url;\n        actions.append(download);\n        body.append(actions);\n        card.append(body);\n        grid.append(card);\n    }\n    viewRoot.append(grid);\n}\n\n/**\n * \u5DE5\u4F5C\u6D41\u9875\u3002\n */\nfunction renderWorkflows(data) {\n    // \u5DE5\u4F5C\u6D41\u5217\u8868\n    const items = Array.isArray(data) ? data : [];\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    // \u9875\u5934\u6587\u672C\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", "Workflows"));\n    headText.append(createElement("h2", "page-title", "\u5DE5\u4F5C\u6D41"));\n    headText.append(createElement("p", "page-subtitle", "workflows/ \u4E0B\u7684 ComfyUI API \u56FE\u4E0E bindings\u3002"));\n    head.append(headText);\n    viewRoot.append(head);\n    if (items.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u5DE5\u4F5C\u6D41", "\u8FD0\u884C daoyan workflow new / import \u521B\u5EFA\u5DE5\u4F5C\u6D41\u3002"));\n        return;\n    }\n    // \u8868\u683C\n    const list = createElement("div", "table-list");\n    // \u8868\u5934\n    const header = createElement("div", "table-row header");\n    for (const label of ["\u5DE5\u4F5C\u6D41", "\u8282\u70B9", "bindings", "\u9ED8\u8BA4", "\u72B6\u6001"]) header.append(createElement("span", "", label));\n    list.append(header);\n    for (const item of items) {\n        // \u6570\u636E\u884C\n        const row = createElement("div", "table-row");\n        // \u540D\u79F0\u533A\n        const name = createElement("div");\n        name.append(createElement("div", "workflow-name", item.name));\n        name.append(createElement("div", "muted mono", item.path));\n        row.append(name);\n        row.append(createElement("span", "", item.nodes));\n        row.append(createElement("span", "", item.bindings ? "\u6709" : "\u65E0"));\n        row.append(createElement("span", "", item.default ? "\u662F" : "\u2014"));\n        row.append(createElement("span", "", item.valid ? "\u53EF\u89E3\u6790" : "JSON \u635F\u574F"));\n        list.append(row);\n    }\n    viewRoot.append(list);\n}\n\n/**\n * \u6253\u5F00\u64AD\u653E\u5668\u3002\n */\nfunction openPlayer(items, index) {\n    if (items.length === 0) {\n        showToast("\u6CA1\u6709\u53EF\u64AD\u653E\u7684\u4EA7\u7269", true);\n        return;\n    }\n    playerItems = items.slice(0, MAX_PLAYLIST);\n    playerIndex = Math.max(0, Math.min(index, playerItems.length - 1));\n    renderPlayerItem();\n}\n\n/**\n * \u6E32\u67D3\u5F53\u524D\u64AD\u653E\u9879\u3002\n */\nfunction renderPlayerItem() {\n    // \u5F53\u524D\u9879\n    const item = playerItems[playerIndex];\n    if (item === undefined) {\n        closeModal();\n        return;\n    }\n    // \u5A92\u4F53\u5143\u7D20\n    const media = document.createElement(item.kind === "video" ? "video" : "audio");\n    media.controls = true;\n    media.autoplay = true;\n    media.playsInline = true;\n    media.src = item.url;\n    setModal(item.title, media, `${playerIndex + 1} / ${playerItems.length}`);\n    modalPrev.disabled = playerIndex <= 0;\n    modalNext.disabled = playerIndex >= playerItems.length - 1;\n}\n\n/**\n * \u6253\u5F00\u56FE\u7247\u9884\u89C8\u3002\n */\nfunction openImageUrl(url, title) {\n    // \u56FE\u7247\u5143\u7D20\n    const image = document.createElement("img");\n    image.src = url;\n    image.alt = title;\n    setModal(title, image, "\u56FE\u7247");\n    modalPrev.disabled = true;\n    modalNext.disabled = true;\n}\n\n/**\n * \u6253\u5F00\u4EA7\u7269\u56FE\u7247\u3002\n */\nfunction openImage(item) {\n    openImageUrl(item.output.media_url, item.output.name);\n}\n\n/**\n * \u6253\u5F00\u6587\u672C\u9884\u89C8\u3002\n */\nasync function openText(item) {\n    // \u9884\u89C8\u8282\u70B9\n    const pre = createElement("pre", "", "\u52A0\u8F7D\u4E2D\u2026");\n    setModal(item.output.name, pre, "\u6587\u672C\u9884\u89C8");\n    modalPrev.disabled = true;\n    modalNext.disabled = true;\n    try {\n        // \u6587\u672C\u54CD\u5E94\n        const response = await fetch(item.output.media_url);\n        if (!response.ok) throw new Error(`HTTP ${response.status}`);\n        // \u539F\u59CB\u6587\u672C\n        const raw = await response.text();\n        // \u5C55\u793A\u6587\u672C\n        let text = raw;\n        if (item.output.kind === "json") {\n            try {\n                text = JSON.stringify(JSON.parse(raw), null, 2);\n            } catch {\n                text = raw;\n            }\n        }\n        pre.textContent =\n            text.length > TEXT_PREVIEW_LIMIT\n                ? `${text.slice(0, TEXT_PREVIEW_LIMIT)}\\n\\n\u2026\uFF08\u5DF2\u622A\u65AD\uFF0C\u5B8C\u6574\u5185\u5BB9\u8BF7\u4E0B\u8F7D\uFF09`\n                : text;\n    } catch (error) {\n        pre.textContent = `\u8BFB\u53D6\u5931\u8D25\uFF1A${error instanceof Error ? error.message : String(error)}`;\n    }\n}\n\n/**\n * \u8BBE\u7F6E\u6A21\u6001\u6846\u5185\u5BB9\u3002\n */\nfunction setModal(title, content, counter) {\n    modalTitle.textContent = title;\n    clearNode(modalContent);\n    modalContent.append(content);\n    modalCounter.textContent = counter ?? "";\n    modalRoot.hidden = false;\n}\n\n/**\n * \u5173\u95ED\u6A21\u6001\u6846\u3002\n */\nfunction closeModal() {\n    modalRoot.hidden = true;\n    clearNode(modalContent);\n    modalTitle.textContent = "\u9884\u89C8";\n    modalCounter.textContent = "";\n    playerItems = [];\n    playerIndex = 0;\n}\n\n/**\n * \u4E0A\u4E00\u4E2A\u64AD\u653E\u9879\u3002\n */\nfunction modalPrevStep() {\n    if (playerItems.length === 0 || playerIndex <= 0) return;\n    playerIndex -= 1;\n    renderPlayerItem();\n}\n\n/**\n * \u4E0B\u4E00\u4E2A\u64AD\u653E\u9879\u3002\n */\nfunction modalNextStep() {\n    if (playerItems.length === 0 || playerIndex >= playerItems.length - 1) return;\n    playerIndex += 1;\n    renderPlayerItem();\n}\n\n/**\n * \u952E\u76D8\u64CD\u4F5C\u3002\n */\nfunction handleKeydown(event) {\n    if (modalRoot.hidden) return;\n    if (event.key === "Escape") closeModal();\n    else if (event.key === "ArrowLeft") modalPrevStep();\n    else if (event.key === "ArrowRight") modalNextStep();\n}\n\n/**\n * \u542F\u52A8\u5E94\u7528\u3002\n */\nfunction start() {\n    renderShell();\n    renderNav();\n    setActiveNav();\n    modalClose.addEventListener("click", closeModal);\n    modalPrev.addEventListener("click", modalPrevStep);\n    modalNext.addEventListener("click", modalNextStep);\n    // \u906E\u7F69\u5C42\n    const backdrop = document.querySelector(".modal-backdrop");\n    if (backdrop !== null) backdrop.addEventListener("click", closeModal);\n    window.addEventListener("hashchange", onHashChange);\n    window.addEventListener("keydown", handleKeydown);\n    document.addEventListener("visibilitychange", () => {\n        if (!document.hidden) void loadCurrent();\n    });\n    connectProjectEvents();\n    window.setInterval(tickTaskElapsed, 1000);\n    void loadHeader();\n    onHashChange();\n}\n\nstart();\n';
+    app_default = '/* daoyan web \u5BA2\u6237\u7AEF \u2014\u2014 \u539F\u751F JS \u5355\u9875\u5E94\u7528\uFF0C\u65E0\u6784\u5EFA\u4F9D\u8D56\u3002\n * \u6570\u636E\u6765\u81EA\u540C\u6E90 API\uFF1B\u5199\u64CD\u4F5C\u53EA\u6709\u955C\u5934\u5B9A\u7A3F\u3001\u786E\u8BA4\u5267\u672C\u4E0E\u521B\u5EFA\u955C\u5934\u751F\u6210\u4EFB\u52A1\u3002\n * DOM \u6587\u672C\u7EDF\u4E00\u7528 textContent\uFF0C\u907F\u514D\u63D0\u793A\u8BCD\u7B49\u5B57\u6BB5\u6CE8\u5165 HTML\u3002 */\n\n// \u9875\u9762\u89C6\u56FE\nconst VIEWS = [\n    { id: "overview", label: "\u6982\u89C8", hint: "\u9879\u76EE\u4E0E\u5267\u96C6\u72B6\u6001" },\n    { id: "characters", label: "\u89D2\u8272", hint: "\u89D2\u8272\u3001\u5F62\u6001\u4E0E\u53C2\u8003\u56FE" },\n    { id: "scenes", label: "\u573A\u666F", hint: "\u573A\u666F\u4E0E\u53C2\u8003\u56FE" },\n    { id: "voices", label: "\u97F3\u8272", hint: "\u97F3\u8272\u4E0E\u53C2\u8003\u97F3\u9891" },\n    { id: "assets", label: "\u8BBE\u5B9A\u8D44\u4EA7", hint: "\u5168\u90E8\u53C2\u8003\u8D44\u4EA7" },\n    { id: "artifacts", label: "\u4EA7\u51FA\u7269", hint: "\u64AD\u653E\u4E0E\u4E0B\u8F7D" },\n    { id: "tasks", label: "\u4EFB\u52A1", hint: "\u4EFB\u52A1\u4E0E\u4E8B\u4EF6" },\n    { id: "finals", label: "\u6210\u7247", hint: "\u5408\u7247\u7ED3\u679C" },\n    { id: "workflows", label: "\u5DE5\u4F5C\u6D41", hint: "\u56FE\u4E0E bindings" },\n];\n// \u5408\u6CD5\u89C6\u56FE\u96C6\u5408\uFF08\u5267\u96C6\u8BE6\u60C5\u7531 hash \u7684 episode/<id> \u5355\u72EC\u89E3\u6790\uFF09\nconst VIEW_IDS = new Set(VIEWS.map((view) => view.id));\n// \u9ED8\u8BA4\u89C6\u56FE\nconst DEFAULT_VIEW = "overview";\n// \u63A5\u53E3\u8DEF\u5F84\nconst API = {\n    overview: "/api/overview",\n    characters: "/api/story/characters",\n    scenes: "/api/story/scenes",\n    voices: "/api/story/voices",\n    assets: "/api/story/assets",\n    project: "/api/project",\n    projectSettings: "/api/project/settings",\n    artifacts: "/api/artifacts?limit=500",\n    tasks: "/api/tasks",\n    finals: "/api/finals",\n    workflows: "/api/workflows",\n    takeFinalize: "/api/takes/finalize",\n    takeRevoke: "/api/takes/revoke",\n};\n// \u5404\u89C6\u56FE\u8F6E\u8BE2\u95F4\u9694\uFF08\u6BEB\u79D2\uFF09\nconst POLL_MS = {\n    overview: 3000,\n    characters: 10000,\n    scenes: 10000,\n    voices: 10000,\n    assets: 10000,\n    episode: 4000,\n    project: 10000,\n    artifacts: 5000,\n    tasks: 3000,\n    finals: 8000,\n    workflows: 15000,\n};\n// \u72B6\u6001\u6587\u6848\nconst STATUS_LABEL = {\n    queued: "\u6392\u961F",\n    running: "\u8FD0\u884C\u4E2D",\n    succeeded: "\u6210\u529F",\n    failed: "\u5931\u8D25",\n    cancelled: "\u5DF2\u53D6\u6D88",\n    interrupted: "\u5DF2\u4E2D\u65AD",\n    held: "\u6301\u6709",\n    stale: "\u9648\u65E7",\n    absent: "\u7A7A\u95F2",\n    corrupt: "\u635F\u574F",\n};\n// \u4EA7\u7269\u7C7B\u578B\u6587\u6848\nconst KIND_LABEL = {\n    video: "\u89C6\u9891",\n    image: "\u56FE\u7247",\n    audio: "\u97F3\u9891",\n    json: "JSON",\n    text: "\u6587\u672C",\n    other: "\u6587\u4EF6",\n};\n// \u4EA7\u7269\u7C7B\u578B\u56FE\u6807\nconst KIND_ICON = {\n    video: "\u25B6",\n    image: "\u25A7",\n    audio: "\u266A",\n    json: "{}",\n    text: "TXT",\n    other: "\u2193",\n};\n// \u5267\u60C5\u9636\u6BB5\u6587\u6848\nconst STAGE_LABEL = {\n    script: "\u5267\u672C",\n    breakdown: "\u62C6\u89E3",\n    assets: "\u8BBE\u5B9A\u8D44\u4EA7",\n    storyboard: "\u5206\u955C",\n    workflow: "\u5DE5\u4F5C\u6D41",\n    ready: "\u53EF\u62CD\u6444",\n    wrapped: "\u5DF2\u5408\u7247",\n};\n// \u4EFB\u52A1\u7C7B\u578B\u6587\u6848\nconst TASK_KIND_LABEL = {\n    run: "\u5355\u6B21",\n    shot: "\u955C\u5934",\n    retake: "\u91CD\u62CD",\n    batch: "\u6279\u91CF",\n    metadata: "\u5143\u6570\u636E",\n};\n// \u6700\u5927\u64AD\u653E\u5217\u8868\u957F\u5EA6\nconst MAX_PLAYLIST = 200;\n// \u6587\u672C\u9884\u89C8\u4E0A\u9650\nconst TEXT_PREVIEW_LIMIT = 200_000;\n// SVG \u547D\u540D\u7A7A\u95F4\nconst SVG_NS = "http://www.w3.org/2000/svg";\n// \u56FE\u8C31\u8282\u70B9\u5BBD\u5EA6\nconst MAP_NODE_WIDTH = 190;\n// \u56FE\u8C31\u8282\u70B9\u9AD8\u5EA6\nconst MAP_NODE_HEIGHT = 48;\n// \u56FE\u8C31\u884C\u9AD8\nconst MAP_ROW_HEIGHT = 76;\n// \u56FE\u8C31\u9876\u90E8\u7559\u767D\nconst MAP_TOP = 32;\n// \u56FE\u8C31\u5DE6\u5217 x\nconst MAP_LEFT_X = 32;\n// \u56FE\u8C31\u53F3\u5217 x\nconst MAP_RIGHT_X = 470;\n// \u56FE\u8C31\u753B\u5E03\u5BBD\u5EA6\nconst MAP_WIDTH = 700;\n// \u56FE\u8C31\u6700\u5927\u5171\u73B0\u5F27\u6570\u91CF\nconst MAP_MAX_ARCS = 15;\n// \u4EFB\u52A1\u8BE6\u60C5\u7F13\u5B58\u65F6\u95F4\uFF08\u6BEB\u79D2\uFF09\nconst TASK_DETAIL_CACHE_MS = 2000;\n// \u65F6\u95F4\u683C\u5F0F\u5668\nconst TIME_FORMATTER = new Intl.DateTimeFormat("zh-CN", {\n    year: "numeric",\n    month: "2-digit",\n    day: "2-digit",\n    hour: "2-digit",\n    minute: "2-digit",\n    second: "2-digit",\n    hour12: false,\n});\n// \u5B57\u8282\u5355\u4F4D\nconst BYTE_UNITS = ["B", "KB", "MB", "GB", "TB"];\n// hash \u524D\u7F00\nconst HASH_PREFIX = "#/";\n// \u53EF\u64AD\u653E\u7C7B\u578B\nconst PLAYABLE_KINDS = new Set(["video", "audio"]);\n// \u53EF\u9884\u89C8\u7C7B\u578B\nconst PREVIEW_KINDS = new Set(["video", "audio", "image", "json", "text"]);\n\n// \u5E94\u7528\u6839\u8282\u70B9\nconst appRoot = document.querySelector("#app");\n// \u6A21\u6001\u6846\u6839\u8282\u70B9\nconst modalRoot = document.querySelector("#modal");\n// \u6A21\u6001\u6807\u9898\nconst modalTitle = document.querySelector("#modal-title");\n// \u6A21\u6001\u5185\u5BB9\nconst modalContent = document.querySelector("#modal-content");\n// \u6A21\u6001\u8BA1\u6570\nconst modalCounter = document.querySelector("#modal-counter");\n// \u4E0A\u4E00\u4E2A\u6309\u94AE\nconst modalPrev = document.querySelector("#modal-prev");\n// \u4E0B\u4E00\u4E2A\u6309\u94AE\nconst modalNext = document.querySelector("#modal-next");\n// \u5173\u95ED\u6309\u94AE\nconst modalClose = document.querySelector("#modal-close");\n// Toast \u6839\u8282\u70B9\nconst toastRoot = document.querySelector("#toast");\n\n// \u5F53\u524D\u89C6\u56FE\nlet currentView = DEFAULT_VIEW;\n// \u5F53\u524D\u5267\u96C6 id\nlet currentEpisodeId = null;\n// \u5F53\u524D\u89C6\u56FE\u662F\u5426\u5DF2\u6210\u529F\u52A0\u8F7D\nlet loaded = false;\n// \u4E0A\u6B21\u6E32\u67D3\u7684\u6570\u636E\u7B7E\u540D\uFF08\u907F\u514D\u8F6E\u8BE2\u91CD\u590D\u91CD\u5EFA DOM\uFF09\nlet lastSignature = "";\n// \u5F53\u524D\u8BF7\u6C42\u63A7\u5236\u5668\nlet requestController = null;\n// \u8F6E\u8BE2\u5B9A\u65F6\u5668\nlet pollTimer = null;\n// \u9879\u76EE\u53D8\u66F4\u8BA2\u9605\nlet projectEvents = null;\n// \u6700\u8FD1\u4E00\u6B21\u9879\u76EE\u7248\u672C\nlet projectRevision = null;\n// \u53D8\u66F4\u5237\u65B0\u9632\u6296\u5B9A\u65F6\u5668\nlet revisionRefreshTimer = null;\n// \u5F53\u524D\u4EA7\u7269\u7B5B\u9009\nlet artifactFilters = { label: "", status: "", kind: "", search: "" };\n// \u56FE\u8C31 Tab\uFF08graph | timeline\uFF09\nlet mapTab = "graph";\n// \u56FE\u8C31\u805A\u5408\u6A21\u5F0F\uFF08character | form\uFF09\nlet mapMode = "character";\n// \u56FE\u8C31\u7B5B\u9009\uFF08{ kind, id } | null\uFF09\nlet mapFocus = null;\n// \u53EA\u663E\u793A\u5173\u952E\u4E8B\u4EF6\nlet mapOnlyMajor = false;\n// \u53EA\u663E\u793A\u963B\u585E\u4E8B\u4EF6\nlet mapBlockedOnly = false;\n// \u5F53\u524D\u5C55\u5F00\u7684 task id\nlet openTaskId = null;\n// \u4EFB\u52A1\u8BE6\u60C5\u7F13\u5B58\nconst taskDetailCache = new Map();\n// \u6536\u5230\u9879\u76EE\u53D8\u66F4\u540E\u5F3A\u5236\u5237\u65B0\u5C55\u5F00\u7684\u4EFB\u52A1\u8BE6\u60C5\nlet taskDetailRefresh = false;\n// \u64AD\u653E\u5217\u8868\nlet playerItems = [];\n// \u64AD\u653E\u7D22\u5F15\nlet playerIndex = 0;\n// Toast \u5B9A\u65F6\u5668\nlet toastTimer = null;\n// \u6700\u540E\u66F4\u65B0\u65F6\u95F4\nlet lastUpdatedAt = "";\n// \u9879\u76EE\u751F\u4EA7\u8BBE\u7F6E\nlet projectSettings = { name: "", mode: "series", audio: true, episode_count: 0, episodes: [] };\n// \u5E95\u90E8\u9879\u76EE\u7BA1\u7406\u5BFC\u822A\nlet navBottomRoot = null;\n\n// \u4FA7\u8FB9\u5BFC\u822A\u5BB9\u5668\nlet navRoot = null;\n// \u4E3B\u5185\u5BB9\u5BB9\u5668\nlet viewRoot = null;\n// \u9879\u76EE\u540D\u5143\u7D20\nlet projectNameEl = null;\n// \u4FA7\u680F\u9879\u76EE\u540D\u5143\u7D20\nlet brandProjectEl = null;\n// \u6A21\u5F0F\u5143\u7D20\nlet modeEl = null;\n// \u8FDE\u63A5\u72B6\u6001\u5143\u7D20\nlet connectionEl = null;\n// \u66F4\u65B0\u65F6\u95F4\u5143\u7D20\nlet updatedEl = null;\n\n/**\n * \u521B\u5EFA\u5143\u7D20\u5E76\u8BBE\u7F6E\u6587\u672C\u3002\n */\nfunction createElement(tag, className, text) {\n    // \u65B0\u5143\u7D20\n    const node = document.createElement(tag);\n    if (className !== undefined && className !== "") node.className = className;\n    if (text !== undefined && text !== null) node.textContent = String(text);\n    return node;\n}\n\n/**\n * \u6E05\u7A7A\u5B50\u8282\u70B9\u3002\n */\nfunction clearNode(node) {\n    while (node.firstChild !== null) node.removeChild(node.firstChild);\n}\n\n/**\n * \u683C\u5F0F\u5316\u5B57\u8282\u3002\n */\nfunction formatBytes(bytes) {\n    // \u515C\u5E95\u6570\u503C\n    const value = Number(bytes);\n    if (!Number.isFinite(value) || value <= 0) return "0 B";\n    // \u5355\u4F4D\u6307\u6570\n    let index = 0;\n    // \u5F53\u524D\u6570\u503C\n    let current = value;\n    while (current >= 1024 && index < BYTE_UNITS.length - 1) {\n        current /= 1024;\n        index += 1;\n    }\n    // \u5C0F\u6570\u4F4D\n    const digits = index === 0 ? 0 : current >= 10 ? 1 : 2;\n    return `${current.toFixed(digits)} ${BYTE_UNITS[index]}`;\n}\n\n/**\n * \u683C\u5F0F\u5316\u65F6\u95F4\u3002\n */\nfunction formatTime(iso) {\n    if (typeof iso !== "string" || iso === "") return "\u2014";\n    // \u65F6\u95F4\u5BF9\u8C61\n    const date = new Date(iso);\n    if (Number.isNaN(date.getTime())) return "\u2014";\n    return TIME_FORMATTER.format(date);\n}\n\n/**\n * \u683C\u5F0F\u5316\u8017\u65F6\u3002\n */\nfunction formatDuration(ms) {\n    // \u6BEB\u79D2\u503C\n    const value = Number(ms);\n    if (!Number.isFinite(value) || value <= 0) return "0 \u79D2";\n    if (value < 1000) return `${Math.round(value)} \u6BEB\u79D2`;\n    // \u79D2\n    const seconds = Math.round(value / 1000);\n    if (seconds < 60) return `${seconds} \u79D2`;\n    // \u5206\u949F/\u79D2\n    const minutes = Math.floor(seconds / 60);\n    // \u4F59\u6570\u79D2\n    const rest = seconds % 60;\n    return rest === 0 ? `${minutes} \u5206` : `${minutes} \u5206 ${rest} \u79D2`;\n}\n\n/**\n * \u5237\u65B0\u4EFB\u52A1\u8FD0\u884C\u65F6\u957F\uFF08\u6BCF\u79D2\u8C03\u7528\uFF09\u3002\n */\nfunction tickTaskElapsed() {\n    for (const node of document.querySelectorAll("[data-task-elapsed]")) {\n        // \u5F00\u59CB\u65F6\u95F4\n        const started = Date.parse(node.dataset.started ?? "");\n        if (Number.isNaN(started)) continue;\n        // \u7ED3\u675F\u65F6\u95F4\uFF08\u672A\u7ED3\u675F\u5219\u7528\u5F53\u524D\u65F6\u95F4\uFF09\n        const finishedRaw = node.dataset.finished ?? "";\n        const finished = finishedRaw === "" ? Date.now() : Date.parse(finishedRaw);\n        node.textContent = `\u5DF2\u8FD0\u884C ${formatDuration(Math.max(0, (Number.isNaN(finished) ? Date.now() : finished) - started))}`;\n    }\n}\n\n/**\n * \u77ED id\u3002\n */\nfunction shortId(id) {\n    if (typeof id !== "string") return "\u2014";\n    return id.length > 20 ? `${id.slice(0, 20)}\u2026` : id;\n}\n\n/**\n * \u6587\u672C\u515C\u5E95\u3002\n */\nfunction textOrDash(value) {\n    if (value === undefined || value === null || value === "") return "\u2014";\n    return String(value);\n}\n\n/**\n * \u901A\u7528\u5FBD\u6807\u3002\n */\nfunction badge(text, className) {\n    return createElement("span", `badge ${className ?? ""}`.trim(), text);\n}\n\n/**\n * \u72B6\u6001\u5FBD\u6807\u3002\n */\nfunction statusBadge(status, text) {\n    // \u72B6\u6001\u952E\n    const key = typeof status === "string" && status !== "" ? status : "queued";\n    return badge(text ?? STATUS_LABEL[key] ?? key, `status-${key}`);\n}\n\n/**\n * \u7C7B\u578B\u5FBD\u6807\u3002\n */\nfunction kindBadge(kind) {\n    // \u7C7B\u578B\u952E\n    const key = typeof kind === "string" && kind !== "" ? kind : "other";\n    return badge(KIND_LABEL[key] ?? key, `kind-${key}`);\n}\n\n/**\n * \u8FFD\u52A0\u952E\u503C\u884C\u3002\n */\nfunction appendKv(dl, key, value) {\n    dl.append(createElement("dt", "", key));\n    dl.append(createElement("dd", "", textOrDash(value)));\n}\n\n/**\n * \u4EBA\u7269 / \u573A\u666F\u53BB\u91CD\u952E\u3002\n */\nfunction entityKey(entity) {\n    return entity.id !== null && entity.id !== undefined ? `id:${entity.id}` : `name:${entity.name}`;\n}\n\n/**\n * \u683C\u5F0F\u5316\u79D2\u6570\u3002\n */\nfunction formatSeconds(seconds) {\n    // \u6570\u503C\u515C\u5E95\n    const value = Number(seconds);\n    if (!Number.isFinite(value) || value < 0) return "\u2014";\n    if (value < 60) return Number.isInteger(value) ? `${value} \u79D2` : `${value.toFixed(1)} \u79D2`;\n    // \u5206\u949F\u4E0E\u4F59\u79D2\n    const minutes = Math.floor(value / 60);\n    const rest = Math.round(value % 60);\n    return rest === 0 ? `${minutes} \u5206` : `${minutes} \u5206 ${rest} \u79D2`;\n}\n\n/**\n * \u4EBA\u7269 / \u573A\u666F chip\u3002\n */\nfunction entityChip(entity, className) {\n    // chip\n    const chip = createElement("span", `chip ${className ?? ""}`.trim(), entity.name);\n    if (entity.description) chip.title = entity.description;\n    return chip;\n}\n\n/**\n * \u4E00\u7EC4\u4EBA\u7269 / \u573A\u666F chip\u3002\n */\nfunction entityChips(entities, className) {\n    // chip \u5BB9\u5668\n    const row = createElement("div", "chip-row");\n    if (!Array.isArray(entities) || entities.length === 0) {\n        row.append(createElement("span", "muted", "\u672A\u6807\u6CE8"));\n        return row;\n    }\n    for (const entity of entities) row.append(entityChip(entity, className));\n    return row;\n}\n\n/**\n * \u5206\u955C\u72B6\u6001\u5FBD\u6807\u3002\n */\nfunction shotStatusBadge(shot) {\n    if (shot.done === true) return statusBadge("succeeded", "\u5DF2\u5B8C\u6210");\n    if (shot.latest_status === "failed") return statusBadge("failed");\n    if (shot.latest_status === "running" || shot.latest_status === "queued") {\n        return statusBadge(shot.latest_status);\n    }\n    return statusBadge("queued", "\u672A\u5B8C\u6210");\n}\n\n/**\n * \u8BF7\u6C42 JSON \u5E76\u89E3\u5305\u4FE1\u5C01\u3002\n */\nasync function requestJson(path, signal) {\n    // \u54CD\u5E94\n    const response = await fetch(path, { headers: { Accept: "application/json" }, signal });\n    // \u54CD\u5E94\u4F53\n    const payload = await response.json();\n    if (payload.ok !== true) {\n        throw new Error(payload.error !== undefined ? payload.error.message : `\u8BF7\u6C42\u5931\u8D25\uFF08HTTP ${response.status}\uFF09`);\n    }\n    return payload.data;\n}\n\n/**\n * \u5F53\u524D\u89C6\u56FE\u8BF7\u6C42\uFF08\u53EF\u88AB\u4E0B\u4E00\u6B21\u5BFC\u822A\u4E2D\u6B62\uFF09\u3002\n */\nasync function fetchJson(path) {\n    // \u8BF7\u6C42\u63A7\u5236\u5668\n    const controller = new AbortController();\n    requestController = controller;\n    try {\n        return await requestJson(path, controller.signal);\n    } finally {\n        if (requestController === controller) requestController = null;\n    }\n}\n\n/**\n * \u6E32\u67D3\u9875\u9762\u9AA8\u67B6\u3002\n */\nfunction renderShell() {\n    appRoot.innerHTML = `\n        <div class="app-shell">\n            <aside class="sidebar">\n                <div class="brand">\n                    <div class="brand-mark"><span class="brand-dot"></span>daoyan web</div>\n                    <p id="brand-project" class="brand-sub" hidden></p>\n                </div>\n                <nav id="nav" class="nav" aria-label="\u9875\u9762\u5BFC\u822A"></nav>\n                <div class="sidebar-bottom">\n                    <nav id="nav-bottom" class="nav" aria-label="\u9879\u76EE\u7BA1\u7406"></nav>\n                </div>\n            </aside>\n            <main class="main">\n                <header class="topbar">\n                    <div class="topbar-left">\n                        <h1 id="project-name" class="project-name">\u9879\u76EE</h1>\n                        <span id="project-mode" class="project-mode">\u2014</span>\n                    </div>\n                    <div class="topbar-right">\n                        <span id="connection" class="connection">\n                            <span class="connection-dot"></span>\n                            <span id="connection-text">\u8FDE\u63A5\u4E2D</span>\n                        </span>\n                        <span id="updated-at" class="muted">\u2014</span>\n                    </div>\n                </header>\n                <section id="view" class="content" aria-live="polite"></section>\n            </main>\n        </div>\n    `;\n    navRoot = document.querySelector("#nav");\n    navBottomRoot = document.querySelector("#nav-bottom");\n    viewRoot = document.querySelector("#view");\n    projectNameEl = document.querySelector("#project-name");\n    brandProjectEl = document.querySelector("#brand-project");\n    modeEl = document.querySelector("#project-mode");\n    connectionEl = document.querySelector("#connection");\n    updatedEl = document.querySelector("#updated-at");\n}\n\n/**\n * \u6E32\u67D3\u5BFC\u822A\u3002\n */\nfunction renderNav() {\n    clearNode(navRoot);\n    for (const view of VIEWS) {\n        if (view.id === "voices" && !projectSettings.audio) continue;\n        // \u5BFC\u822A\u6309\u94AE\n        const button = createElement("button", "nav-item");\n        button.type = "button";\n        button.dataset.view = view.id;\n        button.append(createElement("span", "nav-label", view.label));\n        button.append(createElement("span", "nav-hint", view.hint));\n        button.addEventListener("click", () => {\n            window.location.hash = `${HASH_PREFIX}${view.id}`;\n        });\n        navRoot.append(button);\n    }\n    // \u5E95\u90E8\u9879\u76EE\u7BA1\u7406\n    if (navBottomRoot !== null) {\n        clearNode(navBottomRoot);\n        const project = createElement("button", "nav-item");\n        project.type = "button";\n        project.dataset.view = "project";\n        project.append(createElement("span", "nav-label", "\u9879\u76EE\u7BA1\u7406"));\n        project.append(createElement("span", "nav-hint", "\u6A21\u5F0F\u3001\u97F3\u9891\u4E0E\u9879\u76EE\u8BBE\u7F6E"));\n        project.addEventListener("click", () => {\n            window.location.hash = `${HASH_PREFIX}project`;\n        });\n        navBottomRoot.append(project);\n    }\n}\n\n/**\n * \u9AD8\u4EAE\u5F53\u524D\u5BFC\u822A\u3002\n */\nfunction setActiveNav() {\n    if (navRoot === null) return;\n    // \u5267\u96C6\u8BE6\u60C5\u5F52\u5C5E\u6982\u89C8\n    const activeView = currentView === "episode" ? "overview" : currentView;\n    for (const button of document.querySelectorAll(".nav-item")) {\n        button.classList.toggle("active", button.dataset.view === activeView);\n    }\n}\n\n/**\n * \u66F4\u65B0\u8FDE\u63A5\u72B6\u6001\u3002\n */\nfunction setConnection(state, text) {\n    if (connectionEl === null) return;\n    connectionEl.classList.remove("ok", "error");\n    if (state === "ok") connectionEl.classList.add("ok");\n    if (state === "error") connectionEl.classList.add("error");\n    // \u72B6\u6001\u6587\u672C\n    const textEl = connectionEl.querySelector("#connection-text");\n    if (textEl !== null) textEl.textContent = text;\n}\n\n/**\n * \u8BBE\u7F6E\u9875\u9762\u6807\u9898\u4E0E\u4FA7\u680F\u9879\u76EE\u540D\u3002\n */\nfunction setProjectName(name) {\n    // \u6E05\u6D17\u540E\u7684\u540D\u79F0\n    const value = typeof name === "string" ? name.trim() : "";\n    document.title = value === "" ? "daoyan web" : value;\n    if (brandProjectEl !== null) {\n        brandProjectEl.textContent = value;\n        brandProjectEl.hidden = value === "";\n    }\n}\n\n/**\n * \u5E94\u7528\u9879\u76EE\u8BBE\u7F6E\u5E76\u5237\u65B0\u5BFC\u822A\u3002\n */\nfunction applyProjectSettings(data) {\n    projectSettings = {\n        name: typeof data.name === "string" ? data.name : projectSettings.name,\n        mode: data.mode === "single" ? "single" : "series",\n        audio: data.audio !== false,\n        episode_count: typeof data.episode_count === "number" ? data.episode_count : 0,\n        episodes: Array.isArray(data.episodes) ? data.episodes : [],\n    };\n    // \u97F3\u9891\u5173\u95ED\u65F6\u79BB\u5F00\u97F3\u8272\u9875\n    if (!projectSettings.audio && currentView === "voices") {\n        currentView = "overview";\n        window.location.hash = `${HASH_PREFIX}overview`;\n    }\n    renderNav();\n    setActiveNav();\n}\n\n/**\n * \u8BFB\u53D6\u9879\u76EE\u8BBE\u7F6E\uFF08\u5931\u8D25\u4FDD\u6301\u65E7\u503C\uFF09\u3002\n */\nasync function loadProjectSettings() {\n    try {\n        const data = await requestJson(API.project);\n        applyProjectSettings(data);\n        return data;\n    } catch {\n        return null;\n    }\n}\n\n/**\n * \u52A0\u8F7D\u9876\u680F\u9879\u76EE\u4FE1\u606F\uFF08\u4E0D\u63A2\u6D4B\u5F15\u64CE\uFF09\u3002\n */\nasync function loadHeader() {\n    try {\n        // \u5065\u5EB7\u68C0\u67E5\u6570\u636E\n        const data = await requestJson("/api/health");\n        if (projectNameEl !== null && typeof data.project === "string") projectNameEl.textContent = data.project;\n        setProjectName(data.project);\n        if (modeEl !== null) modeEl.textContent = data.mode === null ? "\u672A\u7ED1\u5B9A\u672C\u673A" : data.mode;\n    } catch {\n        // \u9876\u680F\u5931\u8D25\u4E0D\u5F71\u54CD\u9875\u9762\u4E3B\u4F53\n    }\n    await loadProjectSettings();\n}\n\n/**\n * \u63D0\u4EA4\u5199\u8BF7\u6C42\uFF08\u5B9A\u7A3F / \u64A4\u9500\uFF09\uFF0C\u8FD4\u56DE\u4FE1\u5C01 data\u3002\n */\nasync function postJson(path, body) {\n    // \u54CD\u5E94\n    const response = await fetch(path, {\n        method: "POST",\n        headers: { "Content-Type": "application/json", Accept: "application/json" },\n        body: JSON.stringify(body),\n    });\n    // \u54CD\u5E94\u4F53\n    const payload = await response.json();\n    if (payload.ok !== true) {\n        // \u9519\u8BEF\u4FE1\u606F\n        const message = payload.error !== undefined ? payload.error.message : `\u8BF7\u6C42\u5931\u8D25\uFF08HTTP ${response.status}\uFF09`;\n        // \u6062\u590D\u5EFA\u8BAE\n        const hint = payload.error !== undefined && payload.error.hint !== undefined ? ` ${payload.error.hint}` : "";\n        throw new Error(message + hint);\n    }\n    return payload.data;\n}\n\n/**\n * \u5237\u65B0\u5F53\u524D\u89C6\u56FE\u6570\u636E\uFF08\u5199\u64CD\u4F5C\u540E\u7ACB\u5373\u53CD\u6620\uFF09\u3002\n */\nasync function reloadView() {\n    lastSignature = "";\n    await loadCurrent();\n}\n\n/**\n * \u66F4\u65B0\u9876\u680F\u9879\u76EE\u4FE1\u606F\u3002\n */\nfunction updateHeader(data) {\n    if (projectNameEl !== null && data !== null && data.project !== undefined && data.project.name !== undefined) {\n        projectNameEl.textContent = data.project.name;\n        setProjectName(data.project.name);\n    }\n    if (modeEl !== null && data !== null && data.mode !== undefined) {\n        modeEl.textContent = data.mode === null ? "\u672A\u7ED1\u5B9A\u672C\u673A" : data.mode;\n    }\n    if (updatedEl !== null) {\n        updatedEl.textContent = lastUpdatedAt === "" ? "\u2014" : `\u66F4\u65B0\u4E8E ${formatTime(lastUpdatedAt)}`;\n    }\n}\n\n/**\n * \u663E\u793A\u9519\u8BEF\u6761\u3002\n */\nfunction showError(message) {\n    if (viewRoot === null) return;\n    // \u73B0\u6709\u9519\u8BEF\u6761\n    let banner = viewRoot.querySelector(".error-banner");\n    if (banner === null) {\n        banner = createElement("div", "error-banner");\n        viewRoot.prepend(banner);\n    }\n    banner.textContent = message;\n}\n\n/**\n * \u6E05\u9664\u9519\u8BEF\u6761\u3002\n */\nfunction clearError() {\n    if (viewRoot === null) return;\n    // \u73B0\u6709\u9519\u8BEF\u6761\n    const banner = viewRoot.querySelector(".error-banner");\n    if (banner !== null) banner.remove();\n}\n\n/**\n * \u663E\u793A Toast\u3002\n */\nfunction showToast(message, isError) {\n    toastRoot.textContent = message;\n    toastRoot.classList.toggle("error", isError === true);\n    toastRoot.hidden = false;\n    if (toastTimer !== null) window.clearTimeout(toastTimer);\n    toastTimer = window.setTimeout(() => {\n        toastRoot.hidden = true;\n    }, 2600);\n}\n\n/**\n * \u7A7A\u72B6\u6001\u8282\u70B9\u3002\n */\nfunction emptyNode(title, body) {\n    // \u5BB9\u5668\n    const box = createElement("div", "empty");\n    box.append(createElement("p", "empty-title", title));\n    box.append(createElement("p", "empty-body", body));\n    return box;\n}\n\n/**\n * \u52A0\u8F7D\u72B6\u6001\u3002\n */\nfunction renderLoading() {\n    if (viewRoot === null) return;\n    clearNode(viewRoot);\n    // \u52A0\u8F7D\u5BB9\u5668\n    const box = createElement("div", "loading");\n    box.append(createElement("span", "spinner"));\n    box.append(createElement("span", "", "\u52A0\u8F7D\u4E2D\u2026"));\n    viewRoot.append(box);\n}\n\n/**\n * \u8BA1\u7B97\u7528\u4E8E\u8DF3\u8FC7\u91CD\u590D\u6E32\u67D3\u7684\u6570\u636E\u7B7E\u540D\uFF08\u5FFD\u7565\u6982\u89C8\u7684\u751F\u6210\u65F6\u95F4\uFF09\u3002\n */\nfunction signatureOf(data) {\n    if (data !== null && typeof data === "object" && Object.prototype.hasOwnProperty.call(data, "generated_at")) {\n        // \u53BB\u6389\u65F6\u95F4\u6233\u540E\u7684\u526F\u672C\n        const copy = { ...data };\n        delete copy.generated_at;\n        return JSON.stringify(copy);\n    }\n    return JSON.stringify(data);\n}\n\n/**\n * \u52A0\u8F7D\u5F53\u524D\u89C6\u56FE\u3002\n */\nasync function loadCurrent() {\n    if (requestController !== null) requestController.abort();\n    // \u76EE\u6807\u89C6\u56FE\n    const view = currentView;\n    if (!loaded) renderLoading();\n    try {\n        // \u63A5\u53E3\u6570\u636E\n        const path =\n            view === "episode" && currentEpisodeId !== null\n                ? `/api/episodes/${encodeURIComponent(currentEpisodeId)}`\n                : API[view];\n        const data = await fetchJson(path);\n        if (view !== currentView) return;\n        // \u6570\u636E\u7B7E\u540D\uFF08\u7A33\u5B9A\u9875\u9762\u4E0D\u91CD\u590D\u91CD\u5EFA DOM\uFF09\n        const signature = signatureOf(data);\n        lastUpdatedAt = new Date().toISOString();\n        updateHeader(data);\n        setConnection("ok", "\u5DF2\u8FDE\u63A5");\n        if (loaded && signature === lastSignature) return;\n        loaded = true;\n        lastSignature = signature;\n        renderView(view, data);\n    } catch (error) {\n        if (error !== null && error !== undefined && error.name === "AbortError") return;\n        setConnection("error", "\u8FDE\u63A5\u5931\u8D25");\n        if (!loaded) {\n            clearNode(viewRoot);\n            viewRoot.append(emptyNode("\u65E0\u6CD5\u52A0\u8F7D", "\u8BF7\u786E\u8BA4\u670D\u52A1\u4ECD\u5728\u8FD0\u884C\uFF0C\u6216\u5237\u65B0\u9875\u9762\u91CD\u8BD5\u3002"));\n        }\n        showError(error instanceof Error ? error.message : "\u52A0\u8F7D\u5931\u8D25");\n    }\n}\n\n/**\n * \u5207\u6362\u89C6\u56FE\u3002\n */\nfunction onHashChange() {\n    // \u539F\u59CB hash\n    const raw = window.location.hash.replace(/^#\\/?/, "");\n    // \u8DEF\u5F84\u6BB5\n    const parts = raw.split("/");\n    // \u76EE\u6807\u89C6\u56FE / \u5267\u96C6\n    let view = DEFAULT_VIEW;\n    let episodeId = null;\n    if (parts[0] === "episode" && parts[1] !== undefined && parts[1] !== "") {\n        try {\n            episodeId = decodeURIComponent(parts[1]);\n            view = "episode";\n        } catch {\n            view = DEFAULT_VIEW;\n        }\n    } else if (raw === "project") {\n        view = "project";\n    } else {\n        view = VIEW_IDS.has(raw) ? raw : DEFAULT_VIEW;\n    }\n    if (view === "voices" && !projectSettings.audio) view = DEFAULT_VIEW;\n    currentView = view;\n    currentEpisodeId = episodeId;\n    mapTab = "graph";\n    mapMode = "character";\n    mapFocus = null;\n    mapOnlyMajor = false;\n    mapBlockedOnly = false;\n    loaded = false;\n    lastSignature = "";\n    openTaskId = null;\n    setActiveNav();\n    renderLoading();\n    void loadCurrent();\n    schedulePoll();\n}\n\n/**\n * \u4ECE SSE \u4E8B\u4EF6\u91CC\u53D6\u7248\u672C\u53F7\u3002\n */\nfunction revisionFromEvent(event) {\n    try {\n        // \u4E8B\u4EF6\u6570\u636E\n        const data = JSON.parse(event.data);\n        return typeof data.revision === "number" ? data.revision : null;\n    } catch {\n        return null;\n    }\n}\n\n/**\n * \u9879\u76EE\u53D1\u751F\u53D8\u5316\uFF1A\u91CD\u8F7D\u9876\u680F\u4E0E\u5F53\u524D\u89C6\u56FE\u3002\n */\nfunction onProjectRevision(revision) {\n    if (revision === null || revision === projectRevision) return;\n    projectRevision = revision;\n    taskDetailRefresh = true;\n    if (!loaded) return;\n    if (revisionRefreshTimer !== null) window.clearTimeout(revisionRefreshTimer);\n    revisionRefreshTimer = window.setTimeout(() => {\n        revisionRefreshTimer = null;\n        void loadHeader();\n        void loadCurrent();\n    }, 120);\n}\n\n/**\n * \u8BA2\u9605\u9879\u76EE\u53D8\u66F4\uFF08SSE\uFF1B\u5931\u8D25\u65F6\u4FDD\u7559\u5B9A\u65F6\u8F6E\u8BE2\u515C\u5E95\uFF09\u3002\n */\nfunction connectProjectEvents() {\n    if (typeof EventSource === "undefined") return;\n    if (projectEvents !== null) projectEvents.close();\n    projectEvents = new EventSource("/api/events");\n    projectEvents.addEventListener("ready", (event) => {\n        // \u5EFA\u7ACB\u57FA\u7EBF\uFF0C\u4E0D\u89E6\u53D1\u9996\u5C4F\u91CD\u8F7D\n        const revision = revisionFromEvent(event);\n        if (revision !== null) projectRevision = revision;\n    });\n    projectEvents.addEventListener("revision", (event) => {\n        onProjectRevision(revisionFromEvent(event));\n    });\n}\n\n/**\n * \u5B89\u6392\u8F6E\u8BE2\u3002\n */\nfunction schedulePoll() {\n    if (pollTimer !== null) window.clearInterval(pollTimer);\n    // \u5F53\u524D\u95F4\u9694\n    const interval = POLL_MS[currentView] ?? 5000;\n    pollTimer = window.setInterval(() => {\n        if (document.hidden) return;\n        void loadCurrent();\n    }, interval);\n}\n\n/**\n * \u5206\u53D1\u89C6\u56FE\u6E32\u67D3\u3002\n */\nfunction renderView(view, data) {\n    if (viewRoot === null) return;\n    clearNode(viewRoot);\n    if (view === "overview") renderOverview(data);\n    else if (view === "episode") renderEpisode(data);\n    else if (view === "project") renderProject(data);\n    else if (view === "characters") renderCharacters(data);\n    else if (view === "scenes") renderScenes(data);\n    else if (view === "voices") renderVoices(data);\n    else if (view === "assets") renderAssets(data);\n    else if (view === "artifacts") renderArtifacts(data);\n    else if (view === "tasks") renderTasks(data);\n    else if (view === "finals") renderFinals(data);\n    else if (view === "workflows") renderWorkflows(data);\n    clearError();\n}\n\n/**\n * \u72B6\u6001\u5361\u7247\u3002\n */\nfunction statCard(label, value, hint) {\n    // \u5361\u7247\n    const card = createElement("div", "stat-card");\n    card.append(createElement("p", "stat-label", label));\n    card.append(createElement("p", "stat-value", value));\n    if (hint !== undefined) card.append(createElement("p", "stat-hint", hint));\n    return card;\n}\n\n/**\n * \u5267\u60C5\u9636\u6BB5\u5FBD\u6807\u3002\n */\nfunction stageBadge(stage) {\n    return badge(STAGE_LABEL[stage] ?? stage, `stage-${stage}`);\n}\n\n/**\n * \u8D44\u4EA7\u7F29\u7565 / \u64AD\u653E\u8282\u70B9\u3002\n */\nfunction assetNode(asset, compact) {\n    // \u5BB9\u5668\n    const box = createElement("div", compact === true ? "asset-compact" : "asset-tile");\n    if (asset === null || asset === undefined) {\n        box.append(createElement("span", "muted", "\u65E0\u8D44\u4EA7"));\n        return box;\n    }\n    if (asset.present !== true || asset.lfs_pointer === true) {\n        box.append(createElement("span", "asset-missing", asset.lfs_pointer === true ? "LFS \u672A\u62C9\u53D6" : "\u6587\u4EF6\u7F3A\u5931"));\n        return box;\n    }\n    if (asset.kind === "image") {\n        // \u56FE\u7247\u9884\u89C8\u6309\u94AE\n        const button = createElement("button", "asset-thumb");\n        button.type = "button";\n        button.title = "\u70B9\u51FB\u9884\u89C8";\n        button.setAttribute("aria-label", `\u9884\u89C8 ${asset.path}`);\n        // \u56FE\u7247\n        const img = document.createElement("img");\n        img.src = asset.media_url;\n        img.alt = asset.path;\n        img.loading = "lazy";\n        button.append(img);\n        button.addEventListener("click", () => {\n            openImageUrl(asset.media_url, asset.path);\n        });\n        box.append(button);\n    } else if (asset.kind === "audio") {\n        // \u97F3\u9891\n        const audio = document.createElement("audio");\n        audio.controls = true;\n        audio.preload = "metadata";\n        audio.src = asset.media_url;\n        box.append(audio);\n    } else {\n        box.append(createElement("span", "preview-icon", KIND_ICON[asset.kind] ?? "\u2193"));\n    }\n    box.append(createElement("span", "asset-name mono", asset.path));\n    return box;\n}\n\n/**\n * \u7CFB\u5217\u6982\u89C8\u3002\n */\nfunction renderStorySeries(story) {\n    // \u533A\u5757\u5934\n    const single = projectSettings.mode === "single";\n    const head = createElement("div", "section-head");\n    head.append(createElement("h3", "section-title", single ? "\u89C6\u9891" : "\u5267\u96C6"));\n    head.append(createElement("span", "section-meta", single ? "\u5355\u89C6\u9891\u9879\u76EE" : `${story.series.episodes_total} \u96C6`));\n    viewRoot.append(head);\n    // \u5267\u96C6\u7F51\u683C\n    const grid = createElement("div", "grid");\n    for (const episode of single ? story.episodes.slice(0, 1) : story.episodes) {\n        // \u5361\u7247\n        const card = createElement("article", "card episode-card");\n        // \u5185\u5BB9\n        const body = createElement("div", "card-body");\n        body.append(createElement("p", "eyebrow", single ? "\u5355\u89C6\u9891" : `\u7B2C ${episode.number} \u96C6`));\n        body.append(createElement("h3", "card-title", episode.title));\n        // \u5143\u4FE1\u606F\n        const meta = createElement("div", "card-meta");\n        meta.append(stageBadge(episode.stage));\n        meta.append(createElement("span", "", `\u5267\u672C r${episode.script.revision} \xB7 ${episode.script.status}`));\n        if (episode.blockers.length > 0) {\n            meta.append(createElement("span", "text-warn", `${episode.blockers.length} \u9879\u963B\u65AD`));\n        }\n        body.append(meta);\n        // \u963B\u65AD\u6458\u8981\n        if (episode.blockers.length > 0) {\n            const list = createElement("ul", "mini-list");\n            for (const blocker of episode.blockers.slice(0, 3)) {\n                list.append(createElement("li", "", blocker.message));\n            }\n            body.append(list);\n        }\n        // \u64CD\u4F5C\n        const actions = createElement("div", "card-actions");\n        const open = createElement("button", "button", single ? "\u6253\u5F00\u89C6\u9891" : "\u67E5\u770B\u5267\u96C6");\n        open.type = "button";\n        open.addEventListener("click", () => {\n            window.location.hash = `${HASH_PREFIX}episode/${encodeURIComponent(episode.id)}`;\n        });\n        actions.append(open);\n        body.append(actions);\n        card.append(body);\n        grid.append(card);\n    }\n    viewRoot.append(grid);\n    // \u4E0B\u4E00\u6B65\n    if (Array.isArray(story.next_actions) && story.next_actions.length > 0) {\n        const callout = createElement("div", "callout");\n        callout.append(createElement("strong", "", "\u4E0B\u4E00\u6B65"));\n        const list = createElement("ul", "mini-list");\n        for (const action of story.next_actions) list.append(createElement("li", "", action));\n        callout.append(list);\n        viewRoot.append(callout);\n    }\n}\n\n/**\n * \u5267\u96C6\u8BE6\u60C5\u3002\n */\nfunction renderEpisode(data) {\n    // \u5267\u96C6 / \u72B6\u6001\n    const episode = data.episode;\n    const status = data.status;\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    const headText = createElement("div");\n    const single = projectSettings.mode === "single";\n    headText.append(createElement("p", "eyebrow", single ? "VIDEO" : `Episode ${episode.id}`));\n    headText.append(\n        createElement("h2", "page-title", single ? episode.title : `\u7B2C ${episode.number} \u96C6 \xB7 ${episode.title}`),\n    );\n    headText.append(createElement("p", "page-subtitle", episode.summary ?? ""));\n    head.append(headText);\n    // \u8FD4\u56DE\n    const back = createElement("button", "button ghost", "\u2190 \u8FD4\u56DE\u6982\u89C8");\n    back.type = "button";\n    back.addEventListener("click", () => {\n        window.location.hash = `${HASH_PREFIX}overview`;\n    });\n    head.append(back);\n    viewRoot.append(head);\n    // \u9636\u6BB5\n    const stageRow = createElement("div", "chip-row");\n    stageRow.append(stageBadge(status.stage));\n    stageRow.append(createElement("span", "muted", `\u5267\u672C r${status.script.revision} \xB7 ${status.script.status}`));\n    stageRow.append(createElement("span", "muted", `\u62C6\u89E3 r${status.documents.breakdown.source_revision}`));\n    stageRow.append(createElement("span", "muted", `\u5206\u955C r${status.documents.shots.source_revision}`));\n    viewRoot.append(stageRow);\n    // \u963B\u65AD\n    if (status.blockers.length > 0) {\n        const callout = createElement("div", "callout warn");\n        callout.append(createElement("strong", "", `\u95E8\u7981\u963B\u65AD ${status.blockers.length} \u9879`));\n        const list = createElement("ul", "mini-list");\n        for (const blocker of status.blockers)\n            list.append(createElement("li", "", `[${blocker.code}] ${blocker.message}`));\n        callout.append(list);\n        viewRoot.append(callout);\n    }\n    // \u5267\u60C5\u56FE\u8C31\uFF08\u5355\u89C6\u9891\u6A21\u5F0F\u9690\u85CF\uFF09\n    if (!single) viewRoot.append(renderStoryMap(data.map));\n    // \u5267\u672C\n    const scriptMeta = data.script.meta ?? {};\n    const scriptApproved = scriptMeta.status === "approved";\n    const scriptHead = createElement("div", "section-head");\n    scriptHead.append(createElement("h3", "section-title", "\u5267\u672C"));\n    const scriptActions = createElement("div", "section-actions");\n    scriptActions.append(\n        createElement(\n            "span",\n            "section-meta",\n            scriptMeta.revision > 0 ? `r${scriptMeta.revision} \xB7 ${scriptApproved ? "\u5DF2\u786E\u8BA4" : "\u5F85\u786E\u8BA4"}` : "\u5C1A\u672A\u540C\u6B65",\n        ),\n    );\n    if (!scriptApproved && scriptMeta.revision > 0) {\n        // \u786E\u8BA4\u5267\u672C\n        const approve = createElement("button", "button", "\u786E\u8BA4\u5267\u672C");\n        approve.type = "button";\n        approve.addEventListener("click", async () => {\n            if (approve.disabled) return;\n            approve.disabled = true;\n            approve.textContent = "\u786E\u8BA4\u4E2D\u2026";\n            try {\n                await postJson("/api/script/approve", { episode_id: episode.id });\n                showToast("\u5267\u672C\u5DF2\u786E\u8BA4");\n                await reloadView();\n            } catch (error) {\n                showToast(error instanceof Error ? error.message : "\u786E\u8BA4\u5931\u8D25", true);\n                approve.disabled = false;\n                approve.textContent = "\u786E\u8BA4\u5267\u672C";\n            }\n        });\n        scriptActions.append(approve);\n    }\n    scriptHead.append(scriptActions);\n    viewRoot.append(scriptHead);\n    const script = createElement(\n        "pre",\n        "script-text",\n        data.script.content === "" ? "\uFF08\u5C1A\u672A\u540C\u6B65\uFF09" : data.script.content,\n    );\n    viewRoot.append(script);\n    // \u62C6\u89E3\n    const breakdown = data.breakdown;\n    const breakdownHead = createElement("div", "section-head");\n    breakdownHead.append(createElement("h3", "section-title", "\u672C\u96C6\u62C6\u89E3"));\n    breakdownHead.append(\n        createElement("span", "section-meta", breakdown === null ? "\u7F3A\u5931" : `source r${breakdown.source_revision}`),\n    );\n    viewRoot.append(breakdownHead);\n    if (breakdown === null) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u62C6\u89E3", "\u4F7F\u7528 daoyan story breakdown set \u5199\u5165\u672C\u96C6\u89D2\u8272\u3001\u5F62\u6001\u4E0E\u573A\u666F\u3002"));\n    } else {\n        const list = createElement("div", "layout-two");\n        // \u89D2\u8272\n        const cast = createElement("div", "panel");\n        cast.append(createElement("h4", "panel-title", "\u89D2\u8272\u4E0E\u5F62\u6001"));\n        const castList = createElement("ul", "mini-list");\n        for (const item of breakdown.characters) {\n            castList.append(createElement("li", "", `${item.id} \xB7 ${item.forms.join(" / ")}`));\n        }\n        cast.append(castList);\n        // \u573A\u666F / \u97F3\u8272 / beat\n        const other = createElement("div", "panel");\n        other.append(createElement("h4", "panel-title", projectSettings.audio ? "\u573A\u666F / \u97F3\u8272 / Beat" : "\u573A\u666F / Beat"));\n        other.append(createElement("p", "", `\u573A\u666F\uFF1A${breakdown.scenes.join("\u3001") || "\u65E0"}`));\n        if (projectSettings.audio) {\n            other.append(createElement("p", "", `\u97F3\u8272\uFF1A${breakdown.voices.join("\u3001") || "\u65E0"}`));\n        }\n        other.append(createElement("p", "", `Beat\uFF1A${(breakdown.beats ?? []).map((b) => b.id).join("\u3001") || "\u65E0"}`));\n        list.append(cast);\n        list.append(other);\n        viewRoot.append(list);\n    }\n    // \u5206\u955C\n    const shots = data.shots;\n    const shotsHead = createElement("div", "section-head");\n    shotsHead.append(createElement("h3", "section-title", "\u5206\u955C"));\n    shotsHead.append(\n        createElement("span", "section-meta", shots === null ? "\u7F3A\u5931" : `${shots.summary.shots_total} \u955C`),\n    );\n    viewRoot.append(shotsHead);\n    if (shots === null || shots.shots.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u5206\u955C", "\u4F7F\u7528 daoyan story shots set \u5199\u5165\u672C\u96C6\u5206\u955C\u3002"));\n    } else {\n        const grid = createElement("div", "shot-grid");\n        for (const shot of shots.shots) grid.append(renderShotCard(shot));\n        viewRoot.append(grid);\n    }\n    // \u4EFB\u52A1\n    const taskHead = createElement("div", "section-head");\n    taskHead.append(createElement("h3", "section-title", "\u672C\u96C6\u4EFB\u52A1"));\n    taskHead.append(createElement("span", "section-meta", `${data.tasks.length} \u4E2A`));\n    viewRoot.append(taskHead);\n    if (data.tasks.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u4EFB\u52A1", "\u62CD\u6444\u672C\u96C6\u540E\uFF0Ctask \u4F1A\u51FA\u73B0\u5728\u8FD9\u91CC\u3002"));\n    } else {\n        const list = createElement("div", "task-list");\n        for (const task of data.tasks.slice(0, 10)) {\n            const row = createElement("div", "task-row");\n            row.append(createElement("span", "mono", task.task_id));\n            row.append(createElement("span", "", task.command));\n            row.append(statusBadge(task.status));\n            list.append(row);\n        }\n        viewRoot.append(list);\n    }\n    // \u6210\u7247\n    const finalHead = createElement("div", "section-head");\n    finalHead.append(createElement("h3", "section-title", "\u6210\u7247"));\n    finalHead.append(createElement("span", "section-meta", `${data.finals.length} \u4E2A`));\n    viewRoot.append(finalHead);\n    if (data.finals.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u6210\u7247", "\u8FD0\u884C daoyan wrap --episode <id> \u540E\u51FA\u73B0\u3002"));\n    } else {\n        const list = createElement("div", "task-list");\n        for (const item of data.finals) {\n            const row = createElement("div", "task-row");\n            row.append(createElement("span", "mono", item.name));\n            row.append(createElement("span", "", formatTime(item.created_at ?? "")));\n            const play = createElement("button", "button", "\u64AD\u653E");\n            play.type = "button";\n            play.addEventListener("click", () => {\n                openPlayer([{ title: item.name, url: item.media_url, kind: "video" }], 0);\n            });\n            row.append(play);\n            list.append(row);\n        }\n        viewRoot.append(list);\n    }\n}\n\n/**\n * \u56FE\u8C31\u91CD\u8981\u5EA6\u5FBD\u6807\u3002\n */\nfunction mapImportanceBadge(importance) {\n    // \u6587\u6848\n    const label = importance === "major" ? "\u5173\u952E" : importance === "minor" ? "\u8FC7\u573A" : "\u5E38\u89C4";\n    return badge(label, `importance-${importance}`);\n}\n\n/**\n * \u56FE\u8C31\u5C31\u7EEA\u5FBD\u6807\u3002\n */\nfunction mapReadyBadge(gen) {\n    if (gen === undefined) return badge("\u65E0\u4E0A\u4E0B\u6587", "map-unknown");\n    if (gen.ready) return badge("\u53EF\u751F\u6210", "map-ready");\n    // \u963B\u585E\u6570\n    const blockers = gen.gaps.filter((gap) => gap.severity === "blocker").length;\n    return badge(`\u963B\u585E ${blockers}`, "map-blocked");\n}\n\n/**\n * \u56FE\u8C31\u6E32\u67D3\u5FBD\u6807\u3002\n */\nfunction mapRenderBadge(gen) {\n    // \u72B6\u6001\n    const status = gen?.render?.latest_status;\n    if (status === "succeeded") return badge("\u5DF2\u751F\u6210", "map-rendered");\n    if (status === "failed") return badge("\u5931\u8D25", "map-failed");\n    if (status === "cancelled" || status === "interrupted") return badge(STATUS_LABEL[status] ?? status, "map-failed");\n    return badge("\u672A\u751F\u6210", "map-pending");\n}\n\n/**\n * SVG \u8282\u70B9\u3002\n */\nfunction svgNode(tag, attrs) {\n    // \u8282\u70B9\n    const node = document.createElementNS(SVG_NS, tag);\n    if (attrs !== undefined) {\n        for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, String(value));\n    }\n    return node;\n}\n\n/**\n * \u65F6\u95F4\u7801\u3002\n */\nfunction formatTimecode(seconds) {\n    // \u6570\u503C\n    const value = Math.max(0, Math.round(Number(seconds) || 0));\n    // \u5206\u949F\n    const minutes = Math.floor(value / 60);\n    // \u79D2\n    const rest = value % 60;\n    return `${String(minutes).padStart(2, "0")}:${String(rest).padStart(2, "0")}`;\n}\n\n/**\n * \u56FE\u8C31\u7D22\u5F15\u3002\n */\nfunction mapIndexes(map) {\n    // \u89D2\u8272\n    const characters = new Map();\n    for (const item of map.catalog.characters) characters.set(item.id, item);\n    // \u573A\u666F\n    const scenes = new Map();\n    for (const item of map.catalog.scenes) scenes.set(item.id, item);\n    // \u97F3\u8272\n    const voices = new Map();\n    for (const item of map.catalog.voices) voices.set(item.id, item);\n    // \u751F\u6210\u4E8B\u4EF6\n    const generation = new Map();\n    for (const item of map.generation.events) generation.set(item.shot_id, item);\n    return { characters, scenes, voices, generation };\n}\n\n/**\n * \u67E5\u627E\u5F62\u6001\u3002\n */\nfunction formOf(character, formId) {\n    if (character === undefined || character === null) return null;\n    return character.forms.find((form) => form.id === formId) ?? null;\n}\n\n/**\n * \u8D44\u4EA7\u72B6\u6001\u3002\n */\nfunction assetStatus(asset) {\n    if (asset === null || asset === undefined) return "missing";\n    if (asset.lfs_pointer) return "lfs";\n    if (!asset.present) return "absent";\n    return "ready";\n}\n\n/**\n * \u8D44\u4EA7\u72B6\u6001\u6587\u6848\u3002\n */\nfunction assetStatusLabel(status) {\n    if (status === "lfs") return "LFS \u672A\u62C9\u53D6";\n    if (status === "absent") return "\u6587\u4EF6\u7F3A\u5931";\n    if (status === "missing") return "\u672A\u6307\u5B9A";\n    return "\u53EF\u7528";\n}\n\n/**\n * \u8D44\u4EA7\u7F29\u7565 / \u9884\u89C8\u3002\n */\nfunction mapAssetNode(asset, compact) {\n    // \u5BB9\u5668\n    const box = createElement("span", compact === true ? "map-asset compact" : "map-asset");\n    if (asset === null || asset === undefined) {\n        box.append(createElement("span", "map-asset-missing", "\u672A\u6307\u5B9A"));\n        return box;\n    }\n    // \u72B6\u6001\n    const status = assetStatus(asset);\n    if (status !== "ready") {\n        box.append(createElement("span", "map-asset-missing", `${asset.id} \xB7 ${assetStatusLabel(status)}`));\n        return box;\n    }\n    // \u5185\u5BB9\u7C7B\u578B\n    const contentType = typeof asset.content_type === "string" ? asset.content_type : "";\n    if (contentType.startsWith("image/")) {\n        // \u9884\u89C8\u6309\u94AE\n        const button = createElement("button", "map-asset-thumb");\n        button.type = "button";\n        button.title = `\u9884\u89C8 ${asset.id}`;\n        button.setAttribute("aria-label", `\u9884\u89C8 ${asset.id}`);\n        // \u56FE\u7247\n        const image = document.createElement("img");\n        image.src = asset.media_url;\n        image.alt = asset.id;\n        image.loading = "lazy";\n        button.append(image);\n        button.append(createElement("span", "mono", asset.id));\n        button.addEventListener("click", () => openImageUrl(asset.media_url, asset.path));\n        box.append(button);\n        return box;\n    }\n    if (contentType.startsWith("audio/")) {\n        // \u8BD5\u542C\u6309\u94AE\n        const button = createElement("button", "map-asset-thumb", `\u266A ${asset.id}`);\n        button.type = "button";\n        button.addEventListener("click", () => {\n            openPlayer([{ title: asset.path, url: asset.media_url, kind: "audio" }], 0);\n        });\n        box.append(button);\n        return box;\n    }\n    box.append(createElement("span", "mono", asset.id));\n    return box;\n}\n\n/**\n * \u8D44\u4EA7\u5217\u8868\u3002\n */\nfunction mapAssetList(container, assets) {\n    // \u5217\u8868\n    const row = createElement("div", "map-assets");\n    if (!Array.isArray(assets) || assets.length === 0) {\n        row.append(createElement("span", "muted", "\u65E0"));\n        container.append(row);\n        return;\n    }\n    for (const asset of assets) row.append(mapAssetNode(asset, true));\n    container.append(row);\n}\n\n/**\n * \u56FE\u8C31\u7B5B\u9009\u6587\u6848\u3002\n */\nfunction mapFocusLabel(map, focus) {\n    if (focus === null) return "";\n    if (focus.kind === "scene") {\n        // \u573A\u666F\n        const scene = map.catalog.scenes.find((item) => item.id === focus.id);\n        return scene !== undefined ? `\u573A\u666F\uFF1A${scene.name}` : `\u573A\u666F\uFF1A${focus.id}`;\n    }\n    // \u89D2\u8272\n    const character = map.catalog.characters.find((item) => item.id === focus.id);\n    return character !== undefined ? `\u89D2\u8272\uFF1A${character.name}` : `\u89D2\u8272\uFF1A${focus.id}`;\n}\n\n/**\n * \u573A\u666F\u8272\u8C03\u3002\n */\nfunction sceneTone(indexes, sceneId) {\n    if (sceneId === undefined || sceneId === null) return "tone-other";\n    // \u573A\u666F\n    const scene = indexes.scenes.get(sceneId);\n    // \u65F6\u95F4\n    const value = typeof scene?.time_of_day === "string" ? scene.time_of_day.toLowerCase() : "";\n    if (value.includes("night") || value.includes("\u591C")) return "tone-night";\n    if (value.includes("dusk") || value.includes("\u9EC4\u660F")) return "tone-dusk";\n    if (value.includes("dawn") || value.includes("\u6668")) return "tone-dawn";\n    if (value.includes("day") || value.includes("\u65E5")) return "tone-day";\n    return "tone-other";\n}\n\n/**\n * \u56FE\u8C31\u884C\u3002\n */\nfunction mapRow(label, value) {\n    // \u884C\n    const row = createElement("div", "map-row");\n    row.append(createElement("span", "map-row-label", label));\n    row.append(createElement("span", "map-row-value", value));\n    return row;\n}\n\n/**\n * \u56FE\u8C31\u8BE6\u60C5\u3002\n */\nfunction renderMapDetail(container, map, refresh) {\n    // \u7D22\u5F15\n    const indexes = mapIndexes(map);\n    // \u9762\u677F\n    const panel = createElement("div", "map-detail");\n    if (mapFocus === null) {\n        panel.append(createElement("p", "muted", "\u70B9\u51FB\u89D2\u8272\u3001\u5F62\u6001\u6216\u573A\u666F\u8282\u70B9\u67E5\u770B\u8BE6\u60C5\uFF1B\u70B9\u51FB\u540E\u53EF\u5728\u65F6\u5E8F\u56FE\u4E2D\u7B5B\u9009\u3002"));\n        container.append(panel);\n        return;\n    }\n    // \u5934\u90E8\n    const head = createElement("div", "map-detail-head");\n    head.append(createElement("strong", "", mapFocusLabel(map, mapFocus)));\n    // \u6E05\u9664\n    const clear = createElement("button", "button ghost", "\u6E05\u9664\u7B5B\u9009");\n    clear.type = "button";\n    clear.addEventListener("click", () => {\n        mapFocus = null;\n        refresh();\n    });\n    head.append(clear);\n    // \u65F6\u5E8F\n    const timeline = createElement("button", "button", "\u5728\u65F6\u5E8F\u4E2D\u7B5B\u9009");\n    timeline.type = "button";\n    timeline.addEventListener("click", () => {\n        mapTab = "timeline";\n        refresh();\n    });\n    head.append(timeline);\n    panel.append(head);\n    if (mapFocus.kind === "scene") {\n        // \u573A\u666F\n        const scene = indexes.scenes.get(mapFocus.id);\n        if (scene === undefined) {\n            panel.append(createElement("p", "muted", "\u573A\u666F\u4E0D\u5728\u672C\u96C6\u8D44\u4EA7\u76EE\u5F55\u4E2D\u3002"));\n            container.append(panel);\n            return;\n        }\n        panel.append(mapRow("\u65F6\u95F4", `${scene.time_of_day ?? "\u672A\u6807\u6CE8"} \xB7 ${scene.interior_exterior ?? "\u672A\u6807\u6CE8"}`));\n        panel.append(mapRow("\u4F7F\u7528", `${scene.event_count} \u955C`));\n        panel.append(createElement("p", "map-detail-label", "\u4E3B\u53C2\u8003 / \u8D44\u4EA7"));\n        mapAssetList(\n            panel,\n            [scene.reference_asset, ...scene.assets.filter((asset) => asset.id !== scene.reference_asset?.id)].filter(\n                (asset) => asset !== null,\n            ),\n        );\n        // \u89D2\u8272\n        const graphScene = map.graph.scenes.find((node) => String(node.id) === scene.id);\n        // \u89D2\u8272\u540D\n        const names = (graphScene?.character_ids ?? [])\n            .map((id) => indexes.characters.get(String(id))?.name ?? String(id))\n            .join("\u3001");\n        panel.append(mapRow("\u51FA\u573A\u89D2\u8272", names === "" ? "\u65E0" : names));\n        container.append(panel);\n        return;\n    }\n    // \u89D2\u8272\n    const character = indexes.characters.get(mapFocus.id);\n    if (character === undefined) {\n        panel.append(createElement("p", "muted", "\u89D2\u8272\u4E0D\u5728\u672C\u96C6\u8D44\u4EA7\u76EE\u5F55\u4E2D\u3002"));\n        container.append(panel);\n        return;\n    }\n    panel.append(mapRow("\u89D2\u8272\u5B9A\u4F4D", character.role ?? "\u672A\u6807\u6CE8"));\n    // \u5F62\u6001\n    const forms =\n        mapFocus.form === null || mapFocus.form === undefined\n            ? character.forms\n            : character.forms.filter((form) => form.id === mapFocus.form);\n    for (const form of forms) {\n        const section = createElement("div", "map-detail-section");\n        section.append(\n            createElement(\n                "p",\n                "map-detail-label",\n                `${form.name} \xB7 ${form.id}${form.used ? `\uFF08${form.event_count} \u955C\uFF09` : "\uFF08\u672C\u96C6\u672A\u4F7F\u7528\uFF09"}`,\n            ),\n        );\n        section.append(mapRow("\u4E3B\u53C2\u8003", assetStatusLabel(assetStatus(form.reference_asset))));\n        mapAssetList(\n            section,\n            [form.reference_asset, ...form.assets.filter((asset) => asset.id !== form.reference_asset?.id)].filter(\n                (asset) => asset !== null,\n            ),\n        );\n        panel.append(section);\n    }\n    // \u573A\u666F\n    const graphCharacter = map.graph.characters.find((node) => String(node.id) === character.id);\n    // \u573A\u666F\u540D\n    const sceneNames = (graphCharacter?.scene_ids ?? [])\n        .map((id) => indexes.scenes.get(String(id))?.name ?? String(id))\n        .join("\u3001");\n    panel.append(mapRow("\u51FA\u73B0\u573A\u666F", sceneNames === "" ? "\u65E0" : sceneNames));\n    // \u5171\u73B0\n    const cooccur = map.graph.cooccurrence_edges.filter((edge) => edge.a === character.id || edge.b === character.id);\n    // \u5171\u73B0\u6587\u6848\n    const cooccurText = cooccur\n        .map((edge) => {\n            // \u5BF9\u65B9\n            const other = edge.a === character.id ? String(edge.b) : String(edge.a);\n            return `${indexes.characters.get(other)?.name ?? other}\uFF08${edge.event_count} \u955C\uFF09`;\n        })\n        .join("\u3001");\n    panel.append(mapRow("\u5171\u73B0\u89D2\u8272", cooccurText === "" ? "\u65E0" : cooccurText));\n    // \u751F\u6210\u4F7F\u7528\n    const related = map.generation.events.filter((event) => event.cast.some((cast) => cast.id === character.id));\n    // \u5C31\u7EEA\u6570\n    const ready = related.filter((event) => event.ready).length;\n    panel.append(mapRow("\u751F\u6210\u4E0A\u4E0B\u6587", `${related.length} \u955C\u76F8\u5173 \xB7 ${ready} \u53EF\u751F\u6210 \xB7 ${related.length - ready} \u963B\u585E`));\n    container.append(panel);\n}\n\n/**\n * \u62D3\u6251\u8282\u70B9\u3002\n */\nfunction renderTopologyNode(svg, x, y, node, refresh) {\n    // \u5206\u7EC4\n    const group = svgNode("g", {\n        class: `map-node status-${node.status}`,\n        tabindex: "0",\n        role: "button",\n        "aria-label": `${node.kind === "scene" ? "\u573A\u666F" : "\u89D2\u8272"} ${node.name}`,\n    });\n    // \u80CC\u666F\n    group.append(\n        svgNode("rect", { x, y, width: MAP_NODE_WIDTH, height: MAP_NODE_HEIGHT, rx: 10, class: "map-node-bg" }),\n    );\n    // \u5934\u50CF\n    group.append(svgNode("circle", { cx: x + 22, cy: y + 24, r: 13, class: "map-node-avatar" }));\n    // \u9996\u5B57\n    const initial = svgNode("text", { x: x + 22, y: y + 28, class: "map-node-initial", "text-anchor": "middle" });\n    initial.textContent = node.name.slice(0, 1);\n    group.append(initial);\n    // \u540D\u79F0\n    const name = svgNode("text", { x: x + 42, y: y + 21, class: "map-node-name" });\n    name.textContent = node.name;\n    group.append(name);\n    // \u526F\u6807\u9898\n    const subtitle = svgNode("text", { x: x + 42, y: y + 37, class: "map-node-sub" });\n    subtitle.textContent = node.subtitle;\n    group.append(subtitle);\n    // \u63D0\u793A\n    const title = svgNode("title");\n    title.textContent = `${node.name} \xB7 ${node.status === "warn" ? "\u8D44\u4EA7\u5F02\u5E38" : "\u5C31\u7EEA"}`;\n    group.append(title);\n    // \u7126\u70B9\n    const focus = () => {\n        mapFocus = { kind: node.kind === "scene" ? "scene" : "character", id: node.id, form: node.form ?? null };\n        refresh();\n    };\n    group.addEventListener("click", focus);\n    group.addEventListener("keydown", (event) => {\n        if (event.key === "Enter" || event.key === " ") {\n            event.preventDefault();\n            focus();\n        }\n    });\n    // \u805A\u7126 / \u6DE1\u51FA\n    if (node.kind === "scene") {\n        if (mapFocus !== null && mapFocus.kind === "scene")\n            group.classList.add(mapFocus.id === node.id ? "is-focus" : "is-dim");\n    } else if (mapFocus !== null && mapFocus.kind === "character") {\n        group.classList.add(mapFocus.id === node.id ? "is-focus" : "is-dim");\n    }\n    svg.append(group);\n}\n\n/**\n * \u62D3\u6251\u56FE\u3002\n */\nfunction renderMapTopology(container, map, refresh) {\n    // \u7D22\u5F15\n    const indexes = mapIndexes(map);\n    // \u5DE6\u5217\u8282\u70B9\n    const left = [];\n    for (const node of map.graph.characters) {\n        // \u89D2\u8272\n        const character = indexes.characters.get(String(node.id));\n        // \u5F62\u6001\u8282\u70B9\n        const forms = Array.isArray(node.forms) ? node.forms : [];\n        if (mapMode === "form") {\n            for (const formNode of forms) {\n                // \u5F62\u6001\n                const form = formOf(character, String(formNode.id));\n                left.push({\n                    key: `form:${node.id}/${formNode.id}`,\n                    kind: "form",\n                    id: String(node.id),\n                    form: String(formNode.id),\n                    name: `${String(node.name ?? node.id)} \xB7 ${String(formNode.name ?? formNode.id)}`,\n                    subtitle: character?.role ?? "",\n                    status:\n                        form !== null && form.used && assetStatus(form.reference_asset) !== "ready" ? "warn" : "ready",\n                });\n            }\n            continue;\n        }\n        // \u4F7F\u7528\u5F62\u6001\n        const usedForms = forms\n            .map((formNode) => formOf(character, String(formNode.id)))\n            .filter((form) => form !== null && form.used);\n        left.push({\n            key: `character:${node.id}`,\n            kind: "character",\n            id: String(node.id),\n            form: null,\n            name: String(node.name ?? node.id),\n            subtitle: forms.map((formNode) => String(formNode.name ?? formNode.id)).join(" / "),\n            status: usedForms.some((form) => assetStatus(form.reference_asset) !== "ready") ? "warn" : "ready",\n        });\n    }\n    // \u573A\u666F\u8282\u70B9\n    const scenes = map.graph.scenes.map((node) => {\n        // \u573A\u666F\n        const scene = indexes.scenes.get(String(node.id));\n        return {\n            key: `scene:${node.id}`,\n            kind: "scene",\n            id: String(node.id),\n            form: null,\n            name: String(node.name ?? node.id),\n            subtitle: scene?.time_of_day ?? "",\n            status:\n                scene !== undefined && scene.used && assetStatus(scene.reference_asset) !== "ready" ? "warn" : "ready",\n        };\n    });\n    // \u884C\u6570\n    const rows = Math.max(left.length, scenes.length);\n    // \u9AD8\u5EA6\n    const height = MAP_TOP * 2 + rows * MAP_ROW_HEIGHT;\n    // SVG\n    const svg = svgNode("svg", {\n        viewBox: `0 0 ${MAP_WIDTH} ${height}`,\n        class: "map-graph",\n        role: "img",\n        "aria-label": "\u89D2\u8272\u3001\u5F62\u6001\u4E0E\u573A\u666F\u5173\u7CFB\u56FE",\n    });\n    // \u5DE6\u5217\u4F4D\u7F6E\n    const leftPositions = new Map();\n    for (const [index, node] of left.entries()) {\n        leftPositions.set(node.key, { x: MAP_LEFT_X, y: MAP_TOP + index * MAP_ROW_HEIGHT, node });\n    }\n    // \u53F3\u5217\u4F4D\u7F6E\n    const rightPositions = new Map();\n    for (const [index, node] of scenes.entries()) {\n        rightPositions.set(node.key, { x: MAP_RIGHT_X, y: MAP_TOP + index * MAP_ROW_HEIGHT, node });\n    }\n    // \u8FB9\n    const edges = mapMode === "form" ? map.graph.form_scene_edges : map.graph.character_scene_edges;\n    for (const edge of edges) {\n        // \u5DE6\u952E\n        const leftKey =\n            mapMode === "form" ? `form:${edge.character_id}/${edge.form_id}` : `character:${edge.character_id}`;\n        // \u7AEF\u70B9\n        const from = leftPositions.get(leftKey);\n        const to = rightPositions.get(`scene:${edge.scene_id}`);\n        if (from === undefined || to === undefined) continue;\n        // \u6B21\u6570\n        const count = Number(edge.event_count) || 1;\n        // \u8DEF\u5F84\n        const path = svgNode("path", {\n            d: `M ${from.x + MAP_NODE_WIDTH} ${from.y + MAP_NODE_HEIGHT / 2} C ${(from.x + MAP_NODE_WIDTH + to.x) / 2} ${from.y + MAP_NODE_HEIGHT / 2}, ${(from.x + MAP_NODE_WIDTH + to.x) / 2} ${to.y + MAP_NODE_HEIGHT / 2}, ${to.x} ${to.y + MAP_NODE_HEIGHT / 2}`,\n            class: "map-edge",\n            "stroke-width": 1.5 + Math.min(4, Math.sqrt(count) * 1.2),\n            opacity: 0.25 + Math.min(0.55, count * 0.08),\n        });\n        // \u63D0\u793A\n        const title = svgNode("title");\n        title.textContent = `${from.node.name} \u2192 ${to.node.name}\uFF1A${count} \u955C`;\n        path.append(title);\n        // \u805A\u7126\n        if (mapFocus !== null) {\n            // \u662F\u5426\u76F8\u5173\n            const related = mapFocus.kind === "scene" ? to.node.id === mapFocus.id : from.node.id === mapFocus.id;\n            if (!related) path.classList.add("is-dim");\n        }\n        svg.append(path);\n    }\n    // \u5171\u73B0\u5F27\n    if (mapMode === "character") {\n        const arcs = map.graph.cooccurrence_edges.slice(0, MAP_MAX_ARCS);\n        for (const edge of arcs) {\n            // \u7AEF\u70B9\n            const from = leftPositions.get(`character:${edge.a}`);\n            const to = leftPositions.get(`character:${edge.b}`);\n            if (from === undefined || to === undefined) continue;\n            // \u8DEF\u5F84\n            const path = svgNode("path", {\n                d: `M ${from.x} ${from.y + MAP_NODE_HEIGHT / 2} C ${Math.max(4, from.x - 30)} ${from.y + MAP_NODE_HEIGHT / 2}, ${Math.max(4, to.x - 30)} ${to.y + MAP_NODE_HEIGHT / 2}, ${to.x} ${to.y + MAP_NODE_HEIGHT / 2}`,\n                class: "map-cooccur",\n            });\n            // \u63D0\u793A\n            const title = svgNode("title");\n            title.textContent = `\u5171\u73B0\uFF1A${from.node.name} / ${to.node.name}\uFF08${edge.event_count} \u955C\uFF09`;\n            path.append(title);\n            svg.append(path);\n        }\n        // \u53D9\u4E8B\u5173\u7CFB\n        for (const relation of map.relations.slice(0, MAP_MAX_ARCS)) {\n            // \u7AEF\u70B9\n            const from = leftPositions.get(`character:${relation.from}`);\n            const to = leftPositions.get(`character:${relation.to}`);\n            if (from === undefined || to === undefined) continue;\n            // \u8DEF\u5F84\n            const path = svgNode("path", {\n                d: `M ${from.x} ${from.y + MAP_NODE_HEIGHT / 2} C ${Math.max(4, from.x - 50)} ${from.y + MAP_NODE_HEIGHT / 2}, ${Math.max(4, to.x - 50)} ${to.y + MAP_NODE_HEIGHT / 2}, ${to.x} ${to.y + MAP_NODE_HEIGHT / 2}`,\n                class: "map-relation",\n            });\n            // \u6807\u7B7E\n            const label = svgNode("text", {\n                x: Math.max(12, MAP_LEFT_X - 120),\n                y: (from.y + to.y) / 2 + MAP_NODE_HEIGHT / 2,\n                class: "map-relation-label",\n            });\n            label.textContent = relation.label;\n            svg.append(path, label);\n        }\n    }\n    // \u8282\u70B9\n    for (const node of left) {\n        // \u4F4D\u7F6E\n        const position = leftPositions.get(node.key);\n        if (position !== undefined) renderTopologyNode(svg, position.x, position.y, node, refresh);\n    }\n    for (const node of scenes) {\n        // \u4F4D\u7F6E\n        const position = rightPositions.get(node.key);\n        if (position !== undefined) renderTopologyNode(svg, position.x, position.y, node, refresh);\n    }\n    // \u5BB9\u5668\n    const wrap = createElement("div", "map-graph-wrap");\n    wrap.append(svg);\n    container.append(wrap);\n    // \u56FE\u4F8B\n    const legend = createElement("div", "map-legend");\n    legend.append(createElement("span", "", "\u5B9E\u7EBF\uFF1A\u89D2\u8272 / \u5F62\u6001\u51FA\u73B0\u5728\u573A\u666F"));\n    legend.append(createElement("span", "", "\u865A\u7EBF\uFF1A\u5171\u73B0\u6216\u53D9\u4E8B\u5173\u7CFB"));\n    legend.append(createElement("span", "", "\u7EBF\u5BBD\uFF1A\u51FA\u573A\u955C\u5934\u6570"));\n    container.append(legend);\n    // \u8BE6\u60C5\n    renderMapDetail(container, map, refresh);\n}\n\n/**\n * \u65F6\u5E8F\u4E8B\u4EF6\u8BE6\u60C5\u3002\n */\nfunction renderTimelineDetail(container, event, gen, map, indexes) {\n    // \u5185\u5BB9\n    const body = createElement("div", "map-event-detail");\n    // workflow\n    body.append(mapRow("Workflow", gen?.assigned_workflow ?? "\u672A\u6307\u5B9A"));\n    body.append(mapRow("\u6765\u6E90", gen?.workflow_source ?? "none"));\n    // \u69FD\u4F4D\n    if (gen?.workflow !== null && gen?.workflow !== undefined) {\n        const slots = createElement("div", "map-slots");\n        for (const slot of gen.workflow.slots) {\n            // \u69FD\u4F4D\n            const row = createElement("div", "map-slot");\n            row.append(createElement("span", "mono", `${slot.slot} \u2192 ${slot.target}`));\n            row.append(createElement("span", "", `${slot.owner ?? "\u2014"} \xB7 ${slot.asset?.id ?? "\u2014"}`));\n            row.append(badge(slot.status, `map-slot-${slot.status}`));\n            slots.append(row);\n        }\n        if (gen.workflow.slots.length > 0) {\n            body.append(createElement("p", "map-detail-label", "\u8D44\u4EA7\u69FD\u4F4D"));\n            body.append(slots);\n        }\n    }\n    // \u5019\u9009 workflow\n    if (gen !== undefined && gen.candidate_workflows.length > 0) {\n        const section = createElement("div", "map-detail-section");\n        section.append(createElement("p", "map-detail-label", "\u5019\u9009 workflow"));\n        for (const candidate of gen.candidate_workflows) {\n            // \u5019\u9009\u884C\n            const row = createElement("div", "map-slot");\n            row.append(createElement("span", "mono", candidate.name));\n            row.append(badge(candidate.fit, `map-fit-${candidate.fit}`));\n            if (candidate.reasons.length > 0) row.append(createElement("span", "muted", candidate.reasons.join("\uFF1B")));\n            section.append(row);\n        }\n        body.append(section);\n    }\n    // \u89D2\u8272\u8D44\u4EA7\n    const cast = createElement("div", "map-detail-section");\n    cast.append(createElement("p", "map-detail-label", "\u89D2\u8272\u4E0E\u5F62\u6001"));\n    for (const item of event.characters) {\n        // \u89D2\u8272\n        const character = indexes.characters.get(item.id);\n        // \u5F62\u6001\n        const form = formOf(character, item.form);\n        cast.append(\n            mapRow(\n                `${item.name} \xB7 ${item.form_name}`,\n                `${assetStatusLabel(assetStatus(form?.reference_asset))} \xB7 ${form?.assets.length ?? 0} \u4E2A\u8D44\u4EA7`,\n            ),\n        );\n        mapAssetList(\n            cast,\n            [\n                form?.reference_asset,\n                ...(form?.assets ?? []).filter((asset) => asset.id !== form?.reference_asset?.id),\n            ].filter((asset) => asset !== null && asset !== undefined),\n        );\n    }\n    body.append(cast);\n    // \u573A\u666F\u8D44\u4EA7\n    const scene = indexes.scenes.get(event.scene?.id ?? "");\n    if (scene !== undefined) {\n        const section = createElement("div", "map-detail-section");\n        section.append(createElement("p", "map-detail-label", `\u573A\u666F \xB7 ${scene.name}`));\n        mapAssetList(\n            section,\n            [scene.reference_asset, ...scene.assets.filter((asset) => asset.id !== scene.reference_asset?.id)].filter(\n                (asset) => asset !== null,\n            ),\n        );\n        body.append(section);\n    }\n    // \u97F3\u8272\n    if (gen !== undefined && gen.voices.length > 0) {\n        const section = createElement("div", "map-detail-section");\n        section.append(createElement("p", "map-detail-label", "\u97F3\u8272"));\n        for (const voice of gen.voices)\n            section.append(mapRow(voice.voice_id, voice.reference_present ? "\u53C2\u8003\u97F3\u9891\u53EF\u7528" : "\u53C2\u8003\u97F3\u9891\u7F3A\u5931"));\n        body.append(section);\n    }\n    // \u8FDE\u7EED\u6027\n    if (gen !== undefined) {\n        const section = createElement("div", "map-detail-section");\n        section.append(createElement("p", "map-detail-label", "\u8FDE\u7EED\u6027"));\n        section.append(mapRow("\u573A\u666F", gen.continuity.scene_changed ? "\u5207\u6362" : "\u5EF6\u7EED"));\n        section.append(\n            mapRow(\n                "\u5F62\u6001\u53D8\u5316",\n                gen.continuity.form_changes.length === 0\n                    ? "\u65E0"\n                    : gen.continuity.form_changes\n                          .map((change) => `${change.character_id}: ${change.from} \u2192 ${change.to}`)\n                          .join("\uFF1B"),\n            ),\n        );\n        section.append(\n            mapRow(\n                "Relay",\n                `${gen.continuity.relay_from ?? "\u65E0"} \u2192 ${gen.continuity.relay_targets.join(" / ") || "\u65E0"}`,\n            ),\n        );\n        section.append(mapRow("Anchor", gen.continuity.anchor?.path ?? "\u65E0"));\n        body.append(section);\n    }\n    // \u6E32\u67D3\n    if (gen !== undefined) {\n        const section = createElement("div", "map-detail-section");\n        section.append(createElement("p", "map-detail-label", "\u6E32\u67D3"));\n        section.append(mapRow("Run", `${gen.render.runs_count} \u6B21 \xB7 ${gen.render.succeeded_count} \u6210\u529F`));\n        section.append(mapRow("\u6700\u65B0\u72B6\u6001", gen.render.latest_status ?? "\u672A\u751F\u6210"));\n        if (gen.render.finalized_run_id !== null && gen.render.finalized_run_id !== undefined) {\n            section.append(\n                mapRow("\u5B9A\u7A3F\u7A3F\u4EF6", `${gen.render.finalized_run_id} / ${gen.render.finalized_outputs[0]?.name ?? ""}`),\n            );\n        }\n        if (gen.render.latest_error !== null) section.append(mapRow("\u9519\u8BEF", gen.render.latest_error));\n        // \u4EA7\u7269\n        const outputs = createElement("div", "map-assets");\n        // \u5B9A\u7A3F\u7A3F\u4EF6\u4F18\u5148\u5C55\u793A\n        const renderOutputs =\n            gen.render.finalized_outputs !== undefined && gen.render.finalized_outputs.length > 0\n                ? gen.render.finalized_outputs\n                : gen.render.latest_outputs;\n        for (const output of renderOutputs) {\n            // \u6253\u5F00\u6309\u94AE\n            const button = createElement(\n                "button",\n                "button ghost",\n                `${output.kind === "video" ? "\u64AD\u653E" : output.kind === "image" ? "\u67E5\u770B" : "\u6253\u5F00"} ${output.name}`,\n            );\n            button.type = "button";\n            button.addEventListener("click", () => {\n                if (output.kind === "video" || output.kind === "audio")\n                    openPlayer([{ title: output.name, url: output.media_url, kind: output.kind }], 0);\n                else if (output.kind === "image") openImageUrl(output.media_url, output.name);\n                else window.open(output.media_url, "_blank", "noopener");\n            });\n            outputs.append(button);\n        }\n        if (outputs.childElementCount > 0) section.append(outputs);\n        body.append(section);\n    }\n    // \u7F3A\u53E3\n    if (gen !== undefined && gen.gaps.length > 0) {\n        const section = createElement("div", "map-detail-section");\n        section.append(createElement("p", "map-detail-label", "\u7F3A\u53E3"));\n        for (const gap of gen.gaps) {\n            // \u7F3A\u53E3\n            const row = createElement("div", `map-gap ${gap.severity === "blocker" ? "is-blocker" : ""}`);\n            row.append(createElement("span", "mono", gap.code));\n            row.append(createElement("span", "", gap.message));\n            row.append(createElement("span", "muted", gap.hint));\n            section.append(row);\n        }\n        body.append(section);\n    }\n    container.append(body);\n}\n\n/**\n * \u65F6\u5E8F\u4E8B\u4EF6\u3002\n */\nfunction renderTimelineEvent(event, gen, map, indexes, refresh) {\n    // \u5BB9\u5668\n    const item = createElement("article", "timeline-event");\n    if (event.importance === "major") item.classList.add("is-major");\n    if (gen !== undefined && !gen.ready) item.classList.add("is-blocked");\n    // \u65F6\u95F4\n    const time = createElement("div", "timeline-time");\n    // \u65F6\u95F4\u6587\u6848\n    const timecode =\n        map.time.basis === "order"\n            ? `#${event.shot_id}`\n            : `${event.at_estimated ? "~" : ""}${formatTimecode(event.at_seconds)}`;\n    time.append(createElement("span", "timeline-timecode mono", timecode));\n    time.append(\n        createElement(\n            "span",\n            "muted",\n            event.duration_seconds !== null ? formatSeconds(event.duration_seconds) : "\u65F6\u957F\u672A\u77E5",\n        ),\n    );\n    if (event.story_time !== null) time.append(createElement("span", "timeline-story-time", event.story_time));\n    item.append(time);\n    // \u4E3B\u4F53\n    const main = createElement("div", "timeline-main");\n    const titleRow = createElement("div", "timeline-title-row");\n    titleRow.append(createElement("span", "shot-id", event.shot_id));\n    titleRow.append(createElement("h4", "timeline-title", event.title));\n    titleRow.append(mapImportanceBadge(event.importance));\n    titleRow.append(badge(gen?.assigned_workflow ?? "\u672A\u6307\u5B9A", "map-workflow"));\n    titleRow.append(mapReadyBadge(gen));\n    titleRow.append(mapRenderBadge(gen));\n    main.append(titleRow);\n    main.append(createElement("p", "timeline-summary", event.summary));\n    // chips\n    const chips = createElement("div", "chip-row");\n    if (event.scene !== null) {\n        // \u573A\u666F chip\n        const sceneChip = createElement("button", "chip chip-scene map-chip-button", event.scene.name);\n        sceneChip.type = "button";\n        sceneChip.addEventListener("click", () => {\n            mapFocus = { kind: "scene", id: event.scene.id };\n            refresh();\n        });\n        chips.append(sceneChip);\n    }\n    for (const character of event.characters) {\n        // \u89D2\u8272 chip\n        const chip = createElement(\n            "button",\n            "chip chip-character map-chip-button",\n            `${character.name} \xB7 ${character.form_name}`,\n        );\n        chip.type = "button";\n        chip.addEventListener("click", () => {\n            mapFocus = { kind: "character", id: character.id };\n            refresh();\n        });\n        chips.append(chip);\n    }\n    for (const beat of event.beats) {\n        chips.append(badge(beat.id, "map-beat"));\n    }\n    if (event.dialogue_count > 0) chips.append(createElement("span", "muted", `${event.dialogue_count} \u53E5\u53F0\u8BCD`));\n    main.append(chips);\n    // \u64CD\u4F5C\n    const actions = createElement("div", "timeline-actions");\n    const locate = createElement("button", "button ghost", "\u5B9A\u4F4D\u5206\u955C");\n    locate.type = "button";\n    locate.addEventListener("click", () => {\n        // \u76EE\u6807\u4EFB\u52A1\n        const target = document.getElementById(`shot-${event.shot_id}`);\n        if (target !== null) target.scrollIntoView({ behavior: "smooth", block: "start" });\n    });\n    actions.append(locate);\n    main.append(actions);\n    // \u8BE6\u60C5\n    const details = createElement("details", "timeline-details");\n    details.append(createElement("summary", "", "\u751F\u6210\u4E0A\u4E0B\u6587"));\n    // \u8BE6\u60C5\u5BB9\u5668\n    const detailBody = createElement("div");\n    renderTimelineDetail(detailBody, event, gen, map, indexes);\n    details.append(detailBody);\n    main.append(details);\n    item.append(main);\n    return item;\n}\n\n/**\n * \u65F6\u5E8F\u56FE\u3002\n */\nfunction renderMapTimeline(container, map, refresh) {\n    // \u7D22\u5F15\n    const indexes = mapIndexes(map);\n    // \u8FC7\u6EE4\n    let events = map.events.slice();\n    if (mapFocus !== null && mapFocus.kind === "character")\n        events = events.filter((event) => event.characters.some((character) => character.id === mapFocus.id));\n    if (mapFocus !== null && mapFocus.kind === "scene")\n        events = events.filter((event) => event.scene?.id === mapFocus.id);\n    if (mapOnlyMajor) events = events.filter((event) => event.importance === "major");\n    if (mapBlockedOnly) events = events.filter((event) => indexes.generation.get(event.shot_id)?.ready !== true);\n    if (events.length === 0) {\n        container.append(emptyNode("\u5F53\u524D\u7B5B\u9009\u6CA1\u6709\u4E8B\u4EF6", "\u6E05\u9664\u7B5B\u9009\u540E\u67E5\u770B\u5168\u90E8\u4E8B\u4EF6\u3002"));\n        return;\n    }\n    // \u603B\u89C8\n    const overview = createElement("div", "timeline-overview");\n    for (const event of map.events) {\n        // \u7247\u6BB5\n        const segment = createElement("button", `timeline-seg ${sceneTone(indexes, event.scene?.id)}`);\n        segment.type = "button";\n        segment.style.flexGrow = String(event.duration_seconds ?? 1);\n        segment.title = `${formatTimecode(event.at_seconds)} ${event.title}`;\n        if (event.importance === "major") segment.classList.add("is-major");\n        segment.addEventListener("click", () => {\n            // \u76EE\u6807\u4EFB\u52A1\n            const target = document.getElementById(`map-event-${event.shot_id}`);\n            if (target !== null) target.scrollIntoView({ behavior: "smooth", block: "center" });\n        });\n        overview.append(segment);\n    }\n    container.append(overview);\n    // \u5217\u8868\n    const list = createElement("div", "timeline-list");\n    for (const event of events) {\n        // \u751F\u6210\u4E0A\u4E0B\u6587\n        const gen = indexes.generation.get(event.shot_id);\n        // \u4E8B\u4EF6\u8282\u70B9\n        const item = renderTimelineEvent(event, gen, map, indexes, refresh);\n        item.id = `map-event-${event.shot_id}`;\n        list.append(item);\n    }\n    container.append(list);\n}\n\n/**\n * \u5267\u60C5\u56FE\u8C31\u533A\u5757\u3002\n */\nfunction renderStoryMap(map) {\n    // \u533A\u5757\n    const section = createElement("section", "map-section");\n    if (map === null || map === undefined) {\n        section.append(emptyNode("\u5267\u60C5\u56FE\u8C31\u4E0D\u53EF\u7528", "\u5F53\u524D\u5267\u96C6\u8FD8\u6CA1\u6709\u53EF\u89E3\u6790\u7684\u56FE\u8C31\u6570\u636E\u3002"));\n        return section;\n    }\n    // \u5934\u90E8\n    const head = createElement("div", "section-head");\n    // \u6807\u9898\u533A\n    const heading = createElement("div");\n    heading.append(createElement("h3", "section-title", "\u5267\u60C5\u56FE\u8C31"));\n    // \u7EDF\u8BA1\n    const counts = map.generation.readiness.counts;\n    heading.append(\n        createElement(\n            "p",\n            "map-subtitle",\n            `${map.events.length} \u4E8B\u4EF6 \xB7 ${map.catalog.characters.length} \u89D2\u8272 \xB7 ${map.catalog.scenes.length} \u573A\u666F \xB7 \u53EF\u751F\u6210 ${counts.ready} / \u963B\u585E ${counts.blocked} / \u5DF2\u751F\u6210 ${counts.rendered}`,\n        ),\n    );\n    head.append(heading);\n    // Tab\n    const tabs = createElement("div", "map-tabs");\n    const graphTab = createElement("button", "map-tab", "\u62D3\u6251\u56FE");\n    graphTab.type = "button";\n    const timelineTab = createElement("button", "map-tab", "\u65F6\u5E8F\u56FE");\n    timelineTab.type = "button";\n    tabs.append(graphTab, timelineTab);\n    head.append(tabs);\n    section.append(head);\n    // \u6765\u6E90\n    const origin = createElement(\n        "p",\n        "map-origin",\n        `${map.origin.annotated ? `\u542B ${map.origin.author} \u53D9\u4E8B\u6807\u6CE8` : "dycli \u81EA\u52A8\u63A8\u5BFC"}${map.origin.stale ? " \xB7 \u6807\u6CE8\u57FA\u4E8E\u65E7\u5206\u955C" : ""}`,\n    );\n    section.append(origin);\n    // \u8B66\u544A\n    if (map.warnings.length > 0) {\n        const callout = createElement("div", "callout warn map-warning");\n        callout.append(createElement("strong", "", `\u56FE\u8C31\u63D0\u793A ${map.warnings.length} \u9879`));\n        const list = createElement("ul", "mini-list");\n        for (const warning of map.warnings.slice(0, 8)) list.append(createElement("li", "", warning.message));\n        callout.append(list);\n        section.append(callout);\n    }\n    // \u4E3B\u4F53\n    const body = createElement("div", "map-body");\n    section.append(body);\n    /**\n     * \u5237\u65B0\u4E3B\u4F53\u3002\n     */\n    function refresh() {\n        // Tab \u72B6\u6001\n        graphTab.classList.toggle("is-active", mapTab === "graph");\n        graphTab.setAttribute("aria-selected", mapTab === "graph" ? "true" : "false");\n        timelineTab.classList.toggle("is-active", mapTab === "timeline");\n        timelineTab.setAttribute("aria-selected", mapTab === "timeline" ? "true" : "false");\n        clearNode(body);\n        if (map.events.length === 0) {\n            body.append(emptyNode("\u8FD8\u6CA1\u6709\u53EF\u5206\u6790\u7684\u955C\u5934", "\u5148\u5199\u5165\u672C\u96C6\u5206\u955C\uFF0C\u518D\u67E5\u770B\u89D2\u8272\u3001\u5F62\u6001\u3001\u573A\u666F\u4E0E\u751F\u6210\u4E0A\u4E0B\u6587\u3002"));\n            return;\n        }\n        body.append(renderMapToolbar(map, refresh));\n        if (mapTab === "timeline") renderMapTimeline(body, map, refresh);\n        else renderMapTopology(body, map, refresh);\n    }\n    graphTab.addEventListener("click", () => {\n        mapTab = "graph";\n        refresh();\n    });\n    timelineTab.addEventListener("click", () => {\n        mapTab = "timeline";\n        refresh();\n    });\n    refresh();\n    return section;\n}\n\n/**\n * \u56FE\u8C31\u5DE5\u5177\u680F\u3002\n */\nfunction renderMapToolbar(map, refresh) {\n    // \u5DE5\u5177\u680F\n    const bar = createElement("div", "map-toolbar");\n    // \u7B5B\u9009 chip\n    if (mapFocus !== null) {\n        const chip = createElement("span", "map-filter", mapFocusLabel(map, mapFocus));\n        const clear = createElement("button", "map-filter-clear", "\xD7");\n        clear.type = "button";\n        clear.setAttribute("aria-label", "\u6E05\u9664\u56FE\u8C31\u7B5B\u9009");\n        clear.addEventListener("click", () => {\n            mapFocus = null;\n            refresh();\n        });\n        chip.append(clear);\n        bar.append(chip);\n    }\n    // \u6A21\u5F0F / \u8FC7\u6EE4\n    const group = createElement("div", "map-toolbar-group");\n    if (mapTab === "graph") {\n        const characterButton = createElement("button", "button ghost map-toggle", "\u6309\u89D2\u8272");\n        characterButton.type = "button";\n        characterButton.classList.toggle("is-active", mapMode === "character");\n        characterButton.addEventListener("click", () => {\n            mapMode = "character";\n            refresh();\n        });\n        const formButton = createElement("button", "button ghost map-toggle", "\u6309\u5F62\u6001");\n        formButton.type = "button";\n        formButton.classList.toggle("is-active", mapMode === "form");\n        formButton.addEventListener("click", () => {\n            mapMode = "form";\n            refresh();\n        });\n        group.append(characterButton, formButton);\n    } else {\n        const majorButton = createElement("button", "button ghost map-toggle", "\u53EA\u770B\u5173\u952E\u4E8B\u4EF6");\n        majorButton.type = "button";\n        majorButton.classList.toggle("is-active", mapOnlyMajor);\n        majorButton.addEventListener("click", () => {\n            mapOnlyMajor = !mapOnlyMajor;\n            refresh();\n        });\n        const blockedButton = createElement("button", "button ghost map-toggle", "\u53EA\u770B\u963B\u585E");\n        blockedButton.type = "button";\n        blockedButton.classList.toggle("is-active", mapBlockedOnly);\n        blockedButton.addEventListener("click", () => {\n            mapBlockedOnly = !mapBlockedOnly;\n            refresh();\n        });\n        group.append(majorButton, blockedButton);\n    }\n    bar.append(group);\n    return bar;\n}\n\n/**\n * \u9879\u76EE\u7BA1\u7406\u9875\u3002\n */\nfunction renderProject(data) {\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", "Project"));\n    headText.append(createElement("h2", "page-title", "\u9879\u76EE\u7BA1\u7406"));\n    headText.append(createElement("p", "page-subtitle", "\u914D\u7F6E\u89C6\u9891\u6A21\u5F0F\u4E0E\u97F3\u9891\uFF1B\u4FDD\u5B58\u540E\u7ACB\u5373\u751F\u6548\u3002"));\n    head.append(headText);\n    viewRoot.append(head);\n\n    // \u57FA\u672C\u4FE1\u606F\n    const info = createElement("div", "panel settings-panel");\n    info.append(createElement("h3", "panel-title", "\u9879\u76EE\u4FE1\u606F"));\n    const infoList = createElement("div", "settings-rows");\n    infoList.append(settingsRow("\u9879\u76EE\u540D", data.name ?? "\u2014"));\n    infoList.append(settingsRow("\u5F53\u524D\u5267\u96C6", `${data.episode_count ?? 0} \u96C6`));\n    infoList.append(settingsRow("\u97F3\u9891", data.audio ? "\u9700\u8981\u97F3\u9891" : "\u4E0D\u9700\u8981\u97F3\u9891"));\n    info.append(infoList);\n    viewRoot.append(info);\n\n    // \u89C6\u9891\u6A21\u5F0F\n    const modePanel = createElement("div", "panel settings-panel");\n    modePanel.append(createElement("h3", "panel-title", "\u89C6\u9891\u6A21\u5F0F"));\n    const singleDisabled = (data.episode_count ?? 0) > 1;\n    const modeGroup = createElement("div", "settings-options");\n    modeGroup.append(\n        modeOption(\n            "production-mode",\n            "single",\n            "\u5355\u89C6\u9891",\n            "\u53EA\u6709\u4E00\u96C6\uFF1B\u9690\u85CF\u5267\u96C6\u5217\u8868\u4E0E\u5267\u60C5\u56FE\u8C31\u3002",\n            data.mode === "single",\n            singleDisabled,\n        ),\n    );\n    modeGroup.append(\n        modeOption(\n            "production-mode",\n            "series",\n            "\u591A\u96C6",\n            "\u53EF\u65B0\u589E\u5267\u96C6\uFF1B\u663E\u793A\u7CFB\u5217\u3001\u5267\u96C6\u4E0E\u5267\u60C5\u56FE\u8C31\u3002",\n            data.mode === "series",\n            false,\n        ),\n    );\n    modePanel.append(modeGroup);\n    if (singleDisabled) {\n        modePanel.append(\n            createElement(\n                "p",\n                "settings-hint text-warn",\n                `\u5F53\u524D\u6709 ${data.episode_count} \u96C6\uFF0C\u53EA\u6709\u4E00\u96C6\u65F6\u624D\u80FD\u5207\u6362\u4E3A\u5355\u89C6\u9891\u3002\u8BF7\u5148\u5220\u9664\u591A\u4F59\u5267\u96C6\u3002`,\n            ),\n        );\n    }\n    viewRoot.append(modePanel);\n\n    // \u97F3\u9891\n    const audioPanel = createElement("div", "panel settings-panel");\n    audioPanel.append(createElement("h3", "panel-title", "\u97F3\u9891"));\n    const audioOption = createElement("label", "settings-check");\n    const audioInput = document.createElement("input");\n    audioInput.type = "checkbox";\n    audioInput.checked = data.audio !== false;\n    audioOption.append(audioInput);\n    const audioCopy = createElement("span");\n    audioCopy.append(createElement("strong", "", "\u9700\u8981\u97F3\u9891"));\n    audioCopy.append(\n        createElement("span", "settings-hint", "\u5173\u95ED\u540E\u9690\u85CF\u97F3\u8272\u9875\u9762\u4E0E\u53F0\u8BCD\u9009\u9879\uFF0C\u751F\u6210\u65F6\u5FFD\u7565\u97F3\u8272\u69FD\u4F4D\uFF1B\u5DF2\u6709\u6570\u636E\u4FDD\u7559\u3002"),\n    );\n    audioOption.append(audioCopy);\n    audioPanel.append(audioOption);\n    viewRoot.append(audioPanel);\n\n    // \u4FDD\u5B58\n    const actions = createElement("div", "card-actions");\n    const save = createElement("button", "button", "\u4FDD\u5B58\u8BBE\u7F6E");\n    save.type = "button";\n    save.addEventListener("click", async () => {\n        if (save.disabled) return;\n        save.disabled = true;\n        save.textContent = "\u4FDD\u5B58\u4E2D\u2026";\n        // \u76EE\u6807\u6A21\u5F0F\n        const checked = viewRoot.querySelector(\'input[name="production-mode"]:checked\');\n        const mode = checked !== null && checked.value === "single" ? "single" : "series";\n        try {\n            const updated = await postJson(API.projectSettings, { mode, audio: audioInput.checked });\n            applyProjectSettings({ ...data, ...updated });\n            showToast("\u9879\u76EE\u8BBE\u7F6E\u5DF2\u4FDD\u5B58");\n            await reloadView();\n            void loadHeader();\n        } catch (error) {\n            showToast(error instanceof Error ? error.message : "\u4FDD\u5B58\u5931\u8D25", true);\n            save.disabled = false;\n            save.textContent = "\u4FDD\u5B58\u8BBE\u7F6E";\n        }\n    });\n    actions.append(save);\n    viewRoot.append(actions);\n}\n\n/**\n * \u8BBE\u7F6E\u884C\u3002\n */\nfunction settingsRow(label, value) {\n    const row = createElement("div", "settings-row");\n    row.append(createElement("span", "settings-label", label));\n    row.append(createElement("span", "settings-value", value));\n    return row;\n}\n\n/**\n * \u6A21\u5F0F\u5355\u9009\u9879\u3002\n */\nfunction modeOption(name, value, label, hint, checked, disabled) {\n    const option = createElement("label", `settings-option${disabled ? " disabled" : ""}`);\n    const input = document.createElement("input");\n    input.type = "radio";\n    input.name = name;\n    input.value = value;\n    input.checked = checked;\n    input.disabled = disabled;\n    option.append(input);\n    const copy = createElement("span");\n    copy.append(createElement("strong", "", label));\n    copy.append(createElement("span", "settings-hint", hint));\n    option.append(copy);\n    return option;\n}\n\n/**\n * \u89D2\u8272\u9875\u3002\n */\nfunction renderCharacters(data) {\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", "Characters"));\n    headText.append(createElement("h2", "page-title", "\u89D2\u8272\u4E0E\u5F62\u6001"));\n    headText.append(createElement("p", "page-subtitle", "\u8DE8\u96C6\u5171\u4EAB\u7684\u5168\u5C40\u8BBE\u5B9A\uFF1B\u4E3B\u53C2\u8003\u7531 AI / \u7528\u6237\u663E\u5F0F\u6307\u5B9A\u3002"));\n    head.append(headText);\n    viewRoot.append(head);\n    // \u89D2\u8272\n    const items = Array.isArray(data.items) ? data.items : [];\n    if (items.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u89D2\u8272", "\u4F7F\u7528 daoyan story characters set \u5199\u5165\u5168\u5C40\u89D2\u8272\u3002"));\n        return;\n    }\n    const grid = createElement("div", "grid");\n    for (const character of items) {\n        // \u5361\u7247\n        const card = createElement("article", "card entity-card");\n        const body = createElement("div", "card-body");\n        body.append(createElement("h3", "card-title", `${character.name} \xB7 ${character.id}`));\n        body.append(createElement("p", "muted", character.summary ?? ""));\n        for (const form of character.forms) {\n            // \u5F62\u6001\n            const block = createElement("div", "form-block");\n            block.append(createElement("h4", "form-title", `${form.name} \xB7 ${form.id}`));\n            // \u4E3B\u53C2\u8003\n            const reference = form.reference_asset\n                ? form.assets.find((asset) => asset.id === form.reference_asset)\n                : null;\n            block.append(assetNode(reference, false));\n            // \u5176\u5B83\u8D44\u4EA7\n            const more = createElement("div", "asset-row");\n            for (const asset of form.assets) {\n                if (reference !== null && asset.id === reference.id) continue;\n                more.append(assetNode(asset, true));\n            }\n            if (more.childElementCount > 0) block.append(more);\n            body.append(block);\n        }\n        card.append(body);\n        grid.append(card);\n    }\n    viewRoot.append(grid);\n}\n\n/**\n * \u573A\u666F\u9875\u3002\n */\nfunction renderScenes(data) {\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", "Scenes"));\n    headText.append(createElement("h2", "page-title", "\u573A\u666F"));\n    headText.append(createElement("p", "page-subtitle", "\u8DE8\u96C6\u5171\u4EAB\u7684\u573A\u666F\u53C2\u8003\u8D44\u4EA7\u3002"));\n    head.append(headText);\n    viewRoot.append(head);\n    // \u573A\u666F\n    const items = Array.isArray(data.items) ? data.items : [];\n    if (items.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u573A\u666F", "\u4F7F\u7528 daoyan story scenes set \u5199\u5165\u5168\u5C40\u573A\u666F\u3002"));\n        return;\n    }\n    const grid = createElement("div", "grid");\n    for (const scene of items) {\n        // \u5361\u7247\n        const card = createElement("article", "card entity-card");\n        const body = createElement("div", "card-body");\n        body.append(createElement("h3", "card-title", `${scene.name} \xB7 ${scene.id}`));\n        body.append(createElement("p", "muted", scene.description ?? ""));\n        const reference = scene.reference_asset\n            ? scene.assets.find((asset) => asset.id === scene.reference_asset)\n            : null;\n        body.append(assetNode(reference, false));\n        const more = createElement("div", "asset-row");\n        for (const asset of scene.assets) {\n            if (reference !== null && asset.id === reference.id) continue;\n            more.append(assetNode(asset, true));\n        }\n        if (more.childElementCount > 0) body.append(more);\n        card.append(body);\n        grid.append(card);\n    }\n    viewRoot.append(grid);\n}\n\n/**\n * \u97F3\u8272\u9875\u3002\n */\nfunction renderVoices(data) {\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", "Voices"));\n    headText.append(createElement("h2", "page-title", "\u97F3\u8272"));\n    headText.append(createElement("p", "page-subtitle", "\u89D2\u8272\u97F3\u8272\u6863\u6848\uFF1Breference \u6A21\u5F0F\u5FC5\u987B\u6709\u663E\u5F0F\u53C2\u8003\u97F3\u9891\u3002"));\n    head.append(headText);\n    viewRoot.append(head);\n    // \u97F3\u8272\n    const items = Array.isArray(data.items) ? data.items : [];\n    if (items.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u97F3\u8272", "\u4F7F\u7528 daoyan story voices set \u5199\u5165\u97F3\u8272\u3002"));\n        return;\n    }\n    const grid = createElement("div", "grid");\n    for (const voice of items) {\n        // \u5361\u7247\n        const card = createElement("article", "card entity-card");\n        const body = createElement("div", "card-body");\n        body.append(createElement("h3", "card-title", `${voice.name} \xB7 ${voice.id}`));\n        body.append(createElement("p", "muted", `${voice.character_id} \xB7 ${voice.mode}`));\n        body.append(createElement("p", "", voice.description ?? ""));\n        const reference = voice.reference_asset\n            ? voice.assets.find((asset) => asset.id === voice.reference_asset)\n            : null;\n        body.append(assetNode(reference, false));\n        if (voice.sample_text) body.append(createElement("blockquote", "quote", voice.sample_text));\n        card.append(body);\n        grid.append(card);\n    }\n    viewRoot.append(grid);\n}\n\n/**\n * \u8BBE\u5B9A\u8D44\u4EA7\u9875\u3002\n */\nfunction renderAssets(data) {\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", "Story assets"));\n    headText.append(createElement("h2", "page-title", "\u8BBE\u5B9A\u8D44\u4EA7"));\n    headText.append(createElement("p", "page-subtitle", "\u53C2\u8003\u56FE\u4E0E\u53C2\u8003\u97F3\u9891\uFF1B* \u8868\u793A\u5F53\u524D\u4E3B\u53C2\u8003\u3002"));\n    head.append(headText);\n    viewRoot.append(head);\n    // \u8D44\u4EA7\uFF08\u97F3\u9891\u5173\u95ED\u65F6\u9690\u85CF\u97F3\u8272\u8D44\u4EA7\uFF09\n    const items = (Array.isArray(data.items) ? data.items : []).filter(\n        (item) => projectSettings.audio || item.owner_kind !== "voice",\n    );\n    if (items.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u8BBE\u5B9A\u8D44\u4EA7", "\u4F7F\u7528 daoyan story asset add \u5165\u5E93\u53C2\u8003\u56FE\u3002"));\n        return;\n    }\n    const grid = createElement("div", "grid");\n    for (const item of items) {\n        // \u5361\u7247\n        const card = createElement("article", "card entity-card");\n        const body = createElement("div", "card-body");\n        const owner = `${item.owner_kind}:${item.owner_id}${item.form_id !== null ? `/${item.form_id}` : ""}`;\n        body.append(createElement("h3", "card-title", `${item.reference ? "* " : ""}${item.asset.id}`));\n        body.append(createElement("p", "muted", `${owner} \xB7 ${item.owner_name}`));\n        body.append(assetNode(item.asset, false));\n        card.append(body);\n        grid.append(card);\n    }\n    viewRoot.append(grid);\n}\n\n/**\n * \u6982\u89C8\u9875\u3002\n */\nfunction renderOverview(data) {\n    // \u7EDF\u8BA1\n    const stats = data.stats ?? {};\n    // \u5206\u955C\u89C6\u56FE\n    const storyboard = data.storyboard !== undefined ? data.storyboard : null;\n    // \u7CFB\u5217\u72B6\u6001\n    const story = data.story !== undefined ? data.story : null;\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    // \u9875\u5934\u6587\u672C\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", "Overview"));\n    headText.append(createElement("h2", "page-title", data.project !== undefined ? data.project.name : "\u9879\u76EE\u6982\u89C8"));\n    // \u9879\u76EE\u6458\u8981\n    const subtitle = [`${data.mode ?? "\u672A\u7ED1\u5B9A\u672C\u673A"} \xB7 ${data.machine_id ?? "\u672C\u673A\u672A\u521D\u59CB\u5316"}`];\n    if (storyboard !== null && storyboard.summary !== undefined) {\n        subtitle.push(\n            `${storyboard.summary.shots_total} \u955C \xB7 ${storyboard.summary.characters_total} \u89D2\u8272 \xB7 ${storyboard.summary.scenes_total} \u573A\u666F`,\n        );\n    }\n    headText.append(createElement("p", "page-subtitle", subtitle.join(" \xB7 ")));\n    head.append(headText);\n    viewRoot.append(head);\n\n    if (data.machine === null) {\n        // \u672A\u521D\u59CB\u5316\u63D0\u793A\n        const callout = createElement("div", "callout");\n        callout.append(createElement("strong", "", "\u672C\u673A\u5C1A\u672A\u521D\u59CB\u5316\u3002"));\n        callout.append(document.createTextNode(" \u5F53\u524D\u4EC5\u5C55\u793A\u5171\u4EAB\u6570\u636E\uFF1B\u8FD0\u884C "));\n        callout.append(createElement("code", "mono", "daoyan init --mode=local|remote"));\n        callout.append(document.createTextNode(" \u7ED1\u5B9A\u672C\u673A\u540E\u5373\u53EF\u770B\u5230\u5F15\u64CE\u4E0E\u673A\u5668\u72B6\u6001\u3002"));\n        viewRoot.append(callout);\n    }\n\n    // \u7EDF\u8BA1\u7F51\u683C\n    const statsGrid = createElement("div", "stats-grid");\n    if (story !== null) {\n        statsGrid.append(\n            statCard(\n                projectSettings.mode === "single" ? "\u89C6\u9891" : "\u5267\u96C6",\n                `${story.series.episodes_ready ?? 0}/${story.series.episodes_total ?? 0}`,\n                projectSettings.mode === "single" ? "\u53EF\u62CD / \u603B\u6570" : "\u53EF\u62CD / \u603B\u96C6\u6570",\n            ),\n        );\n        statsGrid.append(statCard("\u89D2\u8272", stats.characters_total ?? 0, `${stats.forms_total ?? 0} \u4E2A\u5F62\u6001`));\n        statsGrid.append(statCard("\u573A\u666F", stats.scenes_total ?? 0, "\u5168\u5C40\u573A\u666F"));\n        if (projectSettings.audio) statsGrid.append(statCard("\u97F3\u8272", stats.voices_total ?? 0, "\u5168\u5C40\u97F3\u8272"));\n        statsGrid.append(statCard("\u8BBE\u5B9A\u8D44\u4EA7", stats.assets_total ?? 0, "\u53C2\u8003\u56FE / \u97F3\u9891"));\n        statsGrid.append(statCard("\u955C\u5934", stats.shots_total ?? 0, `\u6210\u529F run ${stats.runs_succeeded ?? 0}`));\n    } else {\n        statsGrid.append(statCard("\u955C\u5934", `${stats.shots_done ?? 0}/${stats.shots_total ?? 0}`, "\u5DF2\u5B8C\u6210 / \u603B\u6570"));\n        statsGrid.append(statCard("\u4EBA\u7269", stats.characters_total ?? 0, "\u5DF2\u767B\u8BB0\u89D2\u8272"));\n        statsGrid.append(statCard("\u573A\u666F", stats.scenes_total ?? 0, "\u5DF2\u767B\u8BB0\u573A\u666F"));\n        statsGrid.append(statCard("\u4EA7\u51FA\u7269", stats.outputs_total ?? 0, formatBytes(stats.outputs_bytes ?? 0)));\n        statsGrid.append(\n            statCard(\n                "\u6210\u529F run",\n                `${stats.runs_succeeded ?? 0}/${stats.runs_total ?? 0}`,\n                `\u5931\u8D25 ${stats.runs_failed ?? 0}`,\n            ),\n        );\n        statsGrid.append(statCard("\u8FD0\u884C\u4E2D\u4EFB\u52A1", stats.tasks_active ?? 0, `\u5171 ${stats.tasks_total ?? 0} \u4E2A\u4EFB\u52A1`));\n    }\n    viewRoot.append(statsGrid);\n\n    if (story !== null) {\n        renderStorySeries(story);\n    } else if (storyboard !== null) {\n        viewRoot.append(renderProjectProfile(storyboard));\n        viewRoot.append(renderEntitySection("character", storyboard.characters));\n        viewRoot.append(renderEntitySection("scene", storyboard.scenes));\n        viewRoot.append(renderStoryboardPanel(storyboard));\n    } else {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u5206\u955C\u8BBE\u5B9A", "\u521B\u5EFA shots.json \u540E\uFF0C\u8FD9\u91CC\u4F1A\u5C55\u793A\u955C\u5934\u3001\u4EBA\u7269\u3001\u573A\u666F\u548C\u9010\u955C\u4EA7\u51FA\u3002"));\n    }\n\n    // \u4E24\u5217\u4FE1\u606F\n    const layout = createElement("div", "layout-two");\n    layout.append(renderEnginePanel(data));\n    layout.append(renderEnvironmentPanel(data));\n    viewRoot.append(layout);\n\n    // \u6700\u8FD1\u4EA7\u7269\n    const artifacts = Array.isArray(data.recent_artifacts) ? data.recent_artifacts : [];\n    // \u4EA7\u7269\u533A\u5757\u5934\n    const artifactHead = createElement("div", "section-head");\n    artifactHead.append(createElement("h3", "section-title", "\u6700\u8FD1\u4EA7\u51FA\u7269"));\n    artifactHead.append(createElement("span", "section-meta", `${artifacts.length} \u4E2A`));\n    viewRoot.append(artifactHead);\n    if (artifacts.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u4EA7\u51FA\u7269", "\u6267\u884C shot / run \u540E\uFF0C\u89C6\u9891\u4E0E\u56FE\u7247\u4F1A\u51FA\u73B0\u5728\u8FD9\u91CC\u3002"));\n    } else {\n        // \u4EA7\u7269\u7F51\u683C\n        const grid = createElement("div", "grid");\n        renderArtifactCards(grid, artifacts);\n        viewRoot.append(grid);\n    }\n\n    // \u6700\u8FD1\u4EFB\u52A1\n    const tasks = Array.isArray(data.recent_tasks) ? data.recent_tasks : [];\n    // \u4EFB\u52A1\u533A\u5757\u5934\n    const taskHead = createElement("div", "section-head");\n    taskHead.append(createElement("h3", "section-title", "\u6700\u8FD1\u4EFB\u52A1"));\n    taskHead.append(createElement("span", "section-meta", `${tasks.length} \u4E2A`));\n    viewRoot.append(taskHead);\n    if (tasks.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u4EFB\u52A1", "daoyan shot / batch \u521B\u5EFA\u7684\u4EFB\u52A1\u4F1A\u5728\u8FD9\u91CC\u51FA\u73B0\u3002"));\n    } else {\n        viewRoot.append(renderTaskList(tasks));\n    }\n}\n\n/**\n * \u9879\u76EE\u6863\u6848\u9762\u677F\u3002\n */\nfunction renderProjectProfile(storyboard) {\n    // \u9762\u677F\n    const panel = createElement("section", "panel profile-panel");\n    // \u9762\u677F\u5934\n    const head = createElement("div", "panel-head");\n    // \u6807\u9898\u5BB9\u5668\n    const titles = createElement("div");\n    titles.append(createElement("h3", "panel-title", "\u9879\u76EE\u6863\u6848"));\n    titles.append(createElement("p", "panel-sub", "\u5267\u60C5\u3001\u753B\u9762\u4E0E\u751F\u6210\u53C2\u6570"));\n    head.append(titles);\n    panel.append(head);\n\n    if (storyboard.synopsis !== null && storyboard.synopsis !== undefined) {\n        panel.append(createElement("p", "profile-synopsis", storyboard.synopsis));\n    }\n\n    // \u6458\u8981\n    const summary = storyboard.summary ?? {};\n    // \u9ED8\u8BA4\u53C2\u6570\n    const defaults = storyboard.defaults ?? {};\n    // \u952E\u503C\u5217\u8868\n    const kv = createElement("dl", "kv");\n    appendKv(kv, "\u7247\u540D", storyboard.title ?? "\u672A\u547D\u540D");\n    appendKv(kv, "\u5206\u8FA8\u7387", summary.resolution ?? "\u2014");\n    appendKv(kv, "\u5E27\u7387", summary.fps !== null && summary.fps !== undefined ? `${summary.fps} fps` : "\u672A\u8BBE\u7F6E");\n    appendKv(kv, "\u603B\u5E27\u6570", summary.total_frames ?? 0);\n    appendKv(\n        kv,\n        "\u603B\u65F6\u957F",\n        summary.total_duration_seconds !== null && summary.total_duration_seconds !== undefined\n            ? formatSeconds(summary.total_duration_seconds)\n            : "\u90E8\u5206\u955C\u5934\u672A\u77E5",\n    );\n    appendKv(kv, "\u98CE\u683C", storyboard.style_prefix ?? "\u2014");\n    appendKv(kv, "workflow", storyboard.workflow ?? "\u2014");\n    if (defaults.steps !== undefined) appendKv(kv, "\u9ED8\u8BA4 steps", defaults.steps);\n    if (defaults.cfg !== undefined) appendKv(kv, "\u9ED8\u8BA4 cfg", defaults.cfg);\n    if (defaults.negative !== undefined) appendKv(kv, "\u8D1F\u5411\u63D0\u793A\u8BCD", defaults.negative);\n    panel.append(kv);\n    return panel;\n}\n\n/**\n * \u4EBA\u7269 / \u573A\u666F\u533A\u5757\u3002\n */\nfunction renderEntitySection(kind, entities) {\n    // \u662F\u5426\u4EBA\u7269\n    const isCharacter = kind === "character";\n    // \u533A\u5757\n    const section = createElement("section", "entity-section");\n    // \u533A\u5757\u5934\n    const head = createElement("div", "section-head");\n    head.append(createElement("h3", "section-title", isCharacter ? "\u4EBA\u7269\u8BBE\u5B9A" : "\u573A\u666F\u8BBE\u5B9A"));\n    head.append(createElement("span", "section-meta", `${Array.isArray(entities) ? entities.length : 0} \u4E2A`));\n    section.append(head);\n    if (!Array.isArray(entities) || entities.length === 0) {\n        section.append(\n            emptyNode(\n                isCharacter ? "\u8FD8\u6CA1\u6709\u4EBA\u7269\u8BBE\u5B9A" : "\u8FD8\u6CA1\u6709\u573A\u666F\u8BBE\u5B9A",\n                isCharacter\n                    ? "\u5728 shots.json \u7684 meta.characters \u767B\u8BB0\u4EBA\u7269\uFF0C\u5E76\u5728\u955C\u5934\u7684 characters \u5B57\u6BB5\u5F15\u7528\u3002"\n                    : "\u5728 shots.json \u7684 meta.scenes \u767B\u8BB0\u573A\u666F\uFF0C\u5E76\u5728\u955C\u5934\u7684 scene \u5B57\u6BB5\u5F15\u7528\u3002",\n            ),\n        );\n        return section;\n    }\n    // \u5361\u7247\u7F51\u683C\n    const grid = createElement("div", "entity-grid");\n    for (const entity of entities) {\n        // \u5B9E\u4F53\u5361\u7247\n        const card = createElement("article", "entity-card");\n        // \u5361\u7247\u5934\n        const cardHead = createElement("div", "entity-head");\n        cardHead.append(createElement("h4", "entity-name", entity.name));\n        cardHead.append(\n            entity.count > 0\n                ? badge(`\u51FA\u573A ${entity.count} \u955C`, isCharacter ? "kind-image" : "kind-video")\n                : badge("\u672A\u51FA\u573A", ""),\n        );\n        card.append(cardHead);\n        if (entity.description) card.append(createElement("p", "entity-desc", entity.description));\n        if (entity.reference) card.append(createElement("p", "entity-ref mono", entity.reference));\n        // \u51FA\u573A\u955C\u53F7\n        const shots = createElement("div", "chip-row");\n        if (Array.isArray(entity.shots) && entity.shots.length > 0) {\n            for (const shotId of entity.shots) shots.append(createElement("span", "chip chip-small", `\u955C ${shotId}`));\n        } else {\n            shots.append(createElement("span", "muted", "\u6682\u65E0\u51FA\u573A\u955C\u5934"));\n        }\n        card.append(shots);\n        grid.append(card);\n    }\n    section.append(grid);\n    return section;\n}\n\n/**\n * \u5206\u955C\u4E00\u89C8\u9762\u677F\u3002\n */\nfunction renderStoryboardPanel(storyboard) {\n    // \u955C\u5934\n    const shots = Array.isArray(storyboard.shots) ? storyboard.shots : [];\n    // \u533A\u5757\n    const section = createElement("section", "storyboard-section");\n    // \u533A\u5757\u5934\n    const head = createElement("div", "section-head");\n    head.append(createElement("h3", "section-title", "\u5206\u955C\u4E00\u89C8"));\n    head.append(createElement("span", "section-meta", `${shots.length} \u955C`));\n    // \u67E5\u770B\u5168\u90E8\n    const more = createElement("button", "button ghost", "\u67E5\u770B\u5206\u955C\u8BE6\u60C5");\n    more.type = "button";\n    more.addEventListener("click", () => {\n        window.location.hash = `${HASH_PREFIX}shots`;\n    });\n    head.append(more);\n    section.append(head);\n    if (shots.length === 0) {\n        section.append(emptyNode("\u8FD8\u6CA1\u6709\u955C\u5934", "\u5728 shots.json \u7684 shots \u6570\u7EC4\u91CC\u6DFB\u52A0\u955C\u5934\u3002"));\n        return section;\n    }\n    // \u5206\u955C\u5217\u8868\n    const list = createElement("div", "storyboard-list");\n    // \u8868\u5934\n    const header = createElement("div", "storyboard-row storyboard-header");\n    for (const label of ["\u955C\u53F7", "\u5185\u5BB9", "\u573A\u666F", "\u4EBA\u7269", "\u4EA7\u51FA"]) header.append(createElement("span", "", label));\n    list.append(header);\n    for (const shot of shots) {\n        // \u6570\u636E\u884C\n        const row = createElement("div", "storyboard-row");\n        // \u955C\u53F7\n        const idCell = createElement("div", "storyboard-id-cell");\n        idCell.append(createElement("span", "storyboard-id", shot.id));\n        idCell.append(shotStatusBadge(shot));\n        row.append(idCell);\n        // \u5185\u5BB9\n        const content = createElement("div", "storyboard-content");\n        content.append(createElement("div", "storyboard-title", shot.title ?? shot.slug ?? `\u955C\u5934 ${shot.id}`));\n        content.append(createElement("p", "storyboard-summary", shot.summary));\n        row.append(content);\n        // \u573A\u666F\n        row.append(\n            shot.scene !== null && shot.scene !== undefined\n                ? entityChip(shot.scene, "chip-scene")\n                : createElement("span", "muted", "\u2014"),\n        );\n        // \u4EBA\u7269\n        const cast = createElement("div", "chip-row");\n        if (Array.isArray(shot.characters) && shot.characters.length > 0) {\n            for (const character of shot.characters) cast.append(entityChip(character, "chip-character"));\n        } else {\n            cast.append(createElement("span", "muted", "\u2014"));\n        }\n        row.append(cast);\n        // \u4EA7\u51FA\n        const artifacts = Array.isArray(shot.artifacts) ? shot.artifacts : [];\n        const artifactCell = createElement("div", "storyboard-artifacts");\n        artifactCell.append(createElement("span", "muted", `${artifacts.length} \u4E2A`));\n        // \u53EF\u64AD\u653E\u4EA7\u7269\n        const playable = artifacts.find(\n            (item) =>\n                item.output.present === true && item.output.lfs_pointer !== true && PREVIEW_KINDS.has(item.output.kind),\n        );\n        if (playable !== undefined) {\n            // \u64AD\u653E\u6309\u94AE\n            const play = createElement("button", "button ghost", "\u64AD\u653E");\n            play.type = "button";\n            play.addEventListener("click", () => openArtifact(playable, artifacts));\n            artifactCell.append(play);\n        }\n        row.append(artifactCell);\n        list.append(row);\n    }\n    section.append(list);\n    return section;\n}\n\n/**\n * \u5F15\u64CE\u9762\u677F\u3002\n */\nfunction renderEnginePanel(data) {\n    // \u9762\u677F\n    const panel = createElement("section", "panel");\n    // \u9762\u677F\u5934\n    const head = createElement("div", "panel-head");\n    // \u6807\u9898\u5BB9\u5668\n    const titles = createElement("div");\n    titles.append(createElement("h3", "panel-title", "\u5F15\u64CE"));\n    titles.append(createElement("p", "panel-sub", data.engine === null ? "\u672A\u7ED1\u5B9A\u672C\u673A" : data.engine.mode));\n    head.append(titles);\n    if (data.engine !== null) {\n        head.append(data.engine.up === true ? badge("\u53EF\u8FBE", "status-succeeded") : badge("\u4E0D\u53EF\u8FBE", "status-failed"));\n    }\n    panel.append(head);\n    if (data.engine === null) {\n        panel.append(createElement("p", "muted", "\u8FD0\u884C init \u7ED1\u5B9A\u672C\u673A\u540E\u663E\u793A\u5F15\u64CE\u72B6\u6001\u3002"));\n        return panel;\n    }\n    // \u952E\u503C\u5217\u8868\n    const kv = createElement("dl", "kv");\n    appendKv(kv, "\u5730\u5740", data.engine.url);\n    appendKv(kv, "PID", data.engine.pid);\n    if (data.engine.queue !== null && data.engine.queue !== undefined) {\n        appendKv(kv, "\u961F\u5217", `\u6267\u884C\u4E2D ${data.engine.queue.running} / \u7B49\u5F85 ${data.engine.queue.pending}`);\n    }\n    appendKv(kv, "\u6A21\u5F0F", data.mode);\n    panel.append(kv);\n    return panel;\n}\n\n/**\n * \u673A\u5668 / GPU / Skill \u9762\u677F\u3002\n */\nfunction renderEnvironmentPanel(data) {\n    // \u9762\u677F\n    const panel = createElement("section", "panel");\n    // \u9762\u677F\u5934\n    const head = createElement("div", "panel-head");\n    // \u6807\u9898\u5BB9\u5668\n    const titles = createElement("div");\n    titles.append(createElement("h3", "panel-title", "\u673A\u5668\u4E0E\u8FD0\u884C\u73AF\u5883"));\n    titles.append(createElement("p", "panel-sub", data.machine_id ?? "\u672C\u673A\u672A\u521D\u59CB\u5316"));\n    head.append(titles);\n    panel.append(head);\n\n    // \u952E\u503C\u5217\u8868\n    const kv = createElement("dl", "kv");\n    // \u673A\u5668\u9501\u72B6\u6001\n    const lock = data.machine_lock;\n    if (lock === null || lock === undefined) {\n        appendKv(kv, "\u673A\u5668\u9501", "\u2014");\n    } else if (lock.status === "held" && lock.owner !== undefined) {\n        appendKv(kv, "\u673A\u5668\u9501", `${lock.owner.command}\uFF08task ${lock.owner.task_id}\uFF0Cpid ${lock.owner.pid}\uFF09`);\n    } else {\n        appendKv(kv, "\u673A\u5668\u9501", STATUS_LABEL[lock.status] ?? lock.status);\n    }\n\n    // GPU \u72B6\u6001\n    const gpu = data.gpu;\n    if (gpu === null || gpu === undefined) {\n        appendKv(kv, "GPU", "\u2014");\n    } else if (gpu.supported === true && Array.isArray(gpu.devices) && gpu.devices.length > 0) {\n        appendKv(kv, "GPU", `${gpu.devices[0].usedMb} MiB / ${gpu.devices[0].totalMb} MiB`);\n    } else {\n        appendKv(kv, "GPU", gpu.reason ?? "\u4E0D\u53EF\u7528");\n    }\n\n    // Skill \u72B6\u6001\n    const skill = data.skill;\n    if (skill === null || skill === undefined) {\n        appendKv(kv, "Skill", "\u2014");\n    } else if (skill.present !== true) {\n        appendKv(kv, "Skill", "\u7F3A\u5931\uFF08\u8FD0\u884C daoyan skill update\uFF09");\n    } else {\n        appendKv(kv, "Skill", skill.stale === true ? "\u9700\u8981\u66F4\u65B0" : "\u5DF2\u5C31\u7EEA");\n    }\n    panel.append(kv);\n\n    // \u4E0B\u4E00\u6B65\u52A8\u4F5C\n    const actions = Array.isArray(data.next_actions) ? data.next_actions : [];\n    if (actions.length > 0) {\n        // \u4E0B\u4E00\u6B65\n        const next = createElement("div", "card-actions");\n        for (const action of actions) next.append(createElement("code", "mono", action));\n        panel.append(next);\n    }\n    return panel;\n}\n\n/**\n * \u5355\u4E2A\u5206\u955C\u5361\u7247\u3002\n */\nfunction renderShotCard(shot) {\n    // \u5361\u7247\n    const card = createElement("article", "card shot-card shot-card-rich");\n    card.id = `shot-${shot.id}`;\n    // \u5361\u7247\u5934\n    const cardHead = createElement("div", "shot-head");\n    // \u6807\u9898\u5BB9\u5668\n    const titles = createElement("div", "shot-title");\n    titles.append(createElement("span", "shot-id", shot.id));\n    titles.append(createElement("span", "shot-title-text", shot.title ?? shot.slug ?? `\u955C\u5934 ${shot.id}`));\n    if (shot.slug && shot.title) titles.append(createElement("span", "shot-slug", shot.slug));\n    cardHead.append(titles);\n    // \u72B6\u6001\u4E0E\u573A\u666F\n    const headBadges = createElement("div", "chip-row");\n    headBadges.append(shotStatusBadge(shot));\n    if (shot.finalized_run !== null && shot.finalized_run !== undefined) {\n        headBadges.append(createElement("span", "chip chip-final", `\u5DF2\u5B9A\u7A3F ${shortId(shot.finalized_run)}`));\n    } else if (shot.succeeded_count > 0) {\n        headBadges.append(createElement("span", "chip chip-pending", "\u5F85\u5B9A\u7A3F"));\n    }\n    if (shot.scene !== null && shot.scene !== undefined) headBadges.append(entityChip(shot.scene, "chip-scene"));\n    cardHead.append(headBadges);\n    card.append(cardHead);\n\n    // \u5185\u5BB9\u6458\u8981\n    const summary = createElement("p", "shot-summary", shot.summary);\n    card.append(summary);\n\n    // \u4EBA\u7269\n    const cast = createElement("div", "shot-line");\n    cast.append(createElement("span", "shot-line-label", "\u4EBA\u7269"));\n    cast.append(entityChips(shot.characters, "chip-character"));\n    card.append(cast);\n\n    // \u53C2\u8003\u56FE\n    const references = renderShotReferences(shot);\n    if (references !== null) card.append(references);\n\n    // \u5236\u4F5C\u53C2\u6570\n    const meta = createElement("div", "shot-meta-grid");\n    meta.append(createElement("span", "", `seed ${shot.seed}`));\n    meta.append(createElement("span", "", shot.length !== null ? `${shot.length} \u5E27` : "\u5E27\u6570\u672A\u77E5"));\n    meta.append(\n        createElement("span", "", shot.duration_seconds !== null ? formatSeconds(shot.duration_seconds) : "\u65F6\u957F\u672A\u77E5"),\n    );\n    meta.append(createElement("span", "", `${shot.width}x${shot.height}`));\n    meta.append(createElement("span", "", shot.steps !== null ? `steps ${shot.steps}` : "steps \u9ED8\u8BA4"));\n    meta.append(createElement("span", "", shot.cfg !== null ? `cfg ${shot.cfg}` : "cfg \u9ED8\u8BA4"));\n    meta.append(createElement("span", "", `\u9996\u5E27 ${shot.first_frame ?? "\u65E0"}`));\n    meta.append(createElement("span", "", shot.workflow ?? "\u9ED8\u8BA4 workflow"));\n    meta.append(createElement("span", "", `${shot.runs_count} run / ${shot.succeeded_count} \u6210\u529F`));\n    card.append(meta);\n\n    // \u751F\u6210 / \u91CD\u65B0\u751F\u6210\n    const activeTask = shot.active_task ?? null;\n    const running = activeTask !== null || shot.latest_status === "running" || shot.latest_status === "queued";\n    const regenerate = shot.done === true;\n    const actions = createElement("div", "card-actions shot-actions");\n    const generate = createElement(\n        "button",\n        "button",\n        running ? (activeTask !== null ? `${activeTask.label}\u2026` : "\u751F\u6210\u4E2D\u2026") : regenerate ? "\u91CD\u65B0\u751F\u6210" : "\u751F\u6210",\n    );\n    generate.type = "button";\n    generate.disabled = running;\n    if (running) generate.title = activeTask !== null ? `\u4EFB\u52A1 ${activeTask.task_id}` : "\u5DF2\u6709\u955C\u5934\u5728\u751F\u6210";\n    generate.addEventListener("click", async () => {\n        if (generate.disabled) return;\n        if (regenerate && !window.confirm(`\u91CD\u65B0\u751F\u6210\u955C\u5934 ${shot.id}\uFF1F\u4F1A\u521B\u5EFA\u65B0\u7684\u62CD\u6444\u4EFB\u52A1\u3002`)) return;\n        generate.disabled = true;\n        const label = generate.textContent;\n        generate.textContent = "\u63D0\u4EA4\u4E2D\u2026";\n        try {\n            const data = await requestShotGeneration(shot, regenerate);\n            showToast(`\u5DF2\u521B\u5EFA\u4EFB\u52A1 ${shortId(data.task_id ?? "")}`);\n            await reloadView();\n        } catch (error) {\n            showToast(error instanceof Error ? error.message : "\u521B\u5EFA\u4EFB\u52A1\u5931\u8D25", true);\n            generate.disabled = false;\n            generate.textContent = label;\n        }\n    });\n    actions.append(generate);\n    if (activeTask !== null) {\n        const progressLink = createElement("button", "button ghost", "\u67E5\u770B\u4EFB\u52A1");\n        progressLink.type = "button";\n        progressLink.addEventListener("click", () => {\n            window.location.hash = `${HASH_PREFIX}tasks`;\n        });\n        actions.append(progressLink);\n    }\n    card.append(actions);\n\n    // \u5B8C\u6574\u63D0\u793A\u8BCD\n    const promptDetails = createElement("details", "shot-prompt");\n    const referenceCount = Array.isArray(shot.references) ? shot.references.length : 0;\n    promptDetails.append(\n        createElement("summary", "", referenceCount > 0 ? `\u5B8C\u6574\u63D0\u793A\u8BCD \xB7 \u53C2\u8003\u56FE ${referenceCount}` : "\u5B8C\u6574\u63D0\u793A\u8BCD"),\n    );\n    promptDetails.append(renderPromptText(shot));\n    card.append(promptDetails);\n\n    if (shot.notes) card.append(createElement("p", "shot-notes", `\u5907\u6CE8\uFF1A${shot.notes}`));\n\n    // \u4EA7\u7269\u533A\u5757\n    const artifacts = Array.isArray(shot.artifacts) ? shot.artifacts : [];\n    const artifactHead = createElement("div", "shot-section-head");\n    artifactHead.append(createElement("h4", "", `\u4EA7\u51FA\u7269\uFF08${artifacts.length}\uFF09`));\n    artifactHead.append(createElement("span", "muted", `${shot.runs_count} run / ${shot.succeeded_count} \u6210\u529F`));\n    card.append(artifactHead);\n    if (artifacts.length === 0) {\n        card.append(createElement("p", "muted", "\u8FD8\u6CA1\u6709\u4EA7\u51FA\u7269\u3002"));\n    } else {\n        // \u5B9A\u7A3F\u7A3F\u4EF6\u6392\u5728\u6700\u524D\n        const ordered = [...artifacts].sort((a, b) => (a.finalized === true ? 0 : 1) - (b.finalized === true ? 0 : 1));\n        // \u4EA7\u7269\u5217\u8868\n        const list = createElement("div", "artifact-list");\n        for (const item of ordered) list.append(renderShotArtifactRow(item, artifacts, shot));\n        card.append(list);\n    }\n\n    card.append(renderShotRunHistory(shot));\n    return card;\n}\n\n/**\n * \u5206\u955C\u4EA7\u7269\u7684\u5355\u884C\u5C55\u793A\u3002\n */\nfunction renderShotArtifactRow(item, all, shot) {\n    // \u4EA7\u7269\n    const output = item.output;\n    // \u884C\n    const row = createElement("div", "artifact-row");\n    // \u7F29\u7565\u56FE\n    const thumb = createElement("div", "artifact-thumb");\n    // \u662F\u5426\u53EF\u7528\n    const available = output.present === true && output.lfs_pointer !== true;\n    if (available && output.kind === "video") {\n        // \u89C6\u9891\u9996\u5E27\n        const video = document.createElement("video");\n        video.src = `${output.media_url}#t=0.1`;\n        video.muted = true;\n        video.playsInline = true;\n        video.preload = "metadata";\n        thumb.append(video);\n    } else if (available && output.kind === "image") {\n        // \u56FE\u7247\u7F29\u7565\u56FE\n        const image = document.createElement("img");\n        image.src = output.media_url;\n        image.alt = output.name;\n        image.loading = "lazy";\n        thumb.append(image);\n    } else {\n        thumb.append(createElement("span", "artifact-thumb-icon", KIND_ICON[output.kind] ?? "\u2193"));\n    }\n    if (!output.present) thumb.append(createElement("span", "artifact-thumb-note", "\u7F3A\u5931"));\n    else if (output.lfs_pointer) thumb.append(createElement("span", "artifact-thumb-note", "LFS"));\n    row.append(thumb);\n\n    // \u4FE1\u606F\n    const info = createElement("div", "artifact-info");\n    info.append(createElement("div", "artifact-name", output.name));\n    // \u5143\u4FE1\u606F\n    const meta = createElement("div", "artifact-meta");\n    meta.append(kindBadge(output.kind));\n    meta.append(statusBadge(item.run_status));\n    meta.append(createElement("span", "", shortId(item.run_id)));\n    meta.append(createElement("span", "", formatTime(item.started_at)));\n    meta.append(createElement("span", "", formatBytes(output.bytes)));\n    if (item.finalized === true) meta.append(createElement("span", "chip chip-final", "\u5B9A\u7A3F\u7A3F\u4EF6"));\n    info.append(meta);\n    row.append(info);\n\n    // \u64CD\u4F5C\n    const actions = createElement("div", "artifact-row-actions");\n    if (available && PREVIEW_KINDS.has(output.kind)) {\n        // \u9884\u89C8\u6309\u94AE\n        const preview = createElement("button", "button ghost", output.kind === "video" ? "\u64AD\u653E" : "\u67E5\u770B");\n        preview.type = "button";\n        preview.addEventListener("click", () => openArtifact(item, all));\n        actions.append(preview);\n    }\n    // \u4E0B\u8F7D\u94FE\u63A5\n    const download = createElement("a", "button ghost", "\u4E0B\u8F7D");\n    download.href = output.download_url;\n    actions.append(download);\n    // \u5B9A\u7A3F\u6309\u94AE\uFF08\u4EC5\u89C6\u9891\u4EA7\u7269\u4E14\u6587\u4EF6\u5728\u5DE5\u4F5C\u533A\uFF09\n    if (shot !== undefined && output.kind === "video" && available) {\n        // \u5B9A\u7A3F / \u64A4\u9500\u6309\u94AE\n        const takeButton = createElement("button", "button ghost", item.finalized === true ? "\u64A4\u9500\u5B9A\u7A3F" : "\u5B9A\u7A3F");\n        takeButton.type = "button";\n        takeButton.addEventListener("click", () => submitTake(shot, item, takeButton));\n        actions.append(takeButton);\n    }\n    row.append(actions);\n    return row;\n}\n\n/**\n * \u63D0\u4EA4\u955C\u5934\u5B9A\u7A3F\u6216\u64A4\u9500\u3002\n */\nasync function submitTake(shot, item, button) {\n    // \u8BF7\u6C42\u4F53\n    const body = { shot_id: shot.id };\n    if (currentEpisodeId !== null) body.episode_id = currentEpisodeId;\n    button.disabled = true;\n    try {\n        if (item.finalized === true) {\n            await postJson(API.takeRevoke, body);\n            showToast(`\u955C ${shot.id} \u5DF2\u64A4\u9500\u5B9A\u7A3F`);\n        } else {\n            body.run_id = item.run_id;\n            body.output = item.output.name;\n            await postJson(API.takeFinalize, body);\n            showToast(`\u955C ${shot.id} \u5DF2\u5B9A\u7A3F\uFF1A${item.output.name}`);\n        }\n        await reloadView();\n    } catch (error) {\n        showToast(error instanceof Error ? error.message : "\u5B9A\u7A3F\u5931\u8D25", true);\n        button.disabled = false;\n    }\n}\n\n/**\n * \u5386\u53F2 run \u6298\u53E0\u533A\u3002\n */\nfunction renderShotRunHistory(shot) {\n    // run \u5217\u8868\n    const runs = Array.isArray(shot.runs) ? shot.runs : [];\n    // \u6298\u53E0\u533A\n    const details = createElement("details", "shot-runs");\n    details.append(createElement("summary", "", `\u5386\u53F2 run\uFF08${runs.length}\uFF09`));\n    if (runs.length === 0) {\n        details.append(createElement("p", "muted", "\u8FD8\u6CA1\u6709 run\u3002"));\n        return details;\n    }\n    // \u5217\u8868\n    const list = createElement("ul", "run-list");\n    for (const run of runs) {\n        // run \u884C\n        const item = createElement("li", "run-item");\n        // \u4E3B\u4FE1\u606F\n        const main = createElement("div", "run-main");\n        main.append(statusBadge(run.status));\n        main.append(createElement("code", "mono", shortId(run.run_id)));\n        if (run.finalized === true) main.append(createElement("span", "chip chip-final", "\u5B9A\u7A3F"));\n        main.append(createElement("span", "", `${run.outputs.length} \u4E2A\u4EA7\u7269`));\n        main.append(\n            createElement("span", "muted", `${formatDuration(run.duration_ms)} \xB7 ${formatTime(run.started_at)}`),\n        );\n        item.append(main);\n        list.append(item);\n    }\n    details.append(list);\n    return details;\n}\n\n/**\n * \u4EA7\u51FA\u7269\u9875\u3002\n */\nfunction renderArtifacts(data) {\n    // \u5168\u90E8\u6761\u76EE\n    const items = Array.isArray(data.items) ? data.items : [];\n    // label \u5019\u9009\n    const labels = Array.isArray(data.labels) ? data.labels : [];\n    // \u7C7B\u578B\u5019\u9009\n    const kinds = Array.isArray(data.kinds) ? data.kinds : [];\n    // \u603B\u6570\n    const total = Number(data.total ?? items.length);\n\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    // \u9875\u5934\u6587\u672C\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", "Artifacts"));\n    headText.append(createElement("h2", "page-title", "\u4EA7\u51FA\u7269"));\n    headText.append(createElement("p", "page-subtitle", "\u70B9\u51FB\u89C6\u9891\u6216\u56FE\u7247\u9884\u89C8\uFF1B\u652F\u6301\u62D6\u52A8\u8FDB\u5EA6\u6761\u64AD\u653E\u3002"));\n    head.append(headText);\n    viewRoot.append(head);\n\n    // \u7B5B\u9009\u680F\n    const filters = createElement("div", "filter-bar");\n    filters.append(\n        buildSelect(\n            "\u955C\u5934",\n            labels,\n            artifactFilters.label,\n            (value) => {\n                artifactFilters.label = value;\n                refresh();\n            },\n            "\u5168\u90E8\u955C\u5934",\n        ),\n    );\n    filters.append(\n        buildSelect(\n            "\u72B6\u6001",\n            ["queued", "running", "succeeded", "failed", "cancelled", "interrupted"],\n            artifactFilters.status,\n            (value) => {\n                artifactFilters.status = value;\n                refresh();\n            },\n            "\u5168\u90E8\u72B6\u6001",\n            STATUS_LABEL,\n        ),\n    );\n    filters.append(\n        buildSelect(\n            "\u7C7B\u578B",\n            kinds,\n            artifactFilters.kind,\n            (value) => {\n                artifactFilters.kind = value;\n                refresh();\n            },\n            "\u5168\u90E8\u7C7B\u578B",\n            KIND_LABEL,\n        ),\n    );\n    // \u641C\u7D22\u6846\n    const search = createElement("input", "input search");\n    search.type = "search";\n    search.placeholder = "\u641C\u7D22 run / label / prompt / \u6587\u4EF6\u540D";\n    search.value = artifactFilters.search;\n    search.addEventListener("input", () => {\n        artifactFilters.search = search.value;\n        refresh();\n    });\n    filters.append(search);\n    viewRoot.append(filters);\n\n    // \u7ED3\u679C\u6458\u8981\n    const summaryHead = createElement("div", "section-head");\n    summaryHead.append(createElement("h3", "section-title", "\u5168\u90E8\u4EA7\u51FA\u7269"));\n    // \u6458\u8981\n    const summary = createElement("span", "section-meta", "");\n    summaryHead.append(summary);\n    viewRoot.append(summaryHead);\n\n    // \u7F51\u683C\n    const grid = createElement("div", "grid");\n    viewRoot.append(grid);\n\n    /**\n     * \u6309\u5F53\u524D\u7B5B\u9009\u5237\u65B0\u7F51\u683C\u3002\n     */\n    function refresh() {\n        // \u8FC7\u6EE4\u7ED3\u679C\n        const filtered = filterArtifacts(items);\n        summary.textContent = `\u663E\u793A ${filtered.length} / ${total}`;\n        clearNode(grid);\n        if (filtered.length === 0) {\n            grid.append(emptyNode("\u6CA1\u6709\u5339\u914D\u7684\u4EA7\u51FA\u7269", "\u8C03\u6574\u7B5B\u9009\u6761\u4EF6\u6216\u5148\u6267\u884C\u751F\u6210\u4EFB\u52A1\u3002"));\n            return;\n        }\n        renderArtifactCards(grid, filtered);\n    }\n\n    refresh();\n}\n\n/**\n * \u6784\u9020\u4E0B\u62C9\u7B5B\u9009\u3002\n */\nfunction buildSelect(label, options, value, onChange, allLabel, labels) {\n    // \u5B57\u6BB5\u5BB9\u5668\n    const field = createElement("label", "field");\n    field.append(createElement("span", "field-label", label));\n    // \u4E0B\u62C9\u6846\n    const select = createElement("select", "select");\n    select.append(new Option(allLabel, ""));\n    for (const option of options) {\n        // \u9009\u9879\u6587\u6848\n        const text = labels !== undefined ? (labels[option] ?? option) : option;\n        select.append(new Option(text, option));\n    }\n    select.value = value;\n    select.addEventListener("change", () => onChange(select.value));\n    field.append(select);\n    return field;\n}\n\n/**\n * \u6309\u7B5B\u9009\u6761\u4EF6\u8FC7\u6EE4\u4EA7\u7269\u3002\n */\nfunction filterArtifacts(items) {\n    // \u641C\u7D22\u8BCD\n    const search = artifactFilters.search.trim().toLowerCase();\n    return items.filter((item) => {\n        if (artifactFilters.label !== "" && item.label !== artifactFilters.label) return false;\n        if (artifactFilters.status !== "" && item.run_status !== artifactFilters.status) return false;\n        if (artifactFilters.kind !== "" && item.output.kind !== artifactFilters.kind) return false;\n        if (search !== "") {\n            // \u641C\u7D22\u6587\u672C\n            const haystack =\n                `${item.run_id} ${item.label ?? ""} ${item.prompt ?? ""} ${item.output.name}`.toLowerCase();\n            if (!haystack.includes(search)) return false;\n        }\n        return true;\n    });\n}\n\n/**\n * \u6E32\u67D3\u4EA7\u7269\u5361\u7247\u5217\u8868\u3002\n */\nfunction renderArtifactCards(container, items) {\n    for (const item of items) container.append(renderArtifactCard(item, items));\n}\n\n/**\n * \u5355\u4E2A\u4EA7\u7269\u5361\u7247\u3002\n */\nfunction renderArtifactCard(item, items) {\n    // \u4EA7\u7269\n    const output = item.output;\n    // \u5361\u7247\n    const card = createElement("article", "card artifact-card");\n    // \u9884\u89C8\u533A\n    const preview = createElement("div", "artifact-preview");\n    // \u662F\u5426\u53EF\u9884\u89C8\n    const available = output.present === true && output.lfs_pointer !== true;\n    if (available && (output.kind === "video" || output.kind === "image")) {\n        if (output.kind === "video") {\n            // \u89C6\u9891\u9996\u5E27\n            const video = document.createElement("video");\n            video.src = `${output.media_url}#t=0.1`;\n            video.muted = true;\n            video.playsInline = true;\n            video.preload = "metadata";\n            preview.append(video);\n        } else {\n            // \u56FE\u7247\u7F29\u7565\u56FE\n            const image = document.createElement("img");\n            image.src = output.media_url;\n            image.alt = output.name;\n            image.loading = "lazy";\n            preview.append(image);\n        }\n    } else {\n        preview.append(createElement("span", "preview-icon", KIND_ICON[output.kind] ?? "\u2193"));\n    }\n    if (!output.present) preview.append(createElement("span", "preview-note", "\u6587\u4EF6\u7F3A\u5931"));\n    else if (output.lfs_pointer) preview.append(createElement("span", "preview-note", "LFS \u672A\u62C9\u53D6"));\n    if (available && PREVIEW_KINDS.has(output.kind)) {\n        // \u64AD\u653E/\u9884\u89C8\u6309\u94AE\n        const open = createElement("button", "play-button", output.kind === "video" ? "\u25B6" : "\u2315");\n        open.type = "button";\n        open.title = output.kind === "video" ? "\u64AD\u653E" : "\u9884\u89C8";\n        open.addEventListener("click", (event) => {\n            event.stopPropagation();\n            openArtifact(item, items);\n        });\n        preview.append(open);\n    }\n    card.append(preview);\n\n    // \u5361\u7247\u5185\u5BB9\n    const body = createElement("div", "card-body");\n    // \u6807\u9898\u884C\n    const titleRow = createElement("div", "card-meta");\n    titleRow.append(createElement("h3", "card-title", output.name));\n    titleRow.append(kindBadge(output.kind));\n    body.append(titleRow);\n\n    // \u5143\u4FE1\u606F\n    const meta = createElement("div", "card-meta");\n    meta.append(createElement("span", "", item.label ?? shortId(item.run_id)));\n    meta.append(createElement("span", "", formatTime(item.started_at)));\n    meta.append(createElement("span", "", formatBytes(output.bytes)));\n    body.append(meta);\n\n    // \u64CD\u4F5C\u533A\n    const actions = createElement("div", "card-actions");\n    if (available && PREVIEW_KINDS.has(output.kind)) {\n        // \u6253\u5F00\u6309\u94AE\n        const open = createElement(\n            "button",\n            "button",\n            output.kind === "video" ? "\u64AD\u653E" : output.kind === "image" ? "\u67E5\u770B" : "\u9884\u89C8",\n        );\n        open.type = "button";\n        open.addEventListener("click", () => openArtifact(item, items));\n        actions.append(open);\n    }\n    // \u4E0B\u8F7D\u94FE\u63A5\n    const download = createElement("a", "button ghost", "\u4E0B\u8F7D");\n    download.href = output.download_url;\n    actions.append(download);\n    body.append(actions);\n    card.append(body);\n    return card;\n}\n\n/**\n * \u6253\u5F00\u4EA7\u7269\u3002\n */\nfunction openArtifact(item, list) {\n    // \u4EA7\u7269\n    const output = item.output;\n    if (output.present !== true) {\n        showToast("\u6587\u4EF6\u4E0D\u5B58\u5728\uFF0C\u53EF\u80FD\u5C1A\u672A\u4ECE Git LFS \u62C9\u53D6", true);\n        return;\n    }\n    if (output.lfs_pointer === true) {\n        showToast("\u8FD9\u662F Git LFS pointer\uFF0C\u8BF7\u5148\u6267\u884C git lfs pull", true);\n        return;\n    }\n    if (output.kind === "video" || output.kind === "audio") {\n        // \u53EF\u64AD\u653E\u6761\u76EE\n        const playable = playableItems(list ?? [item]);\n        // \u5F53\u524D\u7D22\u5F15\n        const index = playable.findIndex((entry) => entry.url === output.media_url);\n        openPlayer(playable, Math.max(index, 0));\n        return;\n    }\n    if (output.kind === "image") {\n        openImage(item);\n        return;\n    }\n    if (output.kind === "json" || output.kind === "text") {\n        void openText(item);\n        return;\n    }\n    window.location.href = output.download_url;\n}\n\n/**\n * \u53EF\u64AD\u653E\u5217\u8868\u3002\n */\nfunction playableItems(items) {\n    // \u7ED3\u679C\n    const out = [];\n    for (const item of items) {\n        // \u4EA7\u7269\n        const output = item.output;\n        if (output === undefined || output.present !== true || output.lfs_pointer === true) continue;\n        if (!PLAYABLE_KINDS.has(output.kind)) continue;\n        out.push({\n            title: `${item.label ?? item.run_id} \xB7 ${output.name}`,\n            url: output.media_url,\n            kind: output.kind,\n        });\n    }\n    return out;\n}\n\n/**\n * \u4EFB\u52A1\u9875\u3002\n */\nfunction renderTasks(data) {\n    // \u4EFB\u52A1\u5217\u8868\n    const tasks = Array.isArray(data.items) ? data.items : [];\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    // \u9875\u5934\u6587\u672C\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", "Tasks"));\n    headText.append(createElement("h2", "page-title", "\u4EFB\u52A1"));\n    headText.append(\n        createElement("p", "page-subtitle", `\u5171 ${data.total ?? tasks.length} \u4E2A\u4EFB\u52A1\uFF1B\u70B9\u51FB\u8BE6\u60C5\u67E5\u770B run \u4E0E\u4E8B\u4EF6\u3002`),\n    );\n    head.append(headText);\n    viewRoot.append(head);\n    if (tasks.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u4EFB\u52A1", "daoyan run / shot / batch \u521B\u5EFA\u7684\u4EFB\u52A1\u4F1A\u5728\u8FD9\u91CC\u51FA\u73B0\u3002"));\n        return;\n    }\n    viewRoot.append(renderTaskList(tasks));\n    tickTaskElapsed();\n}\n\n/**\n * \u6E32\u67D3\u4EFB\u52A1\u5217\u8868\u3002\n */\nfunction renderTaskList(tasks) {\n    // \u5BB9\u5668\n    const list = createElement("div", "task-list");\n    for (const task of tasks) {\n        // \u4EFB\u52A1\u5361\u7247\n        const card = renderTaskCard(task);\n        list.append(card);\n        if (openTaskId === task.task_id) {\n            // \u8BE6\u60C5\u5BB9\u5668\n            const detail = card.querySelector(".task-detail");\n            void loadTaskDetail(task.task_id, detail);\n        }\n    }\n    return list;\n}\n\n/**\n * \u5355\u4E2A\u4EFB\u52A1\u5361\u7247\u3002\n */\nfunction renderTaskCard(task) {\n    // \u5361\u7247\n    const card = createElement("article", "task-card");\n    // \u5934\u90E8\n    const head = createElement("div", "task-head");\n    // \u6807\u9898\u533A\n    const title = createElement("div", "task-title");\n    title.append(statusBadge(task.status));\n    title.append(createElement("h3", "task-command", task.command));\n    title.append(badge(TASK_KIND_LABEL[task.kind] ?? task.kind, ""));\n    head.append(title);\n\n    // \u8BE6\u60C5\u6309\u94AE\n    const toggle = createElement("button", "button ghost task-toggle", openTaskId === task.task_id ? "\u6536\u8D77" : "\u8BE6\u60C5");\n    toggle.type = "button";\n    head.append(toggle);\n    card.append(head);\n\n    // \u5143\u4FE1\u606F\n    const meta = createElement("div", "task-meta");\n    meta.append(createElement("span", "", `task ${shortId(task.task_id)}`));\n    meta.append(createElement("span", "", `machine ${task.machine_id}`));\n    meta.append(createElement("span", "", `${task.run_count ?? 0} run`));\n    meta.append(createElement("span", "", formatTime(task.created_at)));\n    if (task.error !== null && task.error !== undefined) {\n        meta.append(createElement("span", "", `${task.error.code}: ${task.error.message}`));\n    }\n    card.append(meta);\n\n    // \u5B9E\u65F6\u8FDB\u5EA6\n    const progress = task.progress;\n    if (progress !== null && progress !== undefined) {\n        // \u8FDB\u5EA6\u5BB9\u5668\n        const block = createElement("div", "task-progress");\n        // \u4E00\u884C\u6458\u8981\n        const line = createElement("div", "task-progress-line");\n        if (task.active === true) line.append(createElement("span", "task-pulse"));\n        line.append(createElement("span", "task-progress-label", progress.label ?? "\u2014"));\n        if (progress.run_id !== null && progress.run_id !== undefined) {\n            line.append(createElement("code", "mono task-progress-run", shortId(progress.run_id)));\n        }\n        // \u8FD0\u884C\u65F6\u957F\uFF08\u6BCF\u79D2\u5237\u65B0\uFF09\n        const elapsed = createElement("span", "task-progress-elapsed", "");\n        elapsed.dataset.taskElapsed = "1";\n        const started = task.started_at ?? task.created_at;\n        if (started !== null && started !== undefined) elapsed.dataset.started = started;\n        if (task.active !== true) {\n            const finished = task.finished_at ?? progress.updated_at;\n            if (finished !== null && finished !== undefined) elapsed.dataset.finished = finished;\n        }\n        line.append(elapsed);\n        line.append(createElement("span", "muted", `${progress.event_count ?? 0} \u4E2A\u4E8B\u4EF6`));\n        block.append(line);\n        // \u6D3B\u52A8\u4EFB\u52A1\u663E\u793A\u6D41\u52A8\u8FDB\u5EA6\u6761\n        if (task.active === true) {\n            const bar = createElement("div", "task-progress-bar");\n            bar.append(createElement("span"));\n            block.append(bar);\n        }\n        card.append(block);\n    }\n\n    // \u8BE6\u60C5\u5BB9\u5668\n    const detail = createElement("div", "task-detail");\n    detail.hidden = openTaskId !== task.task_id;\n    card.append(detail);\n    toggle.addEventListener("click", () => {\n        if (openTaskId === task.task_id) {\n            openTaskId = null;\n            detail.hidden = true;\n            toggle.textContent = "\u8BE6\u60C5";\n            return;\n        }\n        openTaskId = task.task_id;\n        for (const other of viewRoot.querySelectorAll(".task-detail")) other.hidden = true;\n        for (const button of viewRoot.querySelectorAll(".task-toggle")) button.textContent = "\u8BE6\u60C5";\n        detail.hidden = false;\n        toggle.textContent = "\u6536\u8D77";\n        void loadTaskDetail(task.task_id, detail);\n    });\n    return card;\n}\n\n/**\n * \u52A0\u8F7D\u4EFB\u52A1\u8BE6\u60C5\u3002\n */\nasync function loadTaskDetail(taskId, container) {\n    if (container === null) return;\n    container.hidden = false;\n    // \u7F13\u5B58\u9879\n    const cached = taskDetailCache.get(taskId);\n    const force = taskDetailRefresh;\n    // \u6709\u7F13\u5B58\u4E14\u65E0\u9700\u5F3A\u5236\u5237\u65B0\uFF1A\u76F4\u63A5\u590D\u7528\n    if (cached !== undefined && !force && Date.now() - cached.at < TASK_DETAIL_CACHE_MS) {\n        renderTaskDetail(container, cached.data);\n        return;\n    }\n    // \u5F3A\u5236\u5237\u65B0\u65F6\u5148\u663E\u793A\u65E7\u5185\u5BB9\uFF0C\u907F\u514D\u6BCF\u6B21\u4E8B\u4EF6\u90FD\u95EA"\u52A0\u8F7D\u4E2D"\n    if (cached !== undefined) renderTaskDetail(container, cached.data);\n    else container.textContent = "\u52A0\u8F7D\u4E2D\u2026";\n    try {\n        // \u8BE6\u60C5\u6570\u636E\n        const data = await requestJson(`/api/tasks/${encodeURIComponent(taskId)}`);\n        taskDetailCache.set(taskId, { at: Date.now(), data });\n        taskDetailRefresh = false;\n        renderTaskDetail(container, data);\n    } catch (error) {\n        if (cached === undefined)\n            container.textContent = `\u52A0\u8F7D\u5931\u8D25\uFF1A${error instanceof Error ? error.message : String(error)}`;\n    }\n}\n\n/**\n * \u6E32\u67D3\u4EFB\u52A1\u8BE6\u60C5\u3002\n */\nfunction renderTaskDetail(container, data) {\n    clearNode(container);\n    // \u5B9E\u65F6\u8FDB\u5EA6\n    const progress = data.progress;\n    if (progress !== null && progress !== undefined) {\n        // \u8FDB\u5EA6\u6761\n        const head = createElement("div", "task-progress task-progress-detail");\n        const line = createElement("div", "task-progress-line");\n        if (data.active === true) line.append(createElement("span", "task-pulse"));\n        line.append(createElement("span", "task-progress-label", progress.label ?? "\u2014"));\n        if (progress.run_id !== null && progress.run_id !== undefined) {\n            line.append(createElement("code", "mono task-progress-run", shortId(progress.run_id)));\n        }\n        const elapsed = createElement("span", "task-progress-elapsed", "");\n        elapsed.dataset.taskElapsed = "1";\n        const started = data.started_at ?? data.created_at;\n        if (started !== null && started !== undefined) elapsed.dataset.started = started;\n        if (data.active !== true) {\n            const finished = data.finished_at ?? progress.updated_at;\n            if (finished !== null && finished !== undefined) elapsed.dataset.finished = finished;\n        }\n        line.append(elapsed);\n        line.append(createElement("span", "muted", `${progress.event_count ?? 0} \u4E2A\u4E8B\u4EF6`));\n        head.append(line);\n        if (data.active === true) {\n            const bar = createElement("div", "task-progress-bar");\n            bar.append(createElement("span"));\n            head.append(bar);\n        }\n        container.append(head);\n        tickTaskElapsed();\n    }\n    // run \u5217\u8868\n    const runs = Array.isArray(data.runs_detail) ? data.runs_detail : [];\n    container.append(createElement("h4", "", `Runs\uFF08${runs.length}\uFF09`));\n    if (runs.length === 0) {\n        container.append(createElement("p", "muted", "\u8FD8\u6CA1\u6709 run\u3002"));\n    } else {\n        // run \u5217\u8868\u8282\u70B9\n        const list = createElement("ul", "run-list");\n        for (const run of runs) {\n            // run \u884C\n            const item = createElement("li", "run-item");\n            // run \u4E3B\u4FE1\u606F\n            const main = createElement("div", "run-main");\n            main.append(statusBadge(run.status));\n            main.append(createElement("code", "mono", shortId(run.run_id)));\n            main.append(createElement("span", "", run.label ?? "\u65E0 label"));\n            main.append(\n                createElement("span", "muted", `${run.outputs.length} \u4E2A\u4EA7\u7269 \xB7 ${formatDuration(run.duration_ms)}`),\n            );\n            item.append(main);\n\n            // run \u64CD\u4F5C\n            const actions = createElement("div", "card-actions");\n            // \u9996\u4E2A\u4EA7\u7269\n            const firstOutput = run.outputs[0];\n            if (\n                firstOutput !== undefined &&\n                firstOutput.present === true &&\n                firstOutput.lfs_pointer !== true &&\n                PREVIEW_KINDS.has(firstOutput.kind)\n            ) {\n                // \u9884\u89C8\u6309\u94AE\n                const preview = createElement("button", "button ghost", "\u9884\u89C8");\n                preview.type = "button";\n                preview.addEventListener("click", () => {\n                    openArtifact(artifactItemFromRun(run, firstOutput));\n                });\n                actions.append(preview);\n            }\n            item.append(actions);\n            list.append(item);\n        }\n        container.append(list);\n    }\n\n    // \u4E8B\u4EF6\n    const events = Array.isArray(data.events) ? data.events : [];\n    container.append(createElement("h4", "", `\u4E8B\u4EF6\uFF08${events.length}\uFF09`));\n    if (events.length === 0) {\n        container.append(createElement("p", "muted", "\u6682\u65E0\u4E8B\u4EF6\u3002"));\n        return;\n    }\n    // \u4E8B\u4EF6\u5217\u8868\n    const eventList = createElement("ul", "events");\n    for (const event of events) {\n        // \u4E8B\u4EF6\u884C\n        const item = createElement("li", "event");\n        item.append(createElement("span", "event-time", event.ts.slice(11, 19)));\n        item.append(createElement("span", "event-type", event.type));\n        // \u4E8B\u4EF6\u6570\u636E\u6587\u672C\n        const dataText = JSON.stringify(event.data ?? {});\n        item.append(\n            createElement("span", "event-data", dataText.length > 220 ? `${dataText.slice(0, 220)}\u2026` : dataText),\n        );\n        eventList.append(item);\n    }\n    container.append(eventList);\n    // \u8FD0\u884C\u4E2D\u81EA\u52A8\u8DDF\u968F\u6700\u65B0\u4E8B\u4EF6\n    if (data.active === true) {\n        window.requestAnimationFrame(() => {\n            eventList.scrollTop = eventList.scrollHeight;\n        });\n    }\n}\n\n/**\n * \u7528 run \u4FE1\u606F\u6784\u9020\u4EA7\u7269\u6761\u76EE\u3002\n */\nfunction artifactItemFromRun(run, output) {\n    return {\n        run_id: run.run_id,\n        task_id: run.task_id,\n        machine_id: run.machine_id,\n        label: run.label,\n        run_status: run.status,\n        started_at: run.started_at,\n        finished_at: run.finished_at,\n        workflow: run.workflow.path,\n        prompt: run.prompt,\n        output,\n    };\n}\n\n/**\n * \u6210\u7247\u9875\u3002\n */\nfunction renderFinals(data) {\n    // \u6210\u7247\u5217\u8868\n    const items = Array.isArray(data) ? data : [];\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    // \u9875\u5934\u6587\u672C\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", "Final cuts"));\n    headText.append(createElement("h2", "page-title", "\u6210\u7247"));\n    headText.append(createElement("p", "page-subtitle", "daoyan wrap \u751F\u6210\u7684 final/cut-* \u6587\u4EF6\u3002"));\n    head.append(headText);\n    viewRoot.append(head);\n    if (items.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u6210\u7247", "\u5B8C\u6210\u81F3\u5C11\u4E24\u4E2A\u955C\u5934\u540E\u8FD0\u884C daoyan wrap\u3002"));\n        return;\n    }\n    // \u7F51\u683C\n    const grid = createElement("div", "grid");\n    for (const item of items) {\n        // \u5361\u7247\n        const card = createElement("article", "card final-card");\n        // \u9884\u89C8\u533A\n        const preview = createElement("div", "artifact-preview");\n        if (item.present === true && item.lfs_pointer !== true) {\n            // \u89C6\u9891\u9996\u5E27\n            const video = document.createElement("video");\n            video.src = `${item.media_url}#t=0.1`;\n            video.muted = true;\n            video.playsInline = true;\n            video.preload = "metadata";\n            preview.append(video);\n            // \u64AD\u653E\u6309\u94AE\n            const play = createElement("button", "play-button", "\u25B6");\n            play.type = "button";\n            play.title = "\u64AD\u653E\u6210\u7247";\n            play.addEventListener("click", () => {\n                openPlayer([{ title: item.name, url: item.media_url, kind: "video" }], 0);\n            });\n            preview.append(play);\n        } else {\n            preview.append(createElement("span", "preview-icon", "\u25B6"));\n            preview.append(\n                createElement("span", "preview-note", item.lfs_pointer === true ? "LFS \u672A\u62C9\u53D6" : "\u6587\u4EF6\u7F3A\u5931"),\n            );\n        }\n        card.append(preview);\n\n        // \u5361\u7247\u5185\u5BB9\n        const body = createElement("div", "card-body");\n        body.append(createElement("h3", "card-title", item.name));\n        // \u5143\u4FE1\u606F\n        const meta = createElement("div", "card-meta");\n        meta.append(createElement("span", "", item.created_at !== null ? formatTime(item.created_at) : "\u65E0 manifest"));\n        meta.append(createElement("span", "", formatBytes(item.bytes)));\n        meta.append(createElement("span", "", `${item.clips.length} \u6BB5`));\n        if (item.missing.length > 0) meta.append(createElement("span", "", `\u7F3A ${item.missing.length} \u955C`));\n        body.append(meta);\n\n        // \u64CD\u4F5C\u533A\n        const actions = createElement("div", "card-actions");\n        if (item.present === true && item.lfs_pointer !== true) {\n            // \u64AD\u653E\u6309\u94AE\n            const play = createElement("button", "button", "\u64AD\u653E");\n            play.type = "button";\n            play.addEventListener("click", () => {\n                openPlayer([{ title: item.name, url: item.media_url, kind: "video" }], 0);\n            });\n            actions.append(play);\n        }\n        // \u4E0B\u8F7D\u94FE\u63A5\n        const download = createElement("a", "button ghost", "\u4E0B\u8F7D");\n        download.href = item.download_url;\n        actions.append(download);\n        body.append(actions);\n        card.append(body);\n        grid.append(card);\n    }\n    viewRoot.append(grid);\n}\n\n/**\n * \u5DE5\u4F5C\u6D41\u9875\u3002\n */\nfunction renderWorkflows(data) {\n    // \u5DE5\u4F5C\u6D41\u5217\u8868\n    const items = Array.isArray(data) ? data : [];\n    // \u9875\u5934\n    const head = createElement("div", "view-head");\n    // \u9875\u5934\u6587\u672C\n    const headText = createElement("div");\n    headText.append(createElement("p", "eyebrow", "Workflows"));\n    headText.append(createElement("h2", "page-title", "\u5DE5\u4F5C\u6D41"));\n    headText.append(createElement("p", "page-subtitle", "workflows/ \u4E0B\u7684 ComfyUI API \u56FE\u4E0E bindings\u3002"));\n    head.append(headText);\n    viewRoot.append(head);\n    if (items.length === 0) {\n        viewRoot.append(emptyNode("\u8FD8\u6CA1\u6709\u5DE5\u4F5C\u6D41", "\u8FD0\u884C daoyan workflow new / import \u521B\u5EFA\u5DE5\u4F5C\u6D41\u3002"));\n        return;\n    }\n    // \u8868\u683C\n    const list = createElement("div", "table-list");\n    // \u8868\u5934\n    const header = createElement("div", "table-row header");\n    for (const label of ["\u5DE5\u4F5C\u6D41", "\u8282\u70B9", "bindings", "\u9ED8\u8BA4", "\u72B6\u6001"]) header.append(createElement("span", "", label));\n    list.append(header);\n    for (const item of items) {\n        // \u6570\u636E\u884C\n        const row = createElement("div", "table-row");\n        // \u540D\u79F0\u533A\n        const name = createElement("div");\n        name.append(createElement("div", "workflow-name", item.name));\n        name.append(createElement("div", "muted mono", item.path));\n        row.append(name);\n        row.append(createElement("span", "", item.nodes));\n        row.append(createElement("span", "", item.bindings ? "\u6709" : "\u65E0"));\n        row.append(createElement("span", "", item.default ? "\u662F" : "\u2014"));\n        row.append(createElement("span", "", item.valid ? "\u53EF\u89E3\u6790" : "JSON \u635F\u574F"));\n        list.append(row);\n    }\n    viewRoot.append(list);\n}\n\n/**\n * \u6253\u5F00\u64AD\u653E\u5668\u3002\n */\nfunction openPlayer(items, index) {\n    if (items.length === 0) {\n        showToast("\u6CA1\u6709\u53EF\u64AD\u653E\u7684\u4EA7\u7269", true);\n        return;\n    }\n    playerItems = items.slice(0, MAX_PLAYLIST);\n    playerIndex = Math.max(0, Math.min(index, playerItems.length - 1));\n    renderPlayerItem();\n}\n\n/**\n * \u6E32\u67D3\u5F53\u524D\u64AD\u653E\u9879\u3002\n */\nfunction renderPlayerItem() {\n    // \u5F53\u524D\u9879\n    const item = playerItems[playerIndex];\n    if (item === undefined) {\n        closeModal();\n        return;\n    }\n    // \u5A92\u4F53\u5143\u7D20\n    const media = document.createElement(item.kind === "video" ? "video" : "audio");\n    media.controls = true;\n    media.autoplay = true;\n    media.playsInline = true;\n    media.src = item.url;\n    setModal(item.title, media, `${playerIndex + 1} / ${playerItems.length}`);\n    modalPrev.disabled = playerIndex <= 0;\n    modalNext.disabled = playerIndex >= playerItems.length - 1;\n}\n\n/**\n * \u6253\u5F00\u56FE\u7247\u9884\u89C8\u3002\n */\nfunction openImageUrl(url, title) {\n    // \u56FE\u7247\u5143\u7D20\n    const image = document.createElement("img");\n    image.src = url;\n    image.alt = title;\n    setModal(title, image, "\u56FE\u7247");\n    modalPrev.disabled = true;\n    modalNext.disabled = true;\n}\n\n/**\n * \u6253\u5F00\u4EA7\u7269\u56FE\u7247\u3002\n */\nfunction openImage(item) {\n    openImageUrl(item.output.media_url, item.output.name);\n}\n\n/**\n * \u6253\u5F00\u6587\u672C\u9884\u89C8\u3002\n */\nasync function openText(item) {\n    // \u9884\u89C8\u8282\u70B9\n    const pre = createElement("pre", "", "\u52A0\u8F7D\u4E2D\u2026");\n    setModal(item.output.name, pre, "\u6587\u672C\u9884\u89C8");\n    modalPrev.disabled = true;\n    modalNext.disabled = true;\n    try {\n        // \u6587\u672C\u54CD\u5E94\n        const response = await fetch(item.output.media_url);\n        if (!response.ok) throw new Error(`HTTP ${response.status}`);\n        // \u539F\u59CB\u6587\u672C\n        const raw = await response.text();\n        // \u5C55\u793A\u6587\u672C\n        let text = raw;\n        if (item.output.kind === "json") {\n            try {\n                text = JSON.stringify(JSON.parse(raw), null, 2);\n            } catch {\n                text = raw;\n            }\n        }\n        pre.textContent =\n            text.length > TEXT_PREVIEW_LIMIT\n                ? `${text.slice(0, TEXT_PREVIEW_LIMIT)}\\n\\n\u2026\uFF08\u5DF2\u622A\u65AD\uFF0C\u5B8C\u6574\u5185\u5BB9\u8BF7\u4E0B\u8F7D\uFF09`\n                : text;\n    } catch (error) {\n        pre.textContent = `\u8BFB\u53D6\u5931\u8D25\uFF1A${error instanceof Error ? error.message : String(error)}`;\n    }\n}\n\n/**\n * \u8BBE\u7F6E\u6A21\u6001\u6846\u5185\u5BB9\u3002\n */\nfunction setModal(title, content, counter) {\n    modalTitle.textContent = title;\n    clearNode(modalContent);\n    modalContent.append(content);\n    modalCounter.textContent = counter ?? "";\n    modalRoot.hidden = false;\n}\n\n/**\n * \u5173\u95ED\u6A21\u6001\u6846\u3002\n */\nfunction closeModal() {\n    modalRoot.hidden = true;\n    clearNode(modalContent);\n    modalTitle.textContent = "\u9884\u89C8";\n    modalCounter.textContent = "";\n    playerItems = [];\n    playerIndex = 0;\n}\n\n/**\n * \u4E0A\u4E00\u4E2A\u64AD\u653E\u9879\u3002\n */\nfunction modalPrevStep() {\n    if (playerItems.length === 0 || playerIndex <= 0) return;\n    playerIndex -= 1;\n    renderPlayerItem();\n}\n\n/**\n * \u4E0B\u4E00\u4E2A\u64AD\u653E\u9879\u3002\n */\nfunction modalNextStep() {\n    if (playerItems.length === 0 || playerIndex >= playerItems.length - 1) return;\n    playerIndex += 1;\n    renderPlayerItem();\n}\n\n/**\n * \u952E\u76D8\u64CD\u4F5C\u3002\n */\nfunction handleKeydown(event) {\n    if (modalRoot.hidden) return;\n    if (event.key === "Escape") closeModal();\n    else if (event.key === "ArrowLeft") modalPrevStep();\n    else if (event.key === "ArrowRight") modalNextStep();\n}\n\n/**\n * \u542F\u52A8\u5E94\u7528\u3002\n */\nasync function start() {\n    renderShell();\n    await loadProjectSettings();\n    renderNav();\n    setActiveNav();\n    modalClose.addEventListener("click", closeModal);\n    modalPrev.addEventListener("click", modalPrevStep);\n    modalNext.addEventListener("click", modalNextStep);\n    // \u906E\u7F69\u5C42\n    const backdrop = document.querySelector(".modal-backdrop");\n    if (backdrop !== null) backdrop.addEventListener("click", closeModal);\n    window.addEventListener("hashchange", onHashChange);\n    window.addEventListener("keydown", handleKeydown);\n    document.addEventListener("visibilitychange", () => {\n        if (!document.hidden) void loadCurrent();\n    });\n    connectProjectEvents();\n    window.setInterval(tickTaskElapsed, 1000);\n    void loadHeader();\n    onHashChange();\n}\n\nvoid start();\n';
   }
 });
 
@@ -21045,7 +20997,7 @@ var init_app = __esm({
 var style_default;
 var init_style = __esm({
   "src/core/web/ui/style.css"() {
-    style_default = '/* daoyan web \u2014\u2014 \u9879\u76EE\u67E5\u770B\u5668\uFF08\u542B\u955C\u5934\u5B9A\u7A3F\uFF09\uFF1B\u539F\u751F CSS\uFF0C\u65E0\u5916\u90E8\u4F9D\u8D56\u3002 */\n:root {\n    color-scheme: light dark;\n    --bg: #f4f5f7;\n    --bg-elevated: #ffffff;\n    --bg-soft: #eceef2;\n    --panel: #ffffff;\n    --panel-strong: #ffffff;\n    --border: #d9dde4;\n    --border-strong: #c3c9d3;\n    --text: #1c2027;\n    --text-soft: #5c6470;\n    --text-muted: #8a919c;\n    --accent: #2f6fed;\n    --accent-soft: #e8f0ff;\n    --green: #16845b;\n    --green-soft: #e4f6ee;\n    --amber: #a56700;\n    --amber-soft: #fff2d9;\n    --red: #b42318;\n    --red-soft: #fde8e6;\n    --violet: #6b4fd8;\n    --violet-soft: #eee9ff;\n    --scene-day: #d99a2b;\n    --scene-night: #5b6fb5;\n    --scene-dusk: #a46bc4;\n    --scene-dawn: #4fa8a0;\n    --scene-other: #8a919c;\n    --shadow: 0 10px 30px rgba(20, 28, 44, 0.08);\n    --radius: 14px;\n    --radius-sm: 10px;\n    --sidebar-width: 232px;\n}\n\n@media (prefers-color-scheme: dark) {\n    :root {\n        --bg: #101318;\n        --bg-elevated: #161a21;\n        --bg-soft: #1d222b;\n        --panel: #161a21;\n        --panel-strong: #1b2029;\n        --border: #2a303a;\n        --border-strong: #3a424f;\n        --text: #eef1f6;\n        --text-soft: #b3bac6;\n        --text-muted: #808895;\n        --accent: #7aa2ff;\n        --accent-soft: #1c2a4a;\n        --green: #5bd3a0;\n        --green-soft: #143329;\n        --amber: #f0b44c;\n        --amber-soft: #392b13;\n        --red: #ff8f86;\n        --red-soft: #3a1b1b;\n        --violet: #b19cff;\n        --violet-soft: #2a2148;\n        --scene-day: #f0c060;\n        --scene-night: #8ea2e8;\n        --scene-dusk: #c79ae0;\n        --scene-dawn: #7ed0c7;\n        --scene-other: #808895;\n        --shadow: 0 14px 40px rgba(0, 0, 0, 0.35);\n    }\n}\n\n* {\n    box-sizing: border-box;\n}\n\n[hidden] {\n    display: none !important;\n}\n\nhtml,\nbody {\n    margin: 0;\n    min-height: 100%;\n}\n\nbody {\n    background: var(--bg);\n    color: var(--text);\n    font-family:\n        -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;\n    font-size: 14px;\n    line-height: 1.55;\n    -webkit-font-smoothing: antialiased;\n}\n\nbutton,\ninput,\nselect {\n    font: inherit;\n    color: inherit;\n}\n\na {\n    color: var(--accent);\n    text-decoration: none;\n}\n\na:hover {\n    text-decoration: underline;\n}\n\n.app-shell {\n    display: grid;\n    grid-template-columns: var(--sidebar-width) minmax(0, 1fr);\n    min-height: 100vh;\n}\n\n.sidebar {\n    position: sticky;\n    top: 0;\n    display: flex;\n    flex-direction: column;\n    gap: 22px;\n    height: 100vh;\n    padding: 24px 16px 18px;\n    border-right: 1px solid var(--border);\n    background: var(--bg-elevated);\n}\n\n.brand {\n    padding: 0 8px;\n}\n\n.brand-mark {\n    display: inline-flex;\n    align-items: center;\n    gap: 8px;\n    font-size: 17px;\n    font-weight: 700;\n    letter-spacing: 0.01em;\n}\n\n.brand-dot {\n    display: inline-block;\n    width: 10px;\n    height: 10px;\n    border-radius: 50%;\n    background: var(--accent);\n    box-shadow: 0 0 0 4px var(--accent-soft);\n}\n\n.brand-sub {\n    margin: 6px 0 0;\n    color: var(--text-muted);\n    font-size: 12px;\n}\n\n.nav {\n    display: flex;\n    flex-direction: column;\n    gap: 4px;\n}\n\n.nav-item {\n    display: flex;\n    flex-direction: column;\n    align-items: flex-start;\n    gap: 1px;\n    width: 100%;\n    padding: 9px 10px;\n    border: 0;\n    border-radius: 9px;\n    background: transparent;\n    cursor: pointer;\n    text-align: left;\n}\n\n.nav-item:hover {\n    background: var(--bg-soft);\n}\n\n.nav-item.active {\n    background: var(--accent-soft);\n    color: var(--accent);\n}\n\n.nav-label {\n    font-weight: 600;\n}\n\n.nav-hint {\n    color: var(--text-muted);\n    font-size: 11px;\n}\n\n.nav-item.active .nav-hint {\n    color: color-mix(in srgb, var(--accent) 72%, var(--text-muted));\n}\n\n.sidebar-foot {\n    margin-top: auto;\n    padding: 12px 10px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius-sm);\n    color: var(--text-muted);\n    font-size: 11px;\n    line-height: 1.5;\n}\n\n.sidebar-foot code {\n    color: var(--text-soft);\n    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;\n    font-size: 11px;\n}\n\n.main {\n    min-width: 0;\n}\n\n.topbar {\n    position: sticky;\n    top: 0;\n    z-index: 10;\n    display: flex;\n    align-items: center;\n    justify-content: space-between;\n    gap: 16px;\n    padding: 16px 28px;\n    border-bottom: 1px solid var(--border);\n    background: color-mix(in srgb, var(--bg) 88%, transparent);\n    backdrop-filter: blur(12px);\n}\n\n.topbar-left {\n    display: flex;\n    align-items: baseline;\n    gap: 12px;\n    min-width: 0;\n}\n\n.project-name {\n    margin: 0;\n    overflow: hidden;\n    font-size: 16px;\n    font-weight: 700;\n    text-overflow: ellipsis;\n    white-space: nowrap;\n}\n\n.project-mode {\n    flex: none;\n    padding: 2px 8px;\n    border: 1px solid var(--border);\n    border-radius: 99px;\n    color: var(--text-soft);\n    font-size: 11px;\n}\n\n.topbar-right {\n    display: flex;\n    align-items: center;\n    gap: 14px;\n    color: var(--text-muted);\n    font-size: 12px;\n}\n\n.connection {\n    display: inline-flex;\n    align-items: center;\n    gap: 6px;\n}\n\n.connection-dot {\n    width: 7px;\n    height: 7px;\n    border-radius: 50%;\n    background: var(--text-muted);\n}\n\n.connection.ok .connection-dot {\n    background: var(--green);\n    box-shadow: 0 0 0 3px var(--green-soft);\n}\n\n.connection.error .connection-dot {\n    background: var(--red);\n    box-shadow: 0 0 0 3px var(--red-soft);\n}\n\n.content {\n    max-width: 1280px;\n    margin: 0 auto;\n    padding: 28px;\n}\n\n.view-head {\n    display: flex;\n    align-items: flex-end;\n    justify-content: space-between;\n    gap: 20px;\n    margin-bottom: 22px;\n}\n\n.eyebrow {\n    margin: 0 0 4px;\n    color: var(--text-muted);\n    font-size: 11px;\n    font-weight: 600;\n    letter-spacing: 0.08em;\n    text-transform: uppercase;\n}\n\n.page-title {\n    margin: 0;\n    font-size: 26px;\n    letter-spacing: -0.02em;\n}\n\n.page-subtitle {\n    margin: 6px 0 0;\n    color: var(--text-soft);\n    font-size: 13px;\n}\n\n.stats-grid {\n    display: grid;\n    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));\n    gap: 12px;\n    margin-bottom: 20px;\n}\n\n.stat-card {\n    padding: 16px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius);\n    background: var(--panel);\n}\n\n.stat-label {\n    margin: 0;\n    color: var(--text-muted);\n    font-size: 12px;\n}\n\n.stat-value {\n    margin: 6px 0 0;\n    font-size: 24px;\n    font-weight: 700;\n    letter-spacing: -0.02em;\n}\n\n.stat-hint {\n    margin: 4px 0 0;\n    color: var(--text-muted);\n    font-size: 11px;\n}\n\n.layout-two {\n    display: grid;\n    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);\n    gap: 16px;\n    margin-bottom: 20px;\n}\n\n.panel {\n    padding: 18px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius);\n    background: var(--panel);\n}\n\n.panel-head {\n    display: flex;\n    align-items: center;\n    justify-content: space-between;\n    gap: 12px;\n    margin-bottom: 12px;\n}\n\n.panel-title {\n    margin: 0;\n    font-size: 15px;\n    font-weight: 700;\n}\n\n.panel-sub {\n    margin: 2px 0 0;\n    color: var(--text-muted);\n    font-size: 12px;\n}\n\n.kv {\n    display: grid;\n    grid-template-columns: 92px minmax(0, 1fr);\n    gap: 7px 12px;\n    margin: 0;\n    font-size: 13px;\n}\n\n.kv dt {\n    color: var(--text-muted);\n}\n\n.kv dd {\n    margin: 0;\n    overflow-wrap: anywhere;\n}\n\n.badge {\n    display: inline-flex;\n    align-items: center;\n    gap: 5px;\n    padding: 2px 8px;\n    border-radius: 99px;\n    background: var(--bg-soft);\n    color: var(--text-soft);\n    font-size: 11px;\n    font-weight: 600;\n    white-space: nowrap;\n}\n\n.badge.status-succeeded {\n    background: var(--green-soft);\n    color: var(--green);\n}\n\n.badge.status-running {\n    background: var(--accent-soft);\n    color: var(--accent);\n}\n\n.badge.status-queued {\n    background: var(--amber-soft);\n    color: var(--amber);\n}\n\n.badge.status-failed {\n    background: var(--red-soft);\n    color: var(--red);\n}\n\n.badge.status-cancelled,\n.badge.status-interrupted {\n    background: var(--violet-soft);\n    color: var(--violet);\n}\n\n.badge.kind-video {\n    background: var(--violet-soft);\n    color: var(--violet);\n}\n\n.badge.kind-image {\n    background: var(--green-soft);\n    color: var(--green);\n}\n\n.badge.kind-audio {\n    background: var(--amber-soft);\n    color: var(--amber);\n}\n\n.badge.kind-json,\n.badge.kind-text {\n    background: var(--accent-soft);\n    color: var(--accent);\n}\n\n.muted {\n    color: var(--text-muted);\n}\n\n.mono {\n    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;\n    font-size: 12px;\n}\n\n.section-head {\n    display: flex;\n    align-items: center;\n    justify-content: space-between;\n    gap: 12px;\n    margin: 24px 0 12px;\n}\n\n.section-title {\n    margin: 0;\n    font-size: 16px;\n    font-weight: 700;\n}\n\n.section-actions {\n    display: flex;\n    align-items: center;\n    gap: 10px;\n}\n\n.section-meta {\n    color: var(--text-muted);\n    font-size: 12px;\n}\n\n.grid {\n    display: grid;\n    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));\n    gap: 14px;\n}\n\n.card {\n    overflow: hidden;\n    border: 1px solid var(--border);\n    border-radius: var(--radius);\n    background: var(--panel);\n}\n\n.card-body {\n    padding: 13px 14px 14px;\n}\n\n.card-title {\n    margin: 0;\n    overflow: hidden;\n    font-size: 14px;\n    font-weight: 700;\n    text-overflow: ellipsis;\n    white-space: nowrap;\n}\n\n.card-meta {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 6px 10px;\n    margin-top: 7px;\n    color: var(--text-muted);\n    font-size: 11px;\n}\n\n.card-actions {\n    display: flex;\n    flex-wrap: wrap;\n    gap: 8px;\n    margin-top: 12px;\n}\n\n.artifact-card {\n    display: flex;\n    flex-direction: column;\n}\n\n.artifact-preview {\n    position: relative;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    aspect-ratio: 16 / 10;\n    overflow: hidden;\n    background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 10%, var(--bg-soft)), var(--bg-soft));\n}\n\n.artifact-preview video,\n.artifact-preview img {\n    width: 100%;\n    height: 100%;\n    object-fit: cover;\n}\n\n.artifact-preview .preview-icon {\n    font-size: 38px;\n    opacity: 0.65;\n}\n\n.artifact-preview .preview-note {\n    position: absolute;\n    inset: auto 8px 8px;\n    padding: 4px 8px;\n    border-radius: 8px;\n    background: rgba(0, 0, 0, 0.62);\n    color: #fff;\n    font-size: 11px;\n    text-align: center;\n}\n\n.play-button {\n    position: absolute;\n    display: inline-flex;\n    align-items: center;\n    justify-content: center;\n    width: 46px;\n    height: 46px;\n    border: 0;\n    border-radius: 50%;\n    background: rgba(0, 0, 0, 0.62);\n    color: #fff;\n    cursor: pointer;\n    font-size: 18px;\n}\n\n.play-button:hover {\n    background: var(--accent);\n}\n\n.button {\n    display: inline-flex;\n    align-items: center;\n    justify-content: center;\n    gap: 6px;\n    padding: 6px 11px;\n    border: 1px solid var(--border-strong);\n    border-radius: 8px;\n    background: var(--panel-strong);\n    cursor: pointer;\n    font-size: 12px;\n    font-weight: 600;\n}\n\n.button:hover {\n    border-color: var(--accent);\n    color: var(--accent);\n}\n\n.button.primary {\n    border-color: var(--accent);\n    background: var(--accent);\n    color: #fff;\n}\n\n.button.primary:hover {\n    color: #fff;\n    filter: brightness(1.06);\n}\n\n.button.ghost {\n    border-color: transparent;\n    background: transparent;\n    color: var(--text-soft);\n}\n\n.button:disabled {\n    cursor: not-allowed;\n    opacity: 0.4;\n}\n\n.icon-button {\n    display: inline-flex;\n    align-items: center;\n    justify-content: center;\n    width: 34px;\n    height: 34px;\n    border: 1px solid var(--border);\n    border-radius: 9px;\n    background: transparent;\n    cursor: pointer;\n    font-size: 20px;\n    line-height: 1;\n}\n\n.filter-bar {\n    display: flex;\n    flex-wrap: wrap;\n    gap: 10px;\n    margin-bottom: 16px;\n    padding: 12px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius);\n    background: var(--panel);\n}\n\n.field {\n    display: flex;\n    flex-direction: column;\n    gap: 4px;\n}\n\n.field-label {\n    color: var(--text-muted);\n    font-size: 11px;\n    font-weight: 600;\n}\n\n.input,\n.select {\n    min-width: 140px;\n    padding: 7px 9px;\n    border: 1px solid var(--border);\n    border-radius: 8px;\n    background: var(--bg-elevated);\n    font-size: 12px;\n}\n\n.input:focus,\n.select:focus {\n    border-color: var(--accent);\n    outline: 2px solid var(--accent-soft);\n}\n\n.input.search {\n    min-width: 210px;\n}\n\n.shot-card {\n    display: flex;\n    flex-direction: column;\n    gap: 10px;\n    padding: 14px;\n}\n\n.shot-title {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: baseline;\n    gap: 8px;\n    min-width: 0;\n}\n\n.shot-head {\n    display: flex;\n    align-items: flex-start;\n    justify-content: space-between;\n    gap: 10px;\n}\n\n.shot-id {\n    font-size: 18px;\n    font-weight: 800;\n    letter-spacing: -0.02em;\n}\n\n.shot-slug {\n    color: var(--text-muted);\n    font-size: 12px;\n}\n\n.prompt {\n    display: -webkit-box;\n    overflow: hidden;\n    margin: 0;\n    color: var(--text-soft);\n    font-size: 12px;\n    -webkit-box-orient: vertical;\n    -webkit-line-clamp: 3;\n}\n\n.meta-row {\n    display: flex;\n    flex-wrap: wrap;\n    gap: 6px 12px;\n    color: var(--text-muted);\n    font-size: 11px;\n}\n\n.task-list {\n    display: flex;\n    flex-direction: column;\n    gap: 10px;\n}\n\n.task-card {\n    padding: 14px 16px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius);\n    background: var(--panel);\n}\n\n.task-head {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    justify-content: space-between;\n    gap: 10px;\n}\n\n.task-title {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 8px;\n    min-width: 0;\n}\n\n.task-command {\n    margin: 0;\n    font-size: 14px;\n    font-weight: 700;\n}\n\n.task-meta {\n    display: flex;\n    flex-wrap: wrap;\n    gap: 6px 12px;\n    margin-top: 7px;\n    color: var(--text-muted);\n    font-size: 11px;\n}\n\n.task-progress {\n    display: flex;\n    flex-direction: column;\n    gap: 6px;\n    margin-top: 10px;\n}\n\n.task-progress-detail {\n    margin: 0 0 12px;\n    padding: 8px 10px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius-sm);\n    background: var(--bg-soft);\n}\n\n.task-progress-line {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 8px;\n    color: var(--text-soft);\n    font-size: 11px;\n}\n\n.task-progress-label {\n    color: var(--text);\n    font-weight: 600;\n}\n\n.task-progress-run {\n    color: var(--text-muted);\n    font-size: 10px;\n}\n\n.task-progress-elapsed {\n    color: var(--text-muted);\n    font-variant-numeric: tabular-nums;\n}\n\n.task-pulse {\n    width: 7px;\n    height: 7px;\n    border-radius: 50%;\n    background: var(--accent);\n    animation: task-pulse 1.6s ease-out infinite;\n}\n\n.task-progress-bar {\n    height: 3px;\n    overflow: hidden;\n    border-radius: 99px;\n    background: var(--bg-soft);\n}\n\n.task-progress-detail .task-progress-bar {\n    background: var(--bg);\n}\n\n.task-progress-bar span {\n    display: block;\n    width: 35%;\n    height: 100%;\n    border-radius: 99px;\n    background: linear-gradient(90deg, transparent, var(--accent), transparent);\n    animation: task-progress-slide 1.4s ease-in-out infinite;\n}\n\n@keyframes task-pulse {\n    0% {\n        box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 45%, transparent);\n    }\n    100% {\n        box-shadow: 0 0 0 6px transparent;\n    }\n}\n\n@keyframes task-progress-slide {\n    0% {\n        transform: translateX(-100%);\n    }\n    100% {\n        transform: translateX(300%);\n    }\n}\n\n.task-detail {\n    margin-top: 14px;\n    padding-top: 14px;\n    border-top: 1px dashed var(--border);\n}\n\n.task-detail h4 {\n    margin: 0 0 8px;\n    font-size: 13px;\n}\n\n.run-list {\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n    margin: 0;\n    padding: 0;\n    list-style: none;\n}\n\n.run-item {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    justify-content: space-between;\n    gap: 8px;\n    padding: 8px 10px;\n    border-radius: 8px;\n    background: var(--bg-soft);\n    font-size: 12px;\n}\n\n.run-main {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 8px;\n    min-width: 0;\n}\n\n.events {\n    display: flex;\n    flex-direction: column;\n    gap: 4px;\n    max-height: 320px;\n    margin: 0;\n    padding: 0;\n    overflow: auto;\n    list-style: none;\n}\n\n.event {\n    display: grid;\n    grid-template-columns: 48px 132px minmax(0, 1fr);\n    gap: 8px;\n    padding: 4px 6px;\n    border-radius: 6px;\n    color: var(--text-soft);\n    font-size: 11px;\n}\n\n.event:nth-child(odd) {\n    background: var(--bg-soft);\n}\n\n.event-time {\n    color: var(--text-muted);\n}\n\n.event-type {\n    font-weight: 600;\n}\n\n.event-data {\n    overflow: hidden;\n    color: var(--text-muted);\n    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;\n    text-overflow: ellipsis;\n    white-space: nowrap;\n}\n\n.table-list {\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n}\n\n.table-row {\n    display: grid;\n    grid-template-columns: minmax(150px, 1.4fr) 80px 80px 90px minmax(0, 1fr);\n    gap: 10px;\n    align-items: center;\n    padding: 11px 14px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius-sm);\n    background: var(--panel);\n    font-size: 12px;\n}\n\n.table-row.header {\n    border-color: transparent;\n    background: transparent;\n    color: var(--text-muted);\n    font-size: 11px;\n    font-weight: 600;\n}\n\n.workflow-name {\n    font-weight: 700;\n}\n\n.final-card .artifact-preview {\n    aspect-ratio: 16 / 9;\n}\n\n.empty {\n    padding: 42px 20px;\n    border: 1px dashed var(--border-strong);\n    border-radius: var(--radius);\n    background: var(--panel);\n    color: var(--text-muted);\n    text-align: center;\n}\n\n.empty-title {\n    margin: 0 0 5px;\n    color: var(--text-soft);\n    font-size: 15px;\n    font-weight: 700;\n}\n\n.empty-body {\n    margin: 0;\n    font-size: 12px;\n}\n\n.loading {\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    gap: 10px;\n    padding: 60px 20px;\n    color: var(--text-muted);\n    font-size: 13px;\n}\n\n.spinner {\n    width: 18px;\n    height: 18px;\n    border: 2px solid var(--border);\n    border-top-color: var(--accent);\n    border-radius: 50%;\n    animation: spin 0.8s linear infinite;\n}\n\n@keyframes spin {\n    to {\n        transform: rotate(360deg);\n    }\n}\n\n.error-banner {\n    margin-bottom: 16px;\n    padding: 10px 13px;\n    border: 1px solid color-mix(in srgb, var(--red) 35%, var(--border));\n    border-radius: var(--radius-sm);\n    background: var(--red-soft);\n    color: var(--red);\n    font-size: 12px;\n}\n\n.callout {\n    margin-bottom: 18px;\n    padding: 13px 15px;\n    border: 1px solid var(--border);\n    border-left: 3px solid var(--amber);\n    border-radius: var(--radius-sm);\n    background: var(--amber-soft);\n    color: var(--text-soft);\n    font-size: 12px;\n}\n\n.callout strong {\n    color: var(--text);\n}\n\n.modal {\n    position: fixed;\n    inset: 0;\n    z-index: 50;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    padding: 24px;\n}\n\n.modal-backdrop {\n    position: absolute;\n    inset: 0;\n    background: rgba(7, 10, 16, 0.72);\n    backdrop-filter: blur(4px);\n}\n\n.modal-panel {\n    position: relative;\n    display: flex;\n    flex-direction: column;\n    width: min(100%, 980px);\n    max-height: calc(100vh - 48px);\n    overflow: hidden;\n    border: 1px solid var(--border-strong);\n    border-radius: 18px;\n    background: var(--panel-strong);\n    box-shadow: var(--shadow);\n}\n\n.modal-head {\n    display: flex;\n    align-items: flex-start;\n    justify-content: space-between;\n    gap: 16px;\n    padding: 16px 18px;\n    border-bottom: 1px solid var(--border);\n}\n\n.modal-heading h2 {\n    margin: 0;\n    overflow: hidden;\n    font-size: 17px;\n    text-overflow: ellipsis;\n    white-space: nowrap;\n}\n\n.modal-content {\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    min-height: 220px;\n    padding: 16px;\n    overflow: auto;\n    background: #05070a;\n}\n\n.modal-content video,\n.modal-content audio {\n    width: 100%;\n    max-height: calc(100vh - 260px);\n    border-radius: 10px;\n}\n\n.modal-content audio {\n    max-width: 620px;\n}\n\n.modal-content img {\n    max-width: 100%;\n    max-height: calc(100vh - 250px);\n    border-radius: 10px;\n    object-fit: contain;\n}\n\n.modal-content pre {\n    width: 100%;\n    max-height: calc(100vh - 260px);\n    margin: 0;\n    padding: 16px;\n    overflow: auto;\n    border-radius: 10px;\n    background: #0d1117;\n    color: #d6deeb;\n    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;\n    font-size: 12px;\n    line-height: 1.6;\n    white-space: pre-wrap;\n}\n\n.modal-foot {\n    display: flex;\n    align-items: center;\n    justify-content: space-between;\n    gap: 12px;\n    padding: 10px 16px;\n    border-top: 1px solid var(--border);\n}\n\n.toast {\n    position: fixed;\n    right: 24px;\n    bottom: 24px;\n    z-index: 60;\n    max-width: 360px;\n    padding: 10px 14px;\n    border: 1px solid var(--border-strong);\n    border-radius: 10px;\n    background: var(--panel-strong);\n    box-shadow: var(--shadow);\n    font-size: 12px;\n}\n\n.toast.error {\n    border-color: color-mix(in srgb, var(--red) 45%, var(--border));\n    color: var(--red);\n}\n\n.profile-panel {\n    margin-bottom: 20px;\n}\n\n.profile-synopsis {\n    margin: 0 0 14px;\n    padding: 12px 14px;\n    border-left: 3px solid var(--accent);\n    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;\n    background: var(--accent-soft);\n    color: var(--text-soft);\n    font-size: 13px;\n    line-height: 1.65;\n}\n\n.entity-section {\n    margin-bottom: 8px;\n}\n\n.entity-grid {\n    display: grid;\n    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));\n    gap: 12px;\n}\n\n.entity-card {\n    padding: 14px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius);\n    background: var(--panel);\n}\n\n.entity-head {\n    display: flex;\n    align-items: center;\n    justify-content: space-between;\n    gap: 10px;\n}\n\n.entity-name {\n    margin: 0;\n    font-size: 15px;\n    font-weight: 700;\n}\n\n.entity-desc {\n    margin: 8px 0 0;\n    color: var(--text-soft);\n    font-size: 12px;\n    line-height: 1.6;\n}\n\n.entity-ref {\n    margin: 6px 0 0;\n    color: var(--text-muted);\n    font-size: 11px;\n}\n\n.chip-row {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 6px;\n}\n\n.chip {\n    display: inline-flex;\n    align-items: center;\n    padding: 3px 8px;\n    border: 1px solid var(--border);\n    border-radius: 99px;\n    background: var(--bg-soft);\n    color: var(--text-soft);\n    font-size: 11px;\n    white-space: nowrap;\n}\n\n.chip-small {\n    padding: 2px 7px;\n    font-size: 10px;\n}\n\n.chip-character {\n    border-color: color-mix(in srgb, var(--green) 30%, var(--border));\n    background: var(--green-soft);\n    color: var(--green);\n}\n\n.chip-scene {\n    border-color: color-mix(in srgb, var(--violet) 30%, var(--border));\n    background: var(--violet-soft);\n    color: var(--violet);\n}\n\n.chip-final {\n    border-color: color-mix(in srgb, var(--green) 30%, var(--border));\n    background: var(--green-soft);\n    color: var(--green);\n}\n\n.chip-pending {\n    border-color: color-mix(in srgb, var(--amber) 30%, var(--border));\n    background: var(--amber-soft);\n    color: var(--amber);\n}\n\n.storyboard-section {\n    margin-top: 8px;\n}\n\n.storyboard-list {\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n}\n\n.storyboard-row {\n    display: grid;\n    grid-template-columns: 96px minmax(220px, 1.8fr) 120px minmax(140px, 1fr) 110px;\n    gap: 12px;\n    align-items: center;\n    padding: 12px 14px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius-sm);\n    background: var(--panel);\n    font-size: 12px;\n}\n\n.storyboard-header {\n    padding-top: 0;\n    padding-bottom: 4px;\n    border-color: transparent;\n    background: transparent;\n    color: var(--text-muted);\n    font-size: 11px;\n    font-weight: 600;\n}\n\n.storyboard-id-cell {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 6px;\n}\n\n.storyboard-id {\n    font-size: 16px;\n    font-weight: 800;\n    letter-spacing: -0.02em;\n}\n\n.storyboard-content {\n    min-width: 0;\n}\n\n.storyboard-title {\n    overflow: hidden;\n    font-weight: 700;\n    text-overflow: ellipsis;\n    white-space: nowrap;\n}\n\n.storyboard-summary {\n    display: -webkit-box;\n    overflow: hidden;\n    margin: 3px 0 0;\n    color: var(--text-muted);\n    font-size: 11px;\n    -webkit-box-orient: vertical;\n    -webkit-line-clamp: 2;\n}\n\n.storyboard-artifacts {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 6px;\n}\n\n.shot-grid {\n    grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));\n}\n\n.shot-card-rich {\n    gap: 12px;\n}\n\n.shot-title-text {\n    overflow: hidden;\n    font-size: 15px;\n    font-weight: 700;\n    text-overflow: ellipsis;\n    white-space: nowrap;\n}\n\n.shot-summary {\n    margin: 0;\n    color: var(--text-soft);\n    font-size: 13px;\n    line-height: 1.7;\n}\n\n.shot-line {\n    display: flex;\n    align-items: flex-start;\n    gap: 10px;\n}\n\n.shot-line-label {\n    flex: none;\n    padding-top: 3px;\n    color: var(--text-muted);\n    font-size: 11px;\n    font-weight: 600;\n}\n\n.shot-refs-body {\n    display: flex;\n    flex: 1;\n    flex-direction: column;\n    gap: 6px;\n    min-width: 0;\n}\n\n.shot-ref-list {\n    display: flex;\n    flex-wrap: wrap;\n    gap: 8px;\n}\n\n.shot-ref {\n    display: inline-flex;\n    align-items: center;\n    gap: 8px;\n    max-width: 100%;\n    padding: 5px 8px 5px 5px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius-sm);\n    background: var(--bg-soft);\n    color: inherit;\n    font: inherit;\n    text-align: left;\n    cursor: pointer;\n}\n\n.shot-ref:hover {\n    border-color: var(--border-strong);\n}\n\n.shot-ref-thumb {\n    display: flex;\n    flex: none;\n    align-items: center;\n    justify-content: center;\n    width: 40px;\n    height: 40px;\n    overflow: hidden;\n    border: 1px solid var(--border);\n    border-radius: 8px;\n    background: var(--bg);\n}\n\n.shot-ref-thumb img {\n    display: block;\n    width: 100%;\n    height: 100%;\n    object-fit: cover;\n}\n\n.shot-ref-glyph {\n    color: var(--text-muted);\n    font-size: 10px;\n}\n\n.shot-ref-copy {\n    display: flex;\n    flex-direction: column;\n    gap: 2px;\n    min-width: 0;\n}\n\n.shot-ref-name {\n    color: var(--text);\n    font-size: 12px;\n    font-weight: 600;\n    white-space: nowrap;\n}\n\n.shot-ref-wire {\n    color: var(--text-muted);\n    font-size: 10px;\n    white-space: nowrap;\n}\n\n.shot-ref-character .shot-ref-name {\n    color: var(--green);\n}\n\n.shot-ref-scene .shot-ref-name {\n    color: var(--violet);\n}\n\n.shot-ref-unwired {\n    border-color: color-mix(in srgb, var(--amber) 45%, var(--border));\n    border-style: dashed;\n}\n\n.shot-ref-unwired .shot-ref-wire {\n    color: var(--amber);\n}\n\n.shot-ref-missing {\n    border-color: color-mix(in srgb, var(--red) 35%, var(--border));\n    opacity: 0.85;\n}\n\n.shot-ref-missing .shot-ref-wire {\n    color: var(--red);\n}\n\n.shot-ref-warning {\n    margin: 0;\n    color: var(--amber);\n    font-size: 11px;\n    line-height: 1.6;\n}\n\n.prompt-ref {\n    display: inline;\n    padding: 0 2px;\n    border: none;\n    border-bottom: 1px dashed currentColor;\n    background: transparent;\n    color: var(--green);\n    font: inherit;\n    cursor: pointer;\n}\n\n.prompt-ref-scene {\n    color: var(--violet);\n}\n\n.prompt-ref-missing {\n    border-bottom-style: dotted;\n    color: var(--red);\n}\n\n.prompt-ref:hover {\n    background: var(--bg-soft);\n}\n\n.shot-meta-grid {\n    display: flex;\n    flex-wrap: wrap;\n    gap: 6px 12px;\n    padding: 10px 12px;\n    border-radius: var(--radius-sm);\n    background: var(--bg-soft);\n    color: var(--text-muted);\n    font-size: 11px;\n}\n\n.shot-prompt,\n.shot-runs {\n    border-top: 1px dashed var(--border);\n    padding-top: 10px;\n}\n\n.shot-prompt summary,\n.shot-runs summary {\n    color: var(--text-soft);\n    cursor: pointer;\n    font-size: 12px;\n    font-weight: 600;\n}\n\n.shot-prompt p {\n    margin: 8px 0 0;\n    color: var(--text-soft);\n    font-size: 12px;\n    line-height: 1.7;\n    white-space: pre-wrap;\n}\n\n.shot-notes {\n    margin: 0;\n    color: var(--text-muted);\n    font-size: 12px;\n}\n\n.shot-section-head {\n    display: flex;\n    align-items: center;\n    justify-content: space-between;\n    gap: 10px;\n    margin-top: 4px;\n}\n\n.shot-section-head h4 {\n    margin: 0;\n    font-size: 13px;\n}\n\n.artifact-list {\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n}\n\n.artifact-row {\n    display: grid;\n    grid-template-columns: 84px minmax(0, 1fr) auto;\n    gap: 10px;\n    align-items: center;\n    padding: 8px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius-sm);\n    background: var(--bg-elevated);\n}\n\n.artifact-thumb {\n    position: relative;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    width: 84px;\n    height: 56px;\n    overflow: hidden;\n    border-radius: 7px;\n    background: var(--bg-soft);\n}\n\n.artifact-thumb video,\n.artifact-thumb img {\n    width: 100%;\n    height: 100%;\n    object-fit: cover;\n}\n\n.artifact-thumb-icon {\n    font-size: 22px;\n    opacity: 0.7;\n}\n\n.artifact-thumb-note {\n    position: absolute;\n    inset: auto 3px 3px;\n    padding: 1px 4px;\n    border-radius: 4px;\n    background: rgba(0, 0, 0, 0.65);\n    color: #fff;\n    font-size: 9px;\n    text-align: center;\n}\n\n.artifact-info {\n    min-width: 0;\n}\n\n.artifact-name {\n    overflow: hidden;\n    font-size: 12px;\n    font-weight: 700;\n    text-overflow: ellipsis;\n    white-space: nowrap;\n}\n\n.artifact-meta {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 5px 8px;\n    margin-top: 4px;\n    color: var(--text-muted);\n    font-size: 10px;\n}\n\n.artifact-row-actions {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 4px;\n}\n\n@media (max-width: 980px) {\n    .app-shell {\n        grid-template-columns: 1fr;\n    }\n\n    .sidebar {\n        position: static;\n        display: block;\n        height: auto;\n        padding: 16px;\n        border-right: 0;\n        border-bottom: 1px solid var(--border);\n    }\n\n    .brand-sub,\n    .sidebar-foot {\n        display: none;\n    }\n\n    .nav {\n        flex-direction: row;\n        flex-wrap: wrap;\n        margin-top: 12px;\n    }\n\n    .nav-item {\n        width: auto;\n        padding: 7px 10px;\n    }\n\n    .nav-hint {\n        display: none;\n    }\n\n    .topbar {\n        padding: 12px 18px;\n    }\n\n    .content {\n        padding: 18px;\n    }\n\n    .stats-grid {\n        grid-template-columns: repeat(2, minmax(0, 1fr));\n    }\n\n    .layout-two {\n        grid-template-columns: 1fr;\n    }\n\n    .shot-grid {\n        grid-template-columns: 1fr;\n    }\n\n    .storyboard-row {\n        grid-template-columns: 1fr;\n        gap: 6px;\n    }\n\n    .storyboard-header {\n        display: none;\n    }\n\n    .artifact-row {\n        grid-template-columns: 72px minmax(0, 1fr);\n    }\n\n    .artifact-row-actions {\n        grid-column: 1 / -1;\n        justify-content: flex-end;\n    }\n\n    .table-row {\n        grid-template-columns: minmax(0, 1fr) 70px 70px;\n    }\n\n    .table-row.header span:nth-child(n + 3) {\n        display: none;\n    }\n}\n\n@media (max-width: 560px) {\n    .stats-grid {\n        grid-template-columns: 1fr;\n    }\n\n    .grid {\n        grid-template-columns: 1fr;\n    }\n\n    .entity-grid {\n        grid-template-columns: 1fr;\n    }\n\n    .artifact-row {\n        grid-template-columns: 64px minmax(0, 1fr);\n    }\n\n    .artifact-thumb {\n        width: 64px;\n        height: 46px;\n    }\n\n    .view-head {\n        align-items: flex-start;\n        flex-direction: column;\n    }\n\n    .modal {\n        padding: 8px;\n    }\n\n    .modal-panel {\n        max-height: calc(100vh - 16px);\n        border-radius: 12px;\n    }\n\n    .event {\n        grid-template-columns: 38px 100px minmax(0, 1fr);\n    }\n}\n\n/* ---- story / episode ---- */\n.episode-card {\n    min-height: 100%;\n}\n\n.script-text {\n    margin: 0 0 18px;\n    padding: 16px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius-sm);\n    background: var(--panel);\n    color: var(--text);\n    font-family: "SFMono-Regular", ui-monospace, Menlo, Consolas, monospace;\n    font-size: 12.5px;\n    line-height: 1.7;\n    white-space: pre-wrap;\n    word-break: break-word;\n    max-height: 460px;\n    overflow: auto;\n}\n\n.form-block {\n    margin-top: 14px;\n    padding-top: 12px;\n    border-top: 1px solid var(--border);\n}\n\n.form-title {\n    margin: 0 0 8px;\n    font-size: 13px;\n    color: var(--text-soft);\n}\n\n.asset-tile,\n.asset-compact {\n    display: flex;\n    flex-direction: column;\n    gap: 6px;\n    min-width: 0;\n}\n\n.asset-tile img,\n.asset-compact img {\n    width: 100%;\n    max-height: 220px;\n    object-fit: contain;\n    border-radius: var(--radius-sm);\n    background: var(--bg-soft);\n    border: 1px solid var(--border);\n}\n\n.asset-compact img {\n    max-height: 96px;\n}\n\n.asset-tile audio,\n.asset-compact audio {\n    width: 100%;\n}\n\n.asset-name {\n    font-size: 10.5px;\n    color: var(--text-muted);\n    overflow: hidden;\n    text-overflow: ellipsis;\n    white-space: nowrap;\n}\n\n.asset-thumb {\n    display: block;\n    width: 100%;\n    padding: 0;\n    border: 0;\n    background: none;\n    border-radius: var(--radius-sm);\n    cursor: zoom-in;\n}\n\n.asset-thumb:focus-visible {\n    outline: 2px solid var(--accent);\n    outline-offset: 2px;\n}\n\n.asset-thumb:hover img {\n    filter: brightness(1.08);\n}\n\n.asset-missing {\n    display: inline-flex;\n    align-items: center;\n    min-height: 64px;\n    padding: 10px 12px;\n    border: 1px dashed var(--border-strong);\n    border-radius: var(--radius-sm);\n    color: var(--text-muted);\n    font-size: 12px;\n    background: var(--bg-soft);\n}\n\n.asset-row {\n    display: grid;\n    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));\n    gap: 8px;\n    margin-top: 8px;\n}\n\n.mini-list {\n    margin: 8px 0 0;\n    padding-left: 18px;\n    color: var(--text-soft);\n    font-size: 12.5px;\n    line-height: 1.65;\n}\n\n.text-warn {\n    color: var(--amber);\n}\n\n.callout.warn {\n    border-color: var(--amber);\n    background: var(--amber-soft);\n}\n\n.task-list {\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n    margin-bottom: 18px;\n}\n\n.task-row {\n    display: flex;\n    align-items: center;\n    gap: 12px;\n    padding: 10px 12px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius-sm);\n    background: var(--panel);\n    font-size: 12.5px;\n}\n\n.task-row > span:nth-child(2) {\n    flex: 1;\n    min-width: 0;\n    overflow: hidden;\n    text-overflow: ellipsis;\n    white-space: nowrap;\n    color: var(--text-soft);\n}\n\n.quote {\n    margin: 10px 0 0;\n    padding: 8px 12px;\n    border-left: 3px solid var(--violet);\n    background: var(--violet-soft);\n    color: var(--text-soft);\n    font-size: 12.5px;\n    line-height: 1.6;\n}\n\n.badge.stage-script,\n.badge.stage-breakdown {\n    background: var(--amber-soft);\n    color: var(--amber);\n}\n\n.badge.stage-assets,\n.badge.stage-storyboard,\n.badge.stage-workflow {\n    background: var(--violet-soft);\n    color: var(--violet);\n}\n\n.badge.stage-ready,\n.badge.stage-wrapped {\n    background: var(--green-soft);\n    color: var(--green);\n}\n\n/* \u5267\u60C5\u56FE\u8C31 */\n.map-section {\n    margin-top: 18px;\n    padding: 18px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius);\n    background: var(--panel);\n}\n\n.map-section .section-head {\n    align-items: flex-start;\n}\n\n.map-subtitle {\n    margin: 6px 0 0;\n    color: var(--text-muted);\n    font-size: 12px;\n}\n\n.map-origin {\n    margin: 8px 0 0;\n    color: var(--text-muted);\n    font-size: 11.5px;\n}\n\n.map-tabs {\n    display: inline-flex;\n    gap: 4px;\n    padding: 3px;\n    border: 1px solid var(--border);\n    border-radius: 999px;\n    background: var(--bg-soft);\n}\n\n.map-tab {\n    padding: 5px 12px;\n    border: 0;\n    border-radius: 999px;\n    background: transparent;\n    color: var(--text-soft);\n    font-size: 12px;\n    cursor: pointer;\n}\n\n.map-tab.is-active {\n    background: var(--panel-strong);\n    color: var(--text);\n    box-shadow: 0 1px 4px rgba(20, 28, 44, 0.12);\n}\n\n.map-warning {\n    margin-top: 12px;\n}\n\n.map-body {\n    margin-top: 14px;\n}\n\n.map-toolbar {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    justify-content: space-between;\n    gap: 10px;\n    margin-bottom: 12px;\n}\n\n.map-toolbar-group {\n    display: flex;\n    flex-wrap: wrap;\n    gap: 6px;\n}\n\n.map-toggle.is-active {\n    border-color: var(--accent);\n    background: var(--accent-soft);\n    color: var(--accent);\n}\n\n.map-filter {\n    display: inline-flex;\n    align-items: center;\n    gap: 6px;\n    padding: 4px 10px;\n    border-radius: 999px;\n    background: var(--accent-soft);\n    color: var(--accent);\n    font-size: 12px;\n}\n\n.map-filter-clear {\n    padding: 0;\n    border: 0;\n    background: transparent;\n    color: inherit;\n    font-size: 14px;\n    line-height: 1;\n    cursor: pointer;\n}\n\n.map-graph-wrap {\n    overflow-x: auto;\n    border: 1px solid var(--border);\n    border-radius: var(--radius-sm);\n    background: var(--bg-soft);\n}\n\n.map-graph {\n    display: block;\n    width: 100%;\n    min-width: 620px;\n    height: auto;\n}\n\n.map-node {\n    cursor: pointer;\n    outline: none;\n}\n\n.map-node-bg {\n    fill: var(--panel);\n    stroke: var(--border-strong);\n    stroke-width: 1;\n}\n\n.map-node.status-warn .map-node-bg {\n    stroke: var(--amber);\n    stroke-width: 1.5;\n}\n\n.map-node.is-focus .map-node-bg {\n    fill: var(--accent-soft);\n    stroke: var(--accent);\n    stroke-width: 2;\n}\n\n.map-node.is-dim {\n    opacity: 0.28;\n}\n\n.map-node:focus-visible .map-node-bg {\n    stroke: var(--accent);\n    stroke-width: 2;\n}\n\n.map-node-avatar {\n    fill: var(--accent-soft);\n    stroke: var(--accent);\n    stroke-width: 1;\n}\n\n.map-node-initial {\n    fill: var(--accent);\n    font-size: 12px;\n    font-weight: 700;\n}\n\n.map-node-name {\n    fill: var(--text);\n    font-size: 12px;\n    font-weight: 600;\n}\n\n.map-node-sub {\n    fill: var(--text-muted);\n    font-size: 10px;\n}\n\n.map-edge {\n    fill: none;\n    stroke: var(--border-strong);\n    stroke-linecap: round;\n}\n\n.map-edge.is-dim {\n    opacity: 0.08 !important;\n}\n\n.map-cooccur {\n    fill: none;\n    stroke: var(--text-muted);\n    stroke-dasharray: 3 4;\n    stroke-width: 1;\n    opacity: 0.4;\n}\n\n.map-relation {\n    fill: none;\n    stroke: var(--accent);\n    stroke-dasharray: 5 4;\n    stroke-width: 1.4;\n    opacity: 0.75;\n}\n\n.map-relation-label {\n    fill: var(--accent);\n    font-size: 9px;\n}\n\n.map-legend {\n    display: flex;\n    flex-wrap: wrap;\n    gap: 14px;\n    margin-top: 8px;\n    color: var(--text-muted);\n    font-size: 11px;\n}\n\n.map-detail {\n    margin-top: 12px;\n    padding-top: 12px;\n    border-top: 1px solid var(--border);\n}\n\n.map-detail-head {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 8px;\n    margin-bottom: 8px;\n}\n\n.map-detail-head strong {\n    margin-right: auto;\n}\n\n.map-detail-section {\n    margin-top: 10px;\n}\n\n.map-detail-label {\n    margin: 0 0 6px;\n    color: var(--text-soft);\n    font-size: 12px;\n    font-weight: 600;\n}\n\n.map-row {\n    display: flex;\n    gap: 10px;\n    padding: 3px 0;\n    font-size: 12px;\n}\n\n.map-row-label {\n    flex: 0 0 84px;\n    color: var(--text-muted);\n}\n\n.map-row-value {\n    min-width: 0;\n    color: var(--text-soft);\n    overflow-wrap: anywhere;\n}\n\n.map-assets {\n    display: flex;\n    flex-wrap: wrap;\n    gap: 8px;\n    margin: 6px 0 2px;\n}\n\n.map-asset {\n    display: inline-flex;\n    align-items: center;\n}\n\n.map-asset-thumb {\n    display: inline-flex;\n    align-items: center;\n    gap: 6px;\n    padding: 3px 7px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius-sm);\n    background: var(--bg-soft);\n    color: var(--text-soft);\n    font-size: 10.5px;\n    cursor: zoom-in;\n}\n\n.map-asset-thumb img {\n    width: 34px;\n    height: 34px;\n    object-fit: cover;\n    border-radius: 5px;\n}\n\n.map-asset-missing {\n    display: inline-flex;\n    align-items: center;\n    padding: 4px 8px;\n    border: 1px dashed var(--border-strong);\n    border-radius: var(--radius-sm);\n    color: var(--amber);\n    font-size: 10.5px;\n}\n\n.map-slots {\n    display: flex;\n    flex-direction: column;\n    gap: 5px;\n}\n\n.map-slot {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 8px;\n    padding: 6px 8px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius-sm);\n    background: var(--bg-soft);\n    font-size: 11.5px;\n}\n\n.map-gap {\n    display: grid;\n    grid-template-columns: 140px 1fr;\n    gap: 4px 10px;\n    padding: 6px 8px;\n    border-left: 3px solid var(--amber);\n    background: var(--amber-soft);\n    font-size: 11.5px;\n}\n\n.map-gap.is-blocker {\n    border-left-color: var(--red);\n    background: var(--red-soft);\n}\n\n.map-gap .muted {\n    grid-column: 2;\n}\n\n.timeline-overview {\n    display: flex;\n    gap: 2px;\n    height: 22px;\n    margin-bottom: 12px;\n    overflow: hidden;\n    border-radius: 7px;\n    background: var(--bg-soft);\n}\n\n.timeline-seg {\n    min-width: 3px;\n    padding: 0;\n    border: 0;\n    background: var(--scene-other);\n    cursor: pointer;\n}\n\n.timeline-seg.tone-day {\n    background: var(--scene-day);\n}\n\n.timeline-seg.tone-night {\n    background: var(--scene-night);\n}\n\n.timeline-seg.tone-dusk {\n    background: var(--scene-dusk);\n}\n\n.timeline-seg.tone-dawn {\n    background: var(--scene-dawn);\n}\n\n.timeline-seg.tone-other {\n    background: var(--scene-other);\n}\n\n.timeline-seg.is-major {\n    box-shadow: inset 0 3px 0 var(--accent);\n}\n\n.timeline-list {\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n}\n\n.timeline-event {\n    display: grid;\n    grid-template-columns: 112px minmax(0, 1fr);\n    gap: 12px;\n    padding: 10px 12px;\n    border: 1px solid var(--border);\n    border-left: 3px solid transparent;\n    border-radius: var(--radius-sm);\n    background: var(--bg-soft);\n}\n\n.timeline-event.is-major {\n    border-left-color: var(--accent);\n}\n\n.timeline-event.is-blocked {\n    border-left-color: var(--red);\n    background: var(--red-soft);\n}\n\n.timeline-time {\n    display: flex;\n    flex-direction: column;\n    gap: 3px;\n    font-size: 11px;\n}\n\n.timeline-timecode {\n    color: var(--text);\n    font-size: 12px;\n}\n\n.timeline-story-time {\n    display: inline-block;\n    padding: 2px 6px;\n    border-radius: 999px;\n    background: var(--violet-soft);\n    color: var(--violet);\n    font-size: 10px;\n}\n\n.timeline-main {\n    min-width: 0;\n}\n\n.timeline-title-row {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 6px;\n}\n\n.timeline-title {\n    margin: 0;\n    font-size: 13px;\n}\n\n.timeline-summary {\n    margin: 6px 0;\n    color: var(--text-soft);\n    font-size: 12px;\n}\n\n.timeline-actions {\n    display: flex;\n    gap: 6px;\n    margin-top: 6px;\n}\n\n.timeline-details {\n    margin-top: 8px;\n    border-top: 1px dashed var(--border);\n    padding-top: 6px;\n}\n\n.timeline-details summary {\n    color: var(--text-muted);\n    font-size: 11.5px;\n    cursor: pointer;\n}\n\n.map-event-detail {\n    margin-top: 8px;\n}\n\n.map-chip-button {\n    border: 0;\n    cursor: pointer;\n    font: inherit;\n}\n\n.badge.importance-major,\n.badge.map-ready,\n.badge.map-rendered {\n    background: var(--green-soft);\n    color: var(--green);\n}\n\n.badge.importance-minor,\n.badge.map-pending,\n.badge.map-unknown,\n.badge.map-workflow {\n    background: var(--bg-soft);\n    color: var(--text-muted);\n}\n\n.badge.map-blocked,\n.badge.map-failed {\n    background: var(--red-soft);\n    color: var(--red);\n}\n\n.badge.map-beat {\n    background: var(--violet-soft);\n    color: var(--violet);\n}\n\n.badge.map-slot-ready {\n    background: var(--green-soft);\n    color: var(--green);\n}\n\n.badge.map-slot-blocker {\n    background: var(--red-soft);\n    color: var(--red);\n}\n\n.badge.map-slot-optional {\n    background: var(--bg-soft);\n    color: var(--text-muted);\n}\n\n.badge.map-fit-ready {\n    background: var(--green-soft);\n    color: var(--green);\n}\n\n.badge.map-fit-needs_assets {\n    background: var(--amber-soft);\n    color: var(--amber);\n}\n\n.badge.map-fit-unusable {\n    background: var(--red-soft);\n    color: var(--red);\n}\n\n@media (max-width: 720px) {\n    .map-section {\n        padding: 14px;\n    }\n\n    .timeline-event {\n        grid-template-columns: 1fr;\n        gap: 6px;\n    }\n\n    .timeline-time {\n        flex-direction: row;\n        align-items: center;\n        flex-wrap: wrap;\n    }\n\n    .map-gap {\n        grid-template-columns: 1fr;\n    }\n\n    .map-gap .muted {\n        grid-column: 1;\n    }\n}\n\n.map-tab {\n    white-space: nowrap;\n}\n\n@media (max-width: 720px) {\n    .map-section .section-head {\n        flex-direction: column;\n        align-items: stretch;\n    }\n\n    .map-tabs {\n        align-self: flex-start;\n        margin-top: 10px;\n    }\n}\n';
+    style_default = '/* daoyan web \u2014\u2014 \u9879\u76EE\u67E5\u770B\u5668\uFF08\u542B\u955C\u5934\u5B9A\u7A3F\uFF09\uFF1B\u539F\u751F CSS\uFF0C\u65E0\u5916\u90E8\u4F9D\u8D56\u3002 */\n:root {\n    color-scheme: light dark;\n    --bg: #f4f5f7;\n    --bg-elevated: #ffffff;\n    --bg-soft: #eceef2;\n    --panel: #ffffff;\n    --panel-strong: #ffffff;\n    --border: #d9dde4;\n    --border-strong: #c3c9d3;\n    --text: #1c2027;\n    --text-soft: #5c6470;\n    --text-muted: #8a919c;\n    --accent: #2f6fed;\n    --accent-soft: #e8f0ff;\n    --green: #16845b;\n    --green-soft: #e4f6ee;\n    --amber: #a56700;\n    --amber-soft: #fff2d9;\n    --red: #b42318;\n    --red-soft: #fde8e6;\n    --violet: #6b4fd8;\n    --violet-soft: #eee9ff;\n    --scene-day: #d99a2b;\n    --scene-night: #5b6fb5;\n    --scene-dusk: #a46bc4;\n    --scene-dawn: #4fa8a0;\n    --scene-other: #8a919c;\n    --shadow: 0 10px 30px rgba(20, 28, 44, 0.08);\n    --radius: 14px;\n    --radius-sm: 10px;\n    --sidebar-width: 232px;\n}\n\n@media (prefers-color-scheme: dark) {\n    :root {\n        --bg: #101318;\n        --bg-elevated: #161a21;\n        --bg-soft: #1d222b;\n        --panel: #161a21;\n        --panel-strong: #1b2029;\n        --border: #2a303a;\n        --border-strong: #3a424f;\n        --text: #eef1f6;\n        --text-soft: #b3bac6;\n        --text-muted: #808895;\n        --accent: #7aa2ff;\n        --accent-soft: #1c2a4a;\n        --green: #5bd3a0;\n        --green-soft: #143329;\n        --amber: #f0b44c;\n        --amber-soft: #392b13;\n        --red: #ff8f86;\n        --red-soft: #3a1b1b;\n        --violet: #b19cff;\n        --violet-soft: #2a2148;\n        --scene-day: #f0c060;\n        --scene-night: #8ea2e8;\n        --scene-dusk: #c79ae0;\n        --scene-dawn: #7ed0c7;\n        --scene-other: #808895;\n        --shadow: 0 14px 40px rgba(0, 0, 0, 0.35);\n    }\n}\n\n* {\n    box-sizing: border-box;\n}\n\n[hidden] {\n    display: none !important;\n}\n\nhtml,\nbody {\n    margin: 0;\n    min-height: 100%;\n}\n\nbody {\n    background: var(--bg);\n    color: var(--text);\n    font-family:\n        -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;\n    font-size: 14px;\n    line-height: 1.55;\n    -webkit-font-smoothing: antialiased;\n}\n\nbutton,\ninput,\nselect {\n    font: inherit;\n    color: inherit;\n}\n\na {\n    color: var(--accent);\n    text-decoration: none;\n}\n\na:hover {\n    text-decoration: underline;\n}\n\n.app-shell {\n    display: grid;\n    grid-template-columns: var(--sidebar-width) minmax(0, 1fr);\n    min-height: 100vh;\n}\n\n.sidebar {\n    position: sticky;\n    top: 0;\n    display: flex;\n    flex-direction: column;\n    gap: 22px;\n    height: 100vh;\n    padding: 24px 16px 18px;\n    border-right: 1px solid var(--border);\n    background: var(--bg-elevated);\n}\n\n.brand {\n    padding: 0 8px;\n}\n\n.brand-mark {\n    display: inline-flex;\n    align-items: center;\n    gap: 8px;\n    font-size: 17px;\n    font-weight: 700;\n    letter-spacing: 0.01em;\n}\n\n.brand-dot {\n    display: inline-block;\n    width: 10px;\n    height: 10px;\n    border-radius: 50%;\n    background: var(--accent);\n    box-shadow: 0 0 0 4px var(--accent-soft);\n}\n\n.brand-sub {\n    margin: 6px 0 0;\n    color: var(--text-muted);\n    font-size: 12px;\n}\n\n.nav {\n    display: flex;\n    flex-direction: column;\n    gap: 4px;\n}\n\n.nav-item {\n    display: flex;\n    flex-direction: column;\n    align-items: flex-start;\n    gap: 1px;\n    width: 100%;\n    padding: 9px 10px;\n    border: 0;\n    border-radius: 9px;\n    background: transparent;\n    cursor: pointer;\n    text-align: left;\n}\n\n.nav-item:hover {\n    background: var(--bg-soft);\n}\n\n.nav-item.active {\n    background: var(--accent-soft);\n    color: var(--accent);\n}\n\n.nav-label {\n    font-weight: 600;\n}\n\n.nav-hint {\n    color: var(--text-muted);\n    font-size: 11px;\n}\n\n.nav-item.active .nav-hint {\n    color: color-mix(in srgb, var(--accent) 72%, var(--text-muted));\n}\n\n.sidebar-bottom {\n    margin-top: auto;\n    padding-top: 12px;\n    border-top: 1px solid var(--border);\n}\n\n.settings-panel {\n    display: flex;\n    flex-direction: column;\n    gap: 10px;\n    margin-bottom: 14px;\n}\n\n.settings-rows {\n    display: flex;\n    flex-direction: column;\n    gap: 6px;\n}\n\n.settings-row {\n    display: flex;\n    align-items: center;\n    justify-content: space-between;\n    gap: 12px;\n    padding: 6px 0;\n    border-bottom: 1px dashed var(--border);\n}\n\n.settings-row:last-child {\n    border-bottom: none;\n}\n\n.settings-label {\n    color: var(--text-muted);\n    font-size: 12px;\n}\n\n.settings-value {\n    color: var(--text);\n    font-size: 12px;\n    font-weight: 600;\n}\n\n.settings-options {\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n}\n\n.settings-option,\n.settings-check {\n    display: flex;\n    align-items: flex-start;\n    gap: 10px;\n    padding: 10px 12px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius-sm);\n    background: var(--bg-soft);\n    cursor: pointer;\n}\n\n.settings-option.disabled {\n    opacity: 0.55;\n    cursor: not-allowed;\n}\n\n.settings-option input,\n.settings-check input {\n    margin-top: 3px;\n}\n\n.settings-option span,\n.settings-check span {\n    display: flex;\n    flex-direction: column;\n    gap: 3px;\n}\n\n.settings-hint {\n    color: var(--text-muted);\n    font-size: 11px;\n    line-height: 1.5;\n}\n\n.main {\n    min-width: 0;\n}\n\n.topbar {\n    position: sticky;\n    top: 0;\n    z-index: 10;\n    display: flex;\n    align-items: center;\n    justify-content: space-between;\n    gap: 16px;\n    padding: 16px 28px;\n    border-bottom: 1px solid var(--border);\n    background: color-mix(in srgb, var(--bg) 88%, transparent);\n    backdrop-filter: blur(12px);\n}\n\n.topbar-left {\n    display: flex;\n    align-items: baseline;\n    gap: 12px;\n    min-width: 0;\n}\n\n.project-name {\n    margin: 0;\n    overflow: hidden;\n    font-size: 16px;\n    font-weight: 700;\n    text-overflow: ellipsis;\n    white-space: nowrap;\n}\n\n.project-mode {\n    flex: none;\n    padding: 2px 8px;\n    border: 1px solid var(--border);\n    border-radius: 99px;\n    color: var(--text-soft);\n    font-size: 11px;\n}\n\n.topbar-right {\n    display: flex;\n    align-items: center;\n    gap: 14px;\n    color: var(--text-muted);\n    font-size: 12px;\n}\n\n.connection {\n    display: inline-flex;\n    align-items: center;\n    gap: 6px;\n}\n\n.connection-dot {\n    width: 7px;\n    height: 7px;\n    border-radius: 50%;\n    background: var(--text-muted);\n}\n\n.connection.ok .connection-dot {\n    background: var(--green);\n    box-shadow: 0 0 0 3px var(--green-soft);\n}\n\n.connection.error .connection-dot {\n    background: var(--red);\n    box-shadow: 0 0 0 3px var(--red-soft);\n}\n\n.content {\n    max-width: 1280px;\n    margin: 0 auto;\n    padding: 28px;\n}\n\n.view-head {\n    display: flex;\n    align-items: flex-end;\n    justify-content: space-between;\n    gap: 20px;\n    margin-bottom: 22px;\n}\n\n.eyebrow {\n    margin: 0 0 4px;\n    color: var(--text-muted);\n    font-size: 11px;\n    font-weight: 600;\n    letter-spacing: 0.08em;\n    text-transform: uppercase;\n}\n\n.page-title {\n    margin: 0;\n    font-size: 26px;\n    letter-spacing: -0.02em;\n}\n\n.page-subtitle {\n    margin: 6px 0 0;\n    color: var(--text-soft);\n    font-size: 13px;\n}\n\n.stats-grid {\n    display: grid;\n    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));\n    gap: 12px;\n    margin-bottom: 20px;\n}\n\n.stat-card {\n    padding: 16px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius);\n    background: var(--panel);\n}\n\n.stat-label {\n    margin: 0;\n    color: var(--text-muted);\n    font-size: 12px;\n}\n\n.stat-value {\n    margin: 6px 0 0;\n    font-size: 24px;\n    font-weight: 700;\n    letter-spacing: -0.02em;\n}\n\n.stat-hint {\n    margin: 4px 0 0;\n    color: var(--text-muted);\n    font-size: 11px;\n}\n\n.layout-two {\n    display: grid;\n    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);\n    gap: 16px;\n    margin-bottom: 20px;\n}\n\n.panel {\n    padding: 18px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius);\n    background: var(--panel);\n}\n\n.panel-head {\n    display: flex;\n    align-items: center;\n    justify-content: space-between;\n    gap: 12px;\n    margin-bottom: 12px;\n}\n\n.panel-title {\n    margin: 0;\n    font-size: 15px;\n    font-weight: 700;\n}\n\n.panel-sub {\n    margin: 2px 0 0;\n    color: var(--text-muted);\n    font-size: 12px;\n}\n\n.kv {\n    display: grid;\n    grid-template-columns: 92px minmax(0, 1fr);\n    gap: 7px 12px;\n    margin: 0;\n    font-size: 13px;\n}\n\n.kv dt {\n    color: var(--text-muted);\n}\n\n.kv dd {\n    margin: 0;\n    overflow-wrap: anywhere;\n}\n\n.badge {\n    display: inline-flex;\n    align-items: center;\n    gap: 5px;\n    padding: 2px 8px;\n    border-radius: 99px;\n    background: var(--bg-soft);\n    color: var(--text-soft);\n    font-size: 11px;\n    font-weight: 600;\n    white-space: nowrap;\n}\n\n.badge.status-succeeded {\n    background: var(--green-soft);\n    color: var(--green);\n}\n\n.badge.status-running {\n    background: var(--accent-soft);\n    color: var(--accent);\n}\n\n.badge.status-queued {\n    background: var(--amber-soft);\n    color: var(--amber);\n}\n\n.badge.status-failed {\n    background: var(--red-soft);\n    color: var(--red);\n}\n\n.badge.status-cancelled,\n.badge.status-interrupted {\n    background: var(--violet-soft);\n    color: var(--violet);\n}\n\n.badge.kind-video {\n    background: var(--violet-soft);\n    color: var(--violet);\n}\n\n.badge.kind-image {\n    background: var(--green-soft);\n    color: var(--green);\n}\n\n.badge.kind-audio {\n    background: var(--amber-soft);\n    color: var(--amber);\n}\n\n.badge.kind-json,\n.badge.kind-text {\n    background: var(--accent-soft);\n    color: var(--accent);\n}\n\n.muted {\n    color: var(--text-muted);\n}\n\n.mono {\n    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;\n    font-size: 12px;\n}\n\n.section-head {\n    display: flex;\n    align-items: center;\n    justify-content: space-between;\n    gap: 12px;\n    margin: 24px 0 12px;\n}\n\n.section-title {\n    margin: 0;\n    font-size: 16px;\n    font-weight: 700;\n}\n\n.section-actions {\n    display: flex;\n    align-items: center;\n    gap: 10px;\n}\n\n.section-meta {\n    color: var(--text-muted);\n    font-size: 12px;\n}\n\n.grid {\n    display: grid;\n    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));\n    gap: 14px;\n}\n\n.card {\n    overflow: hidden;\n    border: 1px solid var(--border);\n    border-radius: var(--radius);\n    background: var(--panel);\n}\n\n.card-body {\n    padding: 13px 14px 14px;\n}\n\n.card-title {\n    margin: 0;\n    overflow: hidden;\n    font-size: 14px;\n    font-weight: 700;\n    text-overflow: ellipsis;\n    white-space: nowrap;\n}\n\n.card-meta {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 6px 10px;\n    margin-top: 7px;\n    color: var(--text-muted);\n    font-size: 11px;\n}\n\n.card-actions {\n    display: flex;\n    flex-wrap: wrap;\n    gap: 8px;\n    margin-top: 12px;\n}\n\n.artifact-card {\n    display: flex;\n    flex-direction: column;\n}\n\n.artifact-preview {\n    position: relative;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    aspect-ratio: 16 / 10;\n    overflow: hidden;\n    background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 10%, var(--bg-soft)), var(--bg-soft));\n}\n\n.artifact-preview video,\n.artifact-preview img {\n    width: 100%;\n    height: 100%;\n    object-fit: cover;\n}\n\n.artifact-preview .preview-icon {\n    font-size: 38px;\n    opacity: 0.65;\n}\n\n.artifact-preview .preview-note {\n    position: absolute;\n    inset: auto 8px 8px;\n    padding: 4px 8px;\n    border-radius: 8px;\n    background: rgba(0, 0, 0, 0.62);\n    color: #fff;\n    font-size: 11px;\n    text-align: center;\n}\n\n.play-button {\n    position: absolute;\n    display: inline-flex;\n    align-items: center;\n    justify-content: center;\n    width: 46px;\n    height: 46px;\n    border: 0;\n    border-radius: 50%;\n    background: rgba(0, 0, 0, 0.62);\n    color: #fff;\n    cursor: pointer;\n    font-size: 18px;\n}\n\n.play-button:hover {\n    background: var(--accent);\n}\n\n.button {\n    display: inline-flex;\n    align-items: center;\n    justify-content: center;\n    gap: 6px;\n    padding: 6px 11px;\n    border: 1px solid var(--border-strong);\n    border-radius: 8px;\n    background: var(--panel-strong);\n    cursor: pointer;\n    font-size: 12px;\n    font-weight: 600;\n}\n\n.button:hover {\n    border-color: var(--accent);\n    color: var(--accent);\n}\n\n.button.primary {\n    border-color: var(--accent);\n    background: var(--accent);\n    color: #fff;\n}\n\n.button.primary:hover {\n    color: #fff;\n    filter: brightness(1.06);\n}\n\n.button.ghost {\n    border-color: transparent;\n    background: transparent;\n    color: var(--text-soft);\n}\n\n.button:disabled {\n    cursor: not-allowed;\n    opacity: 0.4;\n}\n\n.icon-button {\n    display: inline-flex;\n    align-items: center;\n    justify-content: center;\n    width: 34px;\n    height: 34px;\n    border: 1px solid var(--border);\n    border-radius: 9px;\n    background: transparent;\n    cursor: pointer;\n    font-size: 20px;\n    line-height: 1;\n}\n\n.filter-bar {\n    display: flex;\n    flex-wrap: wrap;\n    gap: 10px;\n    margin-bottom: 16px;\n    padding: 12px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius);\n    background: var(--panel);\n}\n\n.field {\n    display: flex;\n    flex-direction: column;\n    gap: 4px;\n}\n\n.field-label {\n    color: var(--text-muted);\n    font-size: 11px;\n    font-weight: 600;\n}\n\n.input,\n.select {\n    min-width: 140px;\n    padding: 7px 9px;\n    border: 1px solid var(--border);\n    border-radius: 8px;\n    background: var(--bg-elevated);\n    font-size: 12px;\n}\n\n.input:focus,\n.select:focus {\n    border-color: var(--accent);\n    outline: 2px solid var(--accent-soft);\n}\n\n.input.search {\n    min-width: 210px;\n}\n\n.shot-card {\n    display: flex;\n    flex-direction: column;\n    gap: 10px;\n    padding: 14px;\n}\n\n.shot-title {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: baseline;\n    gap: 8px;\n    min-width: 0;\n}\n\n.shot-head {\n    display: flex;\n    align-items: flex-start;\n    justify-content: space-between;\n    gap: 10px;\n}\n\n.shot-id {\n    font-size: 18px;\n    font-weight: 800;\n    letter-spacing: -0.02em;\n}\n\n.shot-slug {\n    color: var(--text-muted);\n    font-size: 12px;\n}\n\n.prompt {\n    display: -webkit-box;\n    overflow: hidden;\n    margin: 0;\n    color: var(--text-soft);\n    font-size: 12px;\n    -webkit-box-orient: vertical;\n    -webkit-line-clamp: 3;\n}\n\n.meta-row {\n    display: flex;\n    flex-wrap: wrap;\n    gap: 6px 12px;\n    color: var(--text-muted);\n    font-size: 11px;\n}\n\n.task-list {\n    display: flex;\n    flex-direction: column;\n    gap: 10px;\n}\n\n.task-card {\n    padding: 14px 16px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius);\n    background: var(--panel);\n}\n\n.task-head {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    justify-content: space-between;\n    gap: 10px;\n}\n\n.task-title {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 8px;\n    min-width: 0;\n}\n\n.task-command {\n    margin: 0;\n    font-size: 14px;\n    font-weight: 700;\n}\n\n.task-meta {\n    display: flex;\n    flex-wrap: wrap;\n    gap: 6px 12px;\n    margin-top: 7px;\n    color: var(--text-muted);\n    font-size: 11px;\n}\n\n.task-progress {\n    display: flex;\n    flex-direction: column;\n    gap: 6px;\n    margin-top: 10px;\n}\n\n.task-progress-detail {\n    margin: 0 0 12px;\n    padding: 8px 10px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius-sm);\n    background: var(--bg-soft);\n}\n\n.task-progress-line {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 8px;\n    color: var(--text-soft);\n    font-size: 11px;\n}\n\n.task-progress-label {\n    color: var(--text);\n    font-weight: 600;\n}\n\n.task-progress-run {\n    color: var(--text-muted);\n    font-size: 10px;\n}\n\n.task-progress-elapsed {\n    color: var(--text-muted);\n    font-variant-numeric: tabular-nums;\n}\n\n.task-pulse {\n    width: 7px;\n    height: 7px;\n    border-radius: 50%;\n    background: var(--accent);\n    animation: task-pulse 1.6s ease-out infinite;\n}\n\n.task-progress-bar {\n    height: 3px;\n    overflow: hidden;\n    border-radius: 99px;\n    background: var(--bg-soft);\n}\n\n.task-progress-detail .task-progress-bar {\n    background: var(--bg);\n}\n\n.task-progress-bar span {\n    display: block;\n    width: 35%;\n    height: 100%;\n    border-radius: 99px;\n    background: linear-gradient(90deg, transparent, var(--accent), transparent);\n    animation: task-progress-slide 1.4s ease-in-out infinite;\n}\n\n@keyframes task-pulse {\n    0% {\n        box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 45%, transparent);\n    }\n    100% {\n        box-shadow: 0 0 0 6px transparent;\n    }\n}\n\n@keyframes task-progress-slide {\n    0% {\n        transform: translateX(-100%);\n    }\n    100% {\n        transform: translateX(300%);\n    }\n}\n\n.task-detail {\n    margin-top: 14px;\n    padding-top: 14px;\n    border-top: 1px dashed var(--border);\n}\n\n.task-detail h4 {\n    margin: 0 0 8px;\n    font-size: 13px;\n}\n\n.run-list {\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n    margin: 0;\n    padding: 0;\n    list-style: none;\n}\n\n.run-item {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    justify-content: space-between;\n    gap: 8px;\n    padding: 8px 10px;\n    border-radius: 8px;\n    background: var(--bg-soft);\n    font-size: 12px;\n}\n\n.run-main {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 8px;\n    min-width: 0;\n}\n\n.events {\n    display: flex;\n    flex-direction: column;\n    gap: 4px;\n    max-height: 320px;\n    margin: 0;\n    padding: 0;\n    overflow: auto;\n    list-style: none;\n}\n\n.event {\n    display: grid;\n    grid-template-columns: 48px 132px minmax(0, 1fr);\n    gap: 8px;\n    padding: 4px 6px;\n    border-radius: 6px;\n    color: var(--text-soft);\n    font-size: 11px;\n}\n\n.event:nth-child(odd) {\n    background: var(--bg-soft);\n}\n\n.event-time {\n    color: var(--text-muted);\n}\n\n.event-type {\n    font-weight: 600;\n}\n\n.event-data {\n    overflow: hidden;\n    color: var(--text-muted);\n    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;\n    text-overflow: ellipsis;\n    white-space: nowrap;\n}\n\n.table-list {\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n}\n\n.table-row {\n    display: grid;\n    grid-template-columns: minmax(150px, 1.4fr) 80px 80px 90px minmax(0, 1fr);\n    gap: 10px;\n    align-items: center;\n    padding: 11px 14px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius-sm);\n    background: var(--panel);\n    font-size: 12px;\n}\n\n.table-row.header {\n    border-color: transparent;\n    background: transparent;\n    color: var(--text-muted);\n    font-size: 11px;\n    font-weight: 600;\n}\n\n.workflow-name {\n    font-weight: 700;\n}\n\n.final-card .artifact-preview {\n    aspect-ratio: 16 / 9;\n}\n\n.empty {\n    padding: 42px 20px;\n    border: 1px dashed var(--border-strong);\n    border-radius: var(--radius);\n    background: var(--panel);\n    color: var(--text-muted);\n    text-align: center;\n}\n\n.empty-title {\n    margin: 0 0 5px;\n    color: var(--text-soft);\n    font-size: 15px;\n    font-weight: 700;\n}\n\n.empty-body {\n    margin: 0;\n    font-size: 12px;\n}\n\n.loading {\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    gap: 10px;\n    padding: 60px 20px;\n    color: var(--text-muted);\n    font-size: 13px;\n}\n\n.spinner {\n    width: 18px;\n    height: 18px;\n    border: 2px solid var(--border);\n    border-top-color: var(--accent);\n    border-radius: 50%;\n    animation: spin 0.8s linear infinite;\n}\n\n@keyframes spin {\n    to {\n        transform: rotate(360deg);\n    }\n}\n\n.error-banner {\n    margin-bottom: 16px;\n    padding: 10px 13px;\n    border: 1px solid color-mix(in srgb, var(--red) 35%, var(--border));\n    border-radius: var(--radius-sm);\n    background: var(--red-soft);\n    color: var(--red);\n    font-size: 12px;\n}\n\n.callout {\n    margin-bottom: 18px;\n    padding: 13px 15px;\n    border: 1px solid var(--border);\n    border-left: 3px solid var(--amber);\n    border-radius: var(--radius-sm);\n    background: var(--amber-soft);\n    color: var(--text-soft);\n    font-size: 12px;\n}\n\n.callout strong {\n    color: var(--text);\n}\n\n.modal {\n    position: fixed;\n    inset: 0;\n    z-index: 50;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    padding: 24px;\n}\n\n.modal-backdrop {\n    position: absolute;\n    inset: 0;\n    background: rgba(7, 10, 16, 0.72);\n    backdrop-filter: blur(4px);\n}\n\n.modal-panel {\n    position: relative;\n    display: flex;\n    flex-direction: column;\n    width: min(100%, 980px);\n    max-height: calc(100vh - 48px);\n    overflow: hidden;\n    border: 1px solid var(--border-strong);\n    border-radius: 18px;\n    background: var(--panel-strong);\n    box-shadow: var(--shadow);\n}\n\n.modal-head {\n    display: flex;\n    align-items: flex-start;\n    justify-content: space-between;\n    gap: 16px;\n    padding: 16px 18px;\n    border-bottom: 1px solid var(--border);\n}\n\n.modal-heading h2 {\n    margin: 0;\n    overflow: hidden;\n    font-size: 17px;\n    text-overflow: ellipsis;\n    white-space: nowrap;\n}\n\n.modal-content {\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    min-height: 220px;\n    padding: 16px;\n    overflow: auto;\n    background: #05070a;\n}\n\n.modal-content video,\n.modal-content audio {\n    width: 100%;\n    max-height: calc(100vh - 260px);\n    border-radius: 10px;\n}\n\n.modal-content audio {\n    max-width: 620px;\n}\n\n.modal-content img {\n    max-width: 100%;\n    max-height: calc(100vh - 250px);\n    border-radius: 10px;\n    object-fit: contain;\n}\n\n.modal-content pre {\n    width: 100%;\n    max-height: calc(100vh - 260px);\n    margin: 0;\n    padding: 16px;\n    overflow: auto;\n    border-radius: 10px;\n    background: #0d1117;\n    color: #d6deeb;\n    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;\n    font-size: 12px;\n    line-height: 1.6;\n    white-space: pre-wrap;\n}\n\n.modal-foot {\n    display: flex;\n    align-items: center;\n    justify-content: space-between;\n    gap: 12px;\n    padding: 10px 16px;\n    border-top: 1px solid var(--border);\n}\n\n.toast {\n    position: fixed;\n    right: 24px;\n    bottom: 24px;\n    z-index: 60;\n    max-width: 360px;\n    padding: 10px 14px;\n    border: 1px solid var(--border-strong);\n    border-radius: 10px;\n    background: var(--panel-strong);\n    box-shadow: var(--shadow);\n    font-size: 12px;\n}\n\n.toast.error {\n    border-color: color-mix(in srgb, var(--red) 45%, var(--border));\n    color: var(--red);\n}\n\n.profile-panel {\n    margin-bottom: 20px;\n}\n\n.profile-synopsis {\n    margin: 0 0 14px;\n    padding: 12px 14px;\n    border-left: 3px solid var(--accent);\n    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;\n    background: var(--accent-soft);\n    color: var(--text-soft);\n    font-size: 13px;\n    line-height: 1.65;\n}\n\n.entity-section {\n    margin-bottom: 8px;\n}\n\n.entity-grid {\n    display: grid;\n    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));\n    gap: 12px;\n}\n\n.entity-card {\n    padding: 14px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius);\n    background: var(--panel);\n}\n\n.entity-head {\n    display: flex;\n    align-items: center;\n    justify-content: space-between;\n    gap: 10px;\n}\n\n.entity-name {\n    margin: 0;\n    font-size: 15px;\n    font-weight: 700;\n}\n\n.entity-desc {\n    margin: 8px 0 0;\n    color: var(--text-soft);\n    font-size: 12px;\n    line-height: 1.6;\n}\n\n.entity-ref {\n    margin: 6px 0 0;\n    color: var(--text-muted);\n    font-size: 11px;\n}\n\n.chip-row {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 6px;\n}\n\n.chip {\n    display: inline-flex;\n    align-items: center;\n    padding: 3px 8px;\n    border: 1px solid var(--border);\n    border-radius: 99px;\n    background: var(--bg-soft);\n    color: var(--text-soft);\n    font-size: 11px;\n    white-space: nowrap;\n}\n\n.chip-small {\n    padding: 2px 7px;\n    font-size: 10px;\n}\n\n.chip-character {\n    border-color: color-mix(in srgb, var(--green) 30%, var(--border));\n    background: var(--green-soft);\n    color: var(--green);\n}\n\n.chip-scene {\n    border-color: color-mix(in srgb, var(--violet) 30%, var(--border));\n    background: var(--violet-soft);\n    color: var(--violet);\n}\n\n.chip-final {\n    border-color: color-mix(in srgb, var(--green) 30%, var(--border));\n    background: var(--green-soft);\n    color: var(--green);\n}\n\n.chip-pending {\n    border-color: color-mix(in srgb, var(--amber) 30%, var(--border));\n    background: var(--amber-soft);\n    color: var(--amber);\n}\n\n.storyboard-section {\n    margin-top: 8px;\n}\n\n.storyboard-list {\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n}\n\n.storyboard-row {\n    display: grid;\n    grid-template-columns: 96px minmax(220px, 1.8fr) 120px minmax(140px, 1fr) 110px;\n    gap: 12px;\n    align-items: center;\n    padding: 12px 14px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius-sm);\n    background: var(--panel);\n    font-size: 12px;\n}\n\n.storyboard-header {\n    padding-top: 0;\n    padding-bottom: 4px;\n    border-color: transparent;\n    background: transparent;\n    color: var(--text-muted);\n    font-size: 11px;\n    font-weight: 600;\n}\n\n.storyboard-id-cell {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 6px;\n}\n\n.storyboard-id {\n    font-size: 16px;\n    font-weight: 800;\n    letter-spacing: -0.02em;\n}\n\n.storyboard-content {\n    min-width: 0;\n}\n\n.storyboard-title {\n    overflow: hidden;\n    font-weight: 700;\n    text-overflow: ellipsis;\n    white-space: nowrap;\n}\n\n.storyboard-summary {\n    display: -webkit-box;\n    overflow: hidden;\n    margin: 3px 0 0;\n    color: var(--text-muted);\n    font-size: 11px;\n    -webkit-box-orient: vertical;\n    -webkit-line-clamp: 2;\n}\n\n.storyboard-artifacts {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 6px;\n}\n\n.shot-grid {\n    grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));\n}\n\n.shot-card-rich {\n    gap: 12px;\n}\n\n.shot-title-text {\n    overflow: hidden;\n    font-size: 15px;\n    font-weight: 700;\n    text-overflow: ellipsis;\n    white-space: nowrap;\n}\n\n.shot-summary {\n    margin: 0;\n    color: var(--text-soft);\n    font-size: 13px;\n    line-height: 1.7;\n}\n\n.shot-line {\n    display: flex;\n    align-items: flex-start;\n    gap: 10px;\n}\n\n.shot-line-label {\n    flex: none;\n    padding-top: 3px;\n    color: var(--text-muted);\n    font-size: 11px;\n    font-weight: 600;\n}\n\n.shot-refs-body {\n    display: flex;\n    flex: 1;\n    flex-direction: column;\n    gap: 6px;\n    min-width: 0;\n}\n\n.shot-ref-list {\n    display: flex;\n    flex-wrap: wrap;\n    gap: 8px;\n}\n\n.shot-ref {\n    display: inline-flex;\n    align-items: center;\n    gap: 8px;\n    max-width: 100%;\n    padding: 5px 8px 5px 5px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius-sm);\n    background: var(--bg-soft);\n    color: inherit;\n    font: inherit;\n    text-align: left;\n    cursor: pointer;\n}\n\n.shot-ref:hover {\n    border-color: var(--border-strong);\n}\n\n.shot-ref-thumb {\n    display: flex;\n    flex: none;\n    align-items: center;\n    justify-content: center;\n    width: 40px;\n    height: 40px;\n    overflow: hidden;\n    border: 1px solid var(--border);\n    border-radius: 8px;\n    background: var(--bg);\n}\n\n.shot-ref-thumb img {\n    display: block;\n    width: 100%;\n    height: 100%;\n    object-fit: cover;\n}\n\n.shot-ref-glyph {\n    color: var(--text-muted);\n    font-size: 10px;\n}\n\n.shot-ref-copy {\n    display: flex;\n    flex-direction: column;\n    gap: 2px;\n    min-width: 0;\n}\n\n.shot-ref-name {\n    color: var(--text);\n    font-size: 12px;\n    font-weight: 600;\n    white-space: nowrap;\n}\n\n.shot-ref-wire {\n    color: var(--text-muted);\n    font-size: 10px;\n    white-space: nowrap;\n}\n\n.shot-ref-character .shot-ref-name {\n    color: var(--green);\n}\n\n.shot-ref-scene .shot-ref-name {\n    color: var(--violet);\n}\n\n.shot-ref-unwired {\n    border-color: color-mix(in srgb, var(--amber) 45%, var(--border));\n    border-style: dashed;\n}\n\n.shot-ref-unwired .shot-ref-wire {\n    color: var(--amber);\n}\n\n.shot-ref-missing {\n    border-color: color-mix(in srgb, var(--red) 35%, var(--border));\n    opacity: 0.85;\n}\n\n.shot-ref-missing .shot-ref-wire {\n    color: var(--red);\n}\n\n.shot-ref-warning {\n    margin: 0;\n    color: var(--amber);\n    font-size: 11px;\n    line-height: 1.6;\n}\n\n.prompt-ref {\n    display: inline;\n    padding: 0 2px;\n    border: none;\n    border-bottom: 1px dashed currentColor;\n    background: transparent;\n    color: var(--green);\n    font: inherit;\n    cursor: pointer;\n}\n\n.prompt-ref-scene {\n    color: var(--violet);\n}\n\n.prompt-ref-missing {\n    border-bottom-style: dotted;\n    color: var(--red);\n}\n\n.prompt-ref:hover {\n    background: var(--bg-soft);\n}\n\n.shot-meta-grid {\n    display: flex;\n    flex-wrap: wrap;\n    gap: 6px 12px;\n    padding: 10px 12px;\n    border-radius: var(--radius-sm);\n    background: var(--bg-soft);\n    color: var(--text-muted);\n    font-size: 11px;\n}\n\n.shot-prompt,\n.shot-runs {\n    border-top: 1px dashed var(--border);\n    padding-top: 10px;\n}\n\n.shot-prompt summary,\n.shot-runs summary {\n    color: var(--text-soft);\n    cursor: pointer;\n    font-size: 12px;\n    font-weight: 600;\n}\n\n.shot-prompt p {\n    margin: 8px 0 0;\n    color: var(--text-soft);\n    font-size: 12px;\n    line-height: 1.7;\n    white-space: pre-wrap;\n}\n\n.shot-notes {\n    margin: 0;\n    color: var(--text-muted);\n    font-size: 12px;\n}\n\n.shot-section-head {\n    display: flex;\n    align-items: center;\n    justify-content: space-between;\n    gap: 10px;\n    margin-top: 4px;\n}\n\n.shot-section-head h4 {\n    margin: 0;\n    font-size: 13px;\n}\n\n.artifact-list {\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n}\n\n.artifact-row {\n    display: grid;\n    grid-template-columns: 84px minmax(0, 1fr) auto;\n    gap: 10px;\n    align-items: center;\n    padding: 8px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius-sm);\n    background: var(--bg-elevated);\n}\n\n.artifact-thumb {\n    position: relative;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    width: 84px;\n    height: 56px;\n    overflow: hidden;\n    border-radius: 7px;\n    background: var(--bg-soft);\n}\n\n.artifact-thumb video,\n.artifact-thumb img {\n    width: 100%;\n    height: 100%;\n    object-fit: cover;\n}\n\n.artifact-thumb-icon {\n    font-size: 22px;\n    opacity: 0.7;\n}\n\n.artifact-thumb-note {\n    position: absolute;\n    inset: auto 3px 3px;\n    padding: 1px 4px;\n    border-radius: 4px;\n    background: rgba(0, 0, 0, 0.65);\n    color: #fff;\n    font-size: 9px;\n    text-align: center;\n}\n\n.artifact-info {\n    min-width: 0;\n}\n\n.artifact-name {\n    overflow: hidden;\n    font-size: 12px;\n    font-weight: 700;\n    text-overflow: ellipsis;\n    white-space: nowrap;\n}\n\n.artifact-meta {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 5px 8px;\n    margin-top: 4px;\n    color: var(--text-muted);\n    font-size: 10px;\n}\n\n.artifact-row-actions {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 4px;\n}\n\n@media (max-width: 980px) {\n    .app-shell {\n        grid-template-columns: 1fr;\n    }\n\n    .sidebar {\n        position: static;\n        display: block;\n        height: auto;\n        padding: 16px;\n        border-right: 0;\n        border-bottom: 1px solid var(--border);\n    }\n\n    .brand-sub {\n        display: none;\n    }\n\n    .nav {\n        flex-direction: row;\n        flex-wrap: wrap;\n        margin-top: 12px;\n    }\n\n    .nav-item {\n        width: auto;\n        padding: 7px 10px;\n    }\n\n    .nav-hint {\n        display: none;\n    }\n\n    .topbar {\n        padding: 12px 18px;\n    }\n\n    .content {\n        padding: 18px;\n    }\n\n    .stats-grid {\n        grid-template-columns: repeat(2, minmax(0, 1fr));\n    }\n\n    .layout-two {\n        grid-template-columns: 1fr;\n    }\n\n    .shot-grid {\n        grid-template-columns: 1fr;\n    }\n\n    .storyboard-row {\n        grid-template-columns: 1fr;\n        gap: 6px;\n    }\n\n    .storyboard-header {\n        display: none;\n    }\n\n    .artifact-row {\n        grid-template-columns: 72px minmax(0, 1fr);\n    }\n\n    .artifact-row-actions {\n        grid-column: 1 / -1;\n        justify-content: flex-end;\n    }\n\n    .table-row {\n        grid-template-columns: minmax(0, 1fr) 70px 70px;\n    }\n\n    .table-row.header span:nth-child(n + 3) {\n        display: none;\n    }\n}\n\n@media (max-width: 560px) {\n    .stats-grid {\n        grid-template-columns: 1fr;\n    }\n\n    .grid {\n        grid-template-columns: 1fr;\n    }\n\n    .entity-grid {\n        grid-template-columns: 1fr;\n    }\n\n    .artifact-row {\n        grid-template-columns: 64px minmax(0, 1fr);\n    }\n\n    .artifact-thumb {\n        width: 64px;\n        height: 46px;\n    }\n\n    .view-head {\n        align-items: flex-start;\n        flex-direction: column;\n    }\n\n    .modal {\n        padding: 8px;\n    }\n\n    .modal-panel {\n        max-height: calc(100vh - 16px);\n        border-radius: 12px;\n    }\n\n    .event {\n        grid-template-columns: 38px 100px minmax(0, 1fr);\n    }\n}\n\n/* ---- story / episode ---- */\n.episode-card {\n    min-height: 100%;\n}\n\n.script-text {\n    margin: 0 0 18px;\n    padding: 16px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius-sm);\n    background: var(--panel);\n    color: var(--text);\n    font-family: "SFMono-Regular", ui-monospace, Menlo, Consolas, monospace;\n    font-size: 12.5px;\n    line-height: 1.7;\n    white-space: pre-wrap;\n    word-break: break-word;\n    max-height: 460px;\n    overflow: auto;\n}\n\n.form-block {\n    margin-top: 14px;\n    padding-top: 12px;\n    border-top: 1px solid var(--border);\n}\n\n.form-title {\n    margin: 0 0 8px;\n    font-size: 13px;\n    color: var(--text-soft);\n}\n\n.asset-tile,\n.asset-compact {\n    display: flex;\n    flex-direction: column;\n    gap: 6px;\n    min-width: 0;\n}\n\n.asset-tile img,\n.asset-compact img {\n    width: 100%;\n    max-height: 220px;\n    object-fit: contain;\n    border-radius: var(--radius-sm);\n    background: var(--bg-soft);\n    border: 1px solid var(--border);\n}\n\n.asset-compact img {\n    max-height: 96px;\n}\n\n.asset-tile audio,\n.asset-compact audio {\n    width: 100%;\n}\n\n.asset-name {\n    font-size: 10.5px;\n    color: var(--text-muted);\n    overflow: hidden;\n    text-overflow: ellipsis;\n    white-space: nowrap;\n}\n\n.asset-thumb {\n    display: block;\n    width: 100%;\n    padding: 0;\n    border: 0;\n    background: none;\n    border-radius: var(--radius-sm);\n    cursor: zoom-in;\n}\n\n.asset-thumb:focus-visible {\n    outline: 2px solid var(--accent);\n    outline-offset: 2px;\n}\n\n.asset-thumb:hover img {\n    filter: brightness(1.08);\n}\n\n.asset-missing {\n    display: inline-flex;\n    align-items: center;\n    min-height: 64px;\n    padding: 10px 12px;\n    border: 1px dashed var(--border-strong);\n    border-radius: var(--radius-sm);\n    color: var(--text-muted);\n    font-size: 12px;\n    background: var(--bg-soft);\n}\n\n.asset-row {\n    display: grid;\n    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));\n    gap: 8px;\n    margin-top: 8px;\n}\n\n.mini-list {\n    margin: 8px 0 0;\n    padding-left: 18px;\n    color: var(--text-soft);\n    font-size: 12.5px;\n    line-height: 1.65;\n}\n\n.text-warn {\n    color: var(--amber);\n}\n\n.callout.warn {\n    border-color: var(--amber);\n    background: var(--amber-soft);\n}\n\n.task-list {\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n    margin-bottom: 18px;\n}\n\n.task-row {\n    display: flex;\n    align-items: center;\n    gap: 12px;\n    padding: 10px 12px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius-sm);\n    background: var(--panel);\n    font-size: 12.5px;\n}\n\n.task-row > span:nth-child(2) {\n    flex: 1;\n    min-width: 0;\n    overflow: hidden;\n    text-overflow: ellipsis;\n    white-space: nowrap;\n    color: var(--text-soft);\n}\n\n.quote {\n    margin: 10px 0 0;\n    padding: 8px 12px;\n    border-left: 3px solid var(--violet);\n    background: var(--violet-soft);\n    color: var(--text-soft);\n    font-size: 12.5px;\n    line-height: 1.6;\n}\n\n.badge.stage-script,\n.badge.stage-breakdown {\n    background: var(--amber-soft);\n    color: var(--amber);\n}\n\n.badge.stage-assets,\n.badge.stage-storyboard,\n.badge.stage-workflow {\n    background: var(--violet-soft);\n    color: var(--violet);\n}\n\n.badge.stage-ready,\n.badge.stage-wrapped {\n    background: var(--green-soft);\n    color: var(--green);\n}\n\n/* \u5267\u60C5\u56FE\u8C31 */\n.map-section {\n    margin-top: 18px;\n    padding: 18px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius);\n    background: var(--panel);\n}\n\n.map-section .section-head {\n    align-items: flex-start;\n}\n\n.map-subtitle {\n    margin: 6px 0 0;\n    color: var(--text-muted);\n    font-size: 12px;\n}\n\n.map-origin {\n    margin: 8px 0 0;\n    color: var(--text-muted);\n    font-size: 11.5px;\n}\n\n.map-tabs {\n    display: inline-flex;\n    gap: 4px;\n    padding: 3px;\n    border: 1px solid var(--border);\n    border-radius: 999px;\n    background: var(--bg-soft);\n}\n\n.map-tab {\n    padding: 5px 12px;\n    border: 0;\n    border-radius: 999px;\n    background: transparent;\n    color: var(--text-soft);\n    font-size: 12px;\n    cursor: pointer;\n}\n\n.map-tab.is-active {\n    background: var(--panel-strong);\n    color: var(--text);\n    box-shadow: 0 1px 4px rgba(20, 28, 44, 0.12);\n}\n\n.map-warning {\n    margin-top: 12px;\n}\n\n.map-body {\n    margin-top: 14px;\n}\n\n.map-toolbar {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    justify-content: space-between;\n    gap: 10px;\n    margin-bottom: 12px;\n}\n\n.map-toolbar-group {\n    display: flex;\n    flex-wrap: wrap;\n    gap: 6px;\n}\n\n.map-toggle.is-active {\n    border-color: var(--accent);\n    background: var(--accent-soft);\n    color: var(--accent);\n}\n\n.map-filter {\n    display: inline-flex;\n    align-items: center;\n    gap: 6px;\n    padding: 4px 10px;\n    border-radius: 999px;\n    background: var(--accent-soft);\n    color: var(--accent);\n    font-size: 12px;\n}\n\n.map-filter-clear {\n    padding: 0;\n    border: 0;\n    background: transparent;\n    color: inherit;\n    font-size: 14px;\n    line-height: 1;\n    cursor: pointer;\n}\n\n.map-graph-wrap {\n    overflow-x: auto;\n    border: 1px solid var(--border);\n    border-radius: var(--radius-sm);\n    background: var(--bg-soft);\n}\n\n.map-graph {\n    display: block;\n    width: 100%;\n    min-width: 620px;\n    height: auto;\n}\n\n.map-node {\n    cursor: pointer;\n    outline: none;\n}\n\n.map-node-bg {\n    fill: var(--panel);\n    stroke: var(--border-strong);\n    stroke-width: 1;\n}\n\n.map-node.status-warn .map-node-bg {\n    stroke: var(--amber);\n    stroke-width: 1.5;\n}\n\n.map-node.is-focus .map-node-bg {\n    fill: var(--accent-soft);\n    stroke: var(--accent);\n    stroke-width: 2;\n}\n\n.map-node.is-dim {\n    opacity: 0.28;\n}\n\n.map-node:focus-visible .map-node-bg {\n    stroke: var(--accent);\n    stroke-width: 2;\n}\n\n.map-node-avatar {\n    fill: var(--accent-soft);\n    stroke: var(--accent);\n    stroke-width: 1;\n}\n\n.map-node-initial {\n    fill: var(--accent);\n    font-size: 12px;\n    font-weight: 700;\n}\n\n.map-node-name {\n    fill: var(--text);\n    font-size: 12px;\n    font-weight: 600;\n}\n\n.map-node-sub {\n    fill: var(--text-muted);\n    font-size: 10px;\n}\n\n.map-edge {\n    fill: none;\n    stroke: var(--border-strong);\n    stroke-linecap: round;\n}\n\n.map-edge.is-dim {\n    opacity: 0.08 !important;\n}\n\n.map-cooccur {\n    fill: none;\n    stroke: var(--text-muted);\n    stroke-dasharray: 3 4;\n    stroke-width: 1;\n    opacity: 0.4;\n}\n\n.map-relation {\n    fill: none;\n    stroke: var(--accent);\n    stroke-dasharray: 5 4;\n    stroke-width: 1.4;\n    opacity: 0.75;\n}\n\n.map-relation-label {\n    fill: var(--accent);\n    font-size: 9px;\n}\n\n.map-legend {\n    display: flex;\n    flex-wrap: wrap;\n    gap: 14px;\n    margin-top: 8px;\n    color: var(--text-muted);\n    font-size: 11px;\n}\n\n.map-detail {\n    margin-top: 12px;\n    padding-top: 12px;\n    border-top: 1px solid var(--border);\n}\n\n.map-detail-head {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 8px;\n    margin-bottom: 8px;\n}\n\n.map-detail-head strong {\n    margin-right: auto;\n}\n\n.map-detail-section {\n    margin-top: 10px;\n}\n\n.map-detail-label {\n    margin: 0 0 6px;\n    color: var(--text-soft);\n    font-size: 12px;\n    font-weight: 600;\n}\n\n.map-row {\n    display: flex;\n    gap: 10px;\n    padding: 3px 0;\n    font-size: 12px;\n}\n\n.map-row-label {\n    flex: 0 0 84px;\n    color: var(--text-muted);\n}\n\n.map-row-value {\n    min-width: 0;\n    color: var(--text-soft);\n    overflow-wrap: anywhere;\n}\n\n.map-assets {\n    display: flex;\n    flex-wrap: wrap;\n    gap: 8px;\n    margin: 6px 0 2px;\n}\n\n.map-asset {\n    display: inline-flex;\n    align-items: center;\n}\n\n.map-asset-thumb {\n    display: inline-flex;\n    align-items: center;\n    gap: 6px;\n    padding: 3px 7px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius-sm);\n    background: var(--bg-soft);\n    color: var(--text-soft);\n    font-size: 10.5px;\n    cursor: zoom-in;\n}\n\n.map-asset-thumb img {\n    width: 34px;\n    height: 34px;\n    object-fit: cover;\n    border-radius: 5px;\n}\n\n.map-asset-missing {\n    display: inline-flex;\n    align-items: center;\n    padding: 4px 8px;\n    border: 1px dashed var(--border-strong);\n    border-radius: var(--radius-sm);\n    color: var(--amber);\n    font-size: 10.5px;\n}\n\n.map-slots {\n    display: flex;\n    flex-direction: column;\n    gap: 5px;\n}\n\n.map-slot {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 8px;\n    padding: 6px 8px;\n    border: 1px solid var(--border);\n    border-radius: var(--radius-sm);\n    background: var(--bg-soft);\n    font-size: 11.5px;\n}\n\n.map-gap {\n    display: grid;\n    grid-template-columns: 140px 1fr;\n    gap: 4px 10px;\n    padding: 6px 8px;\n    border-left: 3px solid var(--amber);\n    background: var(--amber-soft);\n    font-size: 11.5px;\n}\n\n.map-gap.is-blocker {\n    border-left-color: var(--red);\n    background: var(--red-soft);\n}\n\n.map-gap .muted {\n    grid-column: 2;\n}\n\n.timeline-overview {\n    display: flex;\n    gap: 2px;\n    height: 22px;\n    margin-bottom: 12px;\n    overflow: hidden;\n    border-radius: 7px;\n    background: var(--bg-soft);\n}\n\n.timeline-seg {\n    min-width: 3px;\n    padding: 0;\n    border: 0;\n    background: var(--scene-other);\n    cursor: pointer;\n}\n\n.timeline-seg.tone-day {\n    background: var(--scene-day);\n}\n\n.timeline-seg.tone-night {\n    background: var(--scene-night);\n}\n\n.timeline-seg.tone-dusk {\n    background: var(--scene-dusk);\n}\n\n.timeline-seg.tone-dawn {\n    background: var(--scene-dawn);\n}\n\n.timeline-seg.tone-other {\n    background: var(--scene-other);\n}\n\n.timeline-seg.is-major {\n    box-shadow: inset 0 3px 0 var(--accent);\n}\n\n.timeline-list {\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n}\n\n.timeline-event {\n    display: grid;\n    grid-template-columns: 112px minmax(0, 1fr);\n    gap: 12px;\n    padding: 10px 12px;\n    border: 1px solid var(--border);\n    border-left: 3px solid transparent;\n    border-radius: var(--radius-sm);\n    background: var(--bg-soft);\n}\n\n.timeline-event.is-major {\n    border-left-color: var(--accent);\n}\n\n.timeline-event.is-blocked {\n    border-left-color: var(--red);\n    background: var(--red-soft);\n}\n\n.timeline-time {\n    display: flex;\n    flex-direction: column;\n    gap: 3px;\n    font-size: 11px;\n}\n\n.timeline-timecode {\n    color: var(--text);\n    font-size: 12px;\n}\n\n.timeline-story-time {\n    display: inline-block;\n    padding: 2px 6px;\n    border-radius: 999px;\n    background: var(--violet-soft);\n    color: var(--violet);\n    font-size: 10px;\n}\n\n.timeline-main {\n    min-width: 0;\n}\n\n.timeline-title-row {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 6px;\n}\n\n.timeline-title {\n    margin: 0;\n    font-size: 13px;\n}\n\n.timeline-summary {\n    margin: 6px 0;\n    color: var(--text-soft);\n    font-size: 12px;\n}\n\n.timeline-actions {\n    display: flex;\n    gap: 6px;\n    margin-top: 6px;\n}\n\n.timeline-details {\n    margin-top: 8px;\n    border-top: 1px dashed var(--border);\n    padding-top: 6px;\n}\n\n.timeline-details summary {\n    color: var(--text-muted);\n    font-size: 11.5px;\n    cursor: pointer;\n}\n\n.map-event-detail {\n    margin-top: 8px;\n}\n\n.map-chip-button {\n    border: 0;\n    cursor: pointer;\n    font: inherit;\n}\n\n.badge.importance-major,\n.badge.map-ready,\n.badge.map-rendered {\n    background: var(--green-soft);\n    color: var(--green);\n}\n\n.badge.importance-minor,\n.badge.map-pending,\n.badge.map-unknown,\n.badge.map-workflow {\n    background: var(--bg-soft);\n    color: var(--text-muted);\n}\n\n.badge.map-blocked,\n.badge.map-failed {\n    background: var(--red-soft);\n    color: var(--red);\n}\n\n.badge.map-beat {\n    background: var(--violet-soft);\n    color: var(--violet);\n}\n\n.badge.map-slot-ready {\n    background: var(--green-soft);\n    color: var(--green);\n}\n\n.badge.map-slot-blocker {\n    background: var(--red-soft);\n    color: var(--red);\n}\n\n.badge.map-slot-optional {\n    background: var(--bg-soft);\n    color: var(--text-muted);\n}\n\n.badge.map-fit-ready {\n    background: var(--green-soft);\n    color: var(--green);\n}\n\n.badge.map-fit-needs_assets {\n    background: var(--amber-soft);\n    color: var(--amber);\n}\n\n.badge.map-fit-unusable {\n    background: var(--red-soft);\n    color: var(--red);\n}\n\n@media (max-width: 720px) {\n    .map-section {\n        padding: 14px;\n    }\n\n    .timeline-event {\n        grid-template-columns: 1fr;\n        gap: 6px;\n    }\n\n    .timeline-time {\n        flex-direction: row;\n        align-items: center;\n        flex-wrap: wrap;\n    }\n\n    .map-gap {\n        grid-template-columns: 1fr;\n    }\n\n    .map-gap .muted {\n        grid-column: 1;\n    }\n}\n\n.map-tab {\n    white-space: nowrap;\n}\n\n@media (max-width: 720px) {\n    .map-section .section-head {\n        flex-direction: column;\n        align-items: stretch;\n    }\n\n    .map-tabs {\n        align-self: flex-start;\n        margin-top: 10px;\n    }\n}\n';
   }
 });
 
@@ -21102,8 +21054,14 @@ function openBrowser(url) {
 async function runWeb(ctx2, args) {
   const flags = parseArgs4(args);
   const { root, config: project } = requireProject(ctx2);
+  if (!storyEnabled(root)) {
+    throw new DaoyanCliError({
+      code: "story_not_found",
+      message: "\u65E7\u9879\u76EE\u7ED3\u6784\u4E0D\u518D\u652F\u6301\uFF08\u7F3A\u5C11 story/series.json\uFF09",
+      hint: "\u8BF7\u5728\u65B0\u76EE\u5F55\u91CD\u65B0\u6267\u884C daoyan init --mode=local|remote\u3002"
+    });
+  }
   const machine = loadMachineIfExists(root);
-  const shots = loadShotsIfExists(root);
   const { COMMANDS: COMMANDS2 } = await Promise.resolve().then(() => (init_registry(), registry_exports));
   const host = flags.host ?? DEFAULT_HOST2;
   if (!isLoopbackHost(host)) {
@@ -21115,7 +21073,6 @@ async function runWeb(ctx2, args) {
       root,
       project,
       machine,
-      shots,
       commands: COMMANDS2,
       assets: { index_html: ui_default, app_js: app_default, style_css: style_default },
       host,
@@ -21141,7 +21098,7 @@ async function runWeb(ctx2, args) {
     say(`daoyan web \xB7 ${project.name} \xB7 ${machine?.engine.mode ?? "\u672A\u7ED1\u5B9A\u672C\u673A"}`);
     for (const url of handle.urls.local) say(`  Local:   ${url}`);
     for (const url of handle.urls.network) say(`  Network: ${url}`);
-    say("  \u5206\u955C\u9875\u53EF\u76F4\u63A5\u5B9A\u7A3F\u955C\u5934\u7A3F\u4EF6\uFF1B\u4E0D\u542F\u52A8\u5F15\u64CE\u3001\u4E0D\u5360\u673A\u5668\u9501\u3001\u4E0D\u89E6\u53D1\u4EFB\u4F55\u751F\u6210");
+    say("  \u53EF\u786E\u8BA4\u5267\u672C\u3001\u751F\u6210\u955C\u5934\u4E0E\u5B9A\u7A3F\uFF1B\u4E0D\u542F\u52A8\u5F15\u64CE\u3001\u4E0D\u5360\u673A\u5668\u9501");
     say("  Ctrl+C \u505C\u6B62");
   }
   if (flags.open) openBrowser(handle.url);
@@ -21169,6 +21126,7 @@ var init_web = __esm({
     init_log();
     init_args();
     init_config();
+    init_paths();
     init_signals();
     init_server();
     init_addresses();
@@ -21183,8 +21141,8 @@ var init_web = __esm({
 });
 
 // src/commands/story.mts
-import { existsSync as existsSync40, readFileSync as readFileSync26 } from "fs";
-import { join as join37 } from "path";
+import { existsSync as existsSync39, readFileSync as readFileSync26, renameSync as renameSync5 } from "fs";
+import { basename as basename12, join as join37 } from "path";
 function readTextInput(file, label) {
   if (file === void 0 || file === "") usageError(`\u9700\u8981 ${label}`);
   try {
@@ -21229,24 +21187,10 @@ function throwIssues(issues, label) {
     details: { issues }
   });
 }
-async function storyInit(ctx2, args) {
-  const parsed = parseFlags(args, { "--json": "boolean" });
-  if (parsed.positionals.length > 0) usageError(`story init \u4E0D\u63A5\u53D7\u53C2\u6570\uFF1A${parsed.positionals.join(" ")}`);
-  const { root, config } = requireProject(ctx2);
-  const result = initStory(root, config.name);
-  output(ctx2, { ...result, episodes: listEpisodeMetas(root).map((e) => e.id) }, [
-    `story \u5DF2\u5C31\u7EEA\uFF1A${result.created.length} \u4E2A\u65B0\u6587\u4EF6 / \u76EE\u5F55`,
-    `\u5267\u96C6\uFF1A${listEpisodeMetas(root).map((e) => `${e.id} ${e.title}`).join("\uFF0C")}`,
-    "\u4E0B\u4E00\u6B65\uFF1Astory script sync --episode ep01 --file <script.md>"
-  ]);
-  return 0;
-}
 async function storySeries(ctx2, args) {
   const [action, ...rest] = args;
   const { root, config } = requireProject(ctx2);
-  if (!storyEnabled(root)) {
-    throw new DaoyanCliError({ code: "story_not_found", message: "story \u6A21\u5F0F\u672A\u542F\u7528" });
-  }
+  requireStory(root);
   if (action === "show") {
     const series = readSeries(root);
     output(ctx2, { series }, [`\u7CFB\u5217\uFF1A${series?.title ?? ""}`, series?.synopsis ?? ""]);
@@ -21279,10 +21223,16 @@ async function storySeries(ctx2, args) {
 async function storyEpisode(ctx2, args) {
   const [action, ...rest] = args;
   const { root } = requireProject(ctx2);
-  if (!storyEnabled(root)) {
-    throw new DaoyanCliError({ code: "story_not_found", message: "story \u6A21\u5F0F\u672A\u542F\u7528" });
-  }
+  requireStory(root);
+  const production = readProduction(root);
   if (action === "add") {
+    if (production.mode === "single") {
+      throw new DaoyanCliError({
+        code: "mode_conflict",
+        message: "\u5355\u89C6\u9891\u9879\u76EE\u4E0D\u80FD\u65B0\u589E\u5267\u96C6",
+        hint: "\u5148\u5728 Web \u9879\u76EE\u7BA1\u7406\u5207\u6362\u4E3A\u591A\u96C6\u6A21\u5F0F\u3002"
+      });
+    }
     const parsed = parseFlags(rest, {
       "--id": "string",
       "--number": "string",
@@ -21314,6 +21264,36 @@ async function storyEpisode(ctx2, args) {
     );
     return 0;
   }
+  if (action === "remove") {
+    const id = rest.find((x) => !x.startsWith("-"));
+    if (id === void 0) usageError("usage: story episode remove <episode-id>");
+    const metas = listEpisodeMetas(root);
+    if (!metas.some((meta) => meta.id === id)) {
+      throw new DaoyanCliError({ code: "episode_not_found", message: `\u672A\u627E\u5230\u5267\u96C6 ${id}` });
+    }
+    if (metas.length <= 1) {
+      throw new DaoyanCliError({
+        code: "story_invalid",
+        message: "\u9879\u76EE\u81F3\u5C11\u4FDD\u7559\u4E00\u96C6\uFF0C\u4E0D\u80FD\u5220\u9664\u6700\u540E\u4E00\u96C6"
+      });
+    }
+    const active = listTasks(root).find((task) => !isTerminalStatus(task.status) && task.episode_id === id);
+    if (active !== void 0) {
+      throw new DaoyanCliError({
+        code: "story_conflict",
+        message: `\u5267\u96C6 ${id} \u4ECD\u6709\u8FDB\u884C\u4E2D\u7684\u4EFB\u52A1 ${active.task_id}`,
+        hint: "\u7B49\u4EFB\u52A1\u7ED3\u675F\u6216\u53D6\u6D88\u540E\u518D\u5220\u9664\u3002"
+      });
+    }
+    const trashDir = join37(root, EPISODES_DIR, "_trash");
+    ensureDir(trashDir);
+    const trashPath = join37(trashDir, `${id}-${Date.now()}`);
+    renameSync5(episodeDir(root, id), trashPath);
+    output(ctx2, { episode_id: id, trash_path: `${EPISODES_DIR}/_trash/${basename12(trashPath)}` }, [
+      `\u5DF2\u79FB\u9664\u5267\u96C6 ${id}\uFF08\u79FB\u5165 ${EPISODES_DIR}/_trash/\uFF09`
+    ]);
+    return 0;
+  }
   if (action === "show") {
     const id = rest.find((x) => !x.startsWith("-"));
     if (id === void 0) usageError("usage: story episode show <episode-id>");
@@ -21327,10 +21307,10 @@ async function storyEpisode(ctx2, args) {
       {
         episode: meta,
         files: {
-          script_md: existsSync40(join37(dir, "script.md")),
-          script_json: existsSync40(join37(dir, "script.json")),
-          breakdown: existsSync40(join37(dir, "breakdown.json")),
-          shots: existsSync40(join37(dir, "shots.json"))
+          script_md: existsSync39(join37(dir, "script.md")),
+          script_json: existsSync39(join37(dir, "script.json")),
+          breakdown: existsSync39(join37(dir, "breakdown.json")),
+          shots: existsSync39(join37(dir, "shots.json"))
         }
       },
       [`${meta.id}  \u7B2C ${meta.number} \u96C6  ${meta.title}`, meta.summary ?? ""]
@@ -21354,14 +21334,12 @@ async function storyEpisode(ctx2, args) {
     output(ctx2, { episode: meta }, [`\u5267\u96C6\u5DF2\u66F4\u65B0\uFF1A${meta.id} \u7B2C ${meta.number} \u96C6 ${meta.title}`]);
     return 0;
   }
-  usageError("\u7528\u6CD5\uFF1Adaoyan story episode add|list|show|set");
+  usageError("\u7528\u6CD5\uFF1Adaoyan story episode add|list|show|set|remove");
 }
 async function storyScript(ctx2, args) {
   const [action, ...rest] = args;
   const { root } = requireProject(ctx2);
-  if (!storyEnabled(root)) {
-    throw new DaoyanCliError({ code: "story_not_found", message: "story \u6A21\u5F0F\u672A\u542F\u7528" });
-  }
+  requireStory(root);
   if (action === "sync") {
     const parsed = parseFlags(rest, {
       "--episode": "string",
@@ -21373,9 +21351,6 @@ async function storyScript(ctx2, args) {
     });
     if (parsed.positionals.length > 0) usageError(`\u672A\u77E5\u53C2\u6570 ${parsed.positionals.join(" ")}`);
     const context = resolveEpisodeContext(root, strFlag(parsed, "--episode"));
-    if (context.legacy || context.episode_id === null) {
-      throw new DaoyanCliError({ code: "story_not_found", message: "story \u6A21\u5F0F\u672A\u542F\u7528" });
-    }
     const source = strFlag(parsed, "--source") ?? "ai";
     if (source !== "ai" && source !== "user" && source !== "import") {
       usageError("--source \u5FC5\u987B\u662F ai|user|import");
@@ -21395,7 +21370,7 @@ async function storyScript(ctx2, args) {
       ...baseText !== void 0 ? { baseRevision: Number(baseText) } : {}
     });
     const stale = ["breakdown", "shots"].filter(
-      (name) => existsSync40(join37(context.dir, name === "breakdown" ? "breakdown.json" : "shots.json"))
+      (name) => existsSync39(join37(context.dir, name === "breakdown" ? "breakdown.json" : "shots.json"))
     );
     output(
       ctx2,
@@ -21421,9 +21396,6 @@ async function storyScript(ctx2, args) {
     const parsed = parseFlags(rest, { "--episode": "string", "--raw": "boolean" });
     if (parsed.positionals.length > 0) usageError(`\u672A\u77E5\u53C2\u6570 ${parsed.positionals.join(" ")}`);
     const context = resolveEpisodeContext(root, strFlag(parsed, "--episode"));
-    if (context.legacy || context.episode_id === null) {
-      throw new DaoyanCliError({ code: "story_not_found", message: "story \u6A21\u5F0F\u672A\u542F\u7528" });
-    }
     const meta = loadScriptMeta(root, context.episode_id);
     const content = loadScriptText(root, context.episode_id);
     if (boolFlag(parsed, "--raw")) {
@@ -21440,9 +21412,6 @@ async function storyScript(ctx2, args) {
     const parsed = parseFlags(rest, { "--episode": "string" });
     if (parsed.positionals.length > 0) usageError(`\u672A\u77E5\u53C2\u6570 ${parsed.positionals.join(" ")}`);
     const context = resolveEpisodeContext(root, strFlag(parsed, "--episode"));
-    if (context.legacy || context.episode_id === null) {
-      throw new DaoyanCliError({ code: "story_not_found", message: "story \u6A21\u5F0F\u672A\u542F\u7528" });
-    }
     const meta = approveScript(root, context.episode_id);
     output(ctx2, { episode_id: context.episode_id, meta }, [
       `\u5267\u672C ${context.episode_id} revision ${meta.revision} \u5DF2\u786E\u8BA4`
@@ -21454,9 +21423,7 @@ async function storyScript(ctx2, args) {
 async function storyBreakdown(ctx2, args) {
   const [action, ...rest] = args;
   const { root } = requireProject(ctx2);
-  if (!storyEnabled(root)) {
-    throw new DaoyanCliError({ code: "story_not_found", message: "story \u6A21\u5F0F\u672A\u542F\u7528" });
-  }
+  requireStory(root);
   if (action === "set") {
     const parsed = parseFlags(rest, {
       "--episode": "string",
@@ -21466,9 +21433,6 @@ async function storyBreakdown(ctx2, args) {
     });
     if (parsed.positionals.length > 0) usageError(`\u672A\u77E5\u53C2\u6570 ${parsed.positionals.join(" ")}`);
     const context = resolveEpisodeContext(root, strFlag(parsed, "--episode"));
-    if (context.legacy || context.episode_id === null) {
-      throw new DaoyanCliError({ code: "story_not_found", message: "story \u6A21\u5F0F\u672A\u542F\u7528" });
-    }
     const script = loadScriptMeta(root, context.episode_id);
     if (script.revision <= 0) {
       throw new DaoyanCliError({
@@ -21478,7 +21442,7 @@ async function storyBreakdown(ctx2, args) {
       });
     }
     const baseSha = strFlag(parsed, "--base-sha256");
-    if (baseSha !== void 0 && existsSync40(context.breakdown_path ?? "")) {
+    if (baseSha !== void 0 && existsSync39(context.breakdown_path ?? "")) {
       if (sha256File(context.breakdown_path) !== baseSha) {
         throw new DaoyanCliError({ code: "story_conflict", message: "breakdown \u5DF2\u88AB\u5176\u5B83\u4FEE\u6539" });
       }
@@ -21513,9 +21477,6 @@ async function storyBreakdown(ctx2, args) {
     const parsed = parseFlags(rest, { "--episode": "string" });
     if (parsed.positionals.length > 0) usageError(`\u672A\u77E5\u53C2\u6570 ${parsed.positionals.join(" ")}`);
     const context = resolveEpisodeContext(root, strFlag(parsed, "--episode"));
-    if (context.legacy || context.episode_id === null) {
-      throw new DaoyanCliError({ code: "story_not_found", message: "story \u6A21\u5F0F\u672A\u542F\u7528" });
-    }
     const doc = loadBreakdown(root, context.episode_id);
     if (doc === null) {
       throw new DaoyanCliError({ code: "story_invalid", message: "\u62C6\u89E3\u4E0D\u5B58\u5728" });
@@ -21531,9 +21492,9 @@ async function storyBreakdown(ctx2, args) {
 async function storyGlobal(ctx2, kind, args) {
   const [action, ...rest] = args;
   const { root } = requireProject(ctx2);
-  if (!storyEnabled(root)) {
-    throw new DaoyanCliError({ code: "story_not_found", message: "story \u6A21\u5F0F\u672A\u542F\u7528" });
-  }
+  requireStory(root);
+  const production = readProduction(root);
+  if (kind === "voices" && !production.audio) throw audioDisabled();
   if (action === "show") {
     const parsed = parseFlags(rest, { "--id": "string" });
     if (kind === "characters") {
@@ -21570,7 +21531,7 @@ async function storyGlobal(ctx2, kind, args) {
     if (parsed.positionals.length > 0) usageError(`\u672A\u77E5\u53C2\u6570 ${parsed.positionals.join(" ")}`);
     const target = kind === "characters" ? join37(root, "story/characters.json") : kind === "scenes" ? join37(root, "story/scenes.json") : join37(root, "story/voices.json");
     const baseSha = strFlag(parsed, "--base-sha256");
-    if (baseSha !== void 0 && existsSync40(target) && sha256File(target) !== baseSha) {
+    if (baseSha !== void 0 && existsSync39(target) && sha256File(target) !== baseSha) {
       throw new DaoyanCliError({ code: "story_conflict", message: `${kind} \u5DF2\u88AB\u5176\u5B83\u4FEE\u6539` });
     }
     const raw = requireRecord(readJsonInput(strFlag(parsed, "--file"), "--file <json|->"), kind);
@@ -21614,9 +21575,8 @@ async function storyGlobal(ctx2, kind, args) {
 async function storyAsset(ctx2, args) {
   const [action, ...rest] = args;
   const { root } = requireProject(ctx2);
-  if (!storyEnabled(root)) {
-    throw new DaoyanCliError({ code: "story_not_found", message: "story \u6A21\u5F0F\u672A\u542F\u7528" });
-  }
+  requireStory(root);
+  const production = readProduction(root);
   if (action === "add") {
     const parsed = parseFlags(rest, {
       "--owner": "string",
@@ -21634,6 +21594,7 @@ async function storyAsset(ctx2, args) {
     const id = strFlag(parsed, "--id");
     if (ownerText === void 0 || id === void 0) usageError("\u9700\u8981 --owner \u4E0E --id");
     const owner = parseAssetOwner(ownerText, strFlag(parsed, "--form"));
+    if (owner.kind === "voice" && !production.audio) throw audioDisabled();
     const result = addAsset({
       root,
       owner,
@@ -21672,6 +21633,7 @@ async function storyAsset(ctx2, args) {
     const id = strFlag(parsed, "--id");
     if (ownerText === void 0 || id === void 0) usageError("\u9700\u8981 --owner \u4E0E --id");
     const owner = parseAssetOwner(ownerText, strFlag(parsed, "--form"));
+    if (owner.kind === "voice" && !production.audio) throw audioDisabled();
     const asset = setReferenceAsset(root, owner, id);
     output(ctx2, { asset, reference_set: true }, [`\u4E3B\u53C2\u8003\u5DF2\u8BBE\u7F6E\uFF1A${asset.path}`]);
     return 0;
@@ -21688,6 +21650,7 @@ async function storyAsset(ctx2, args) {
     const id = strFlag(parsed, "--id");
     if (ownerText === void 0 || id === void 0) usageError("\u9700\u8981 --owner \u4E0E --id");
     const owner = parseAssetOwner(ownerText, strFlag(parsed, "--form"));
+    if (owner.kind === "voice" && !production.audio) throw audioDisabled();
     const asset = removeAsset(root, owner, id, boolFlag(parsed, "--force"));
     output(ctx2, { removed: asset }, [`\u8D44\u4EA7\u5DF2\u5220\u9664\uFF1A${asset.path}`]);
     return 0;
@@ -21713,13 +21676,8 @@ async function storyShots(ctx2, args) {
     const parsed2 = parseFlags(rest, { "--episode": "string" });
     if (parsed2.positionals.length > 0) usageError(`\u672A\u77E5\u53C2\u6570 ${parsed2.positionals.join(" ")}`);
     const { root: root2 } = requireProject(ctx2);
-    if (!storyEnabled(root2)) {
-      throw new DaoyanCliError({ code: "story_not_found", message: "story \u6A21\u5F0F\u672A\u542F\u7528" });
-    }
+    requireStory(root2);
     const context2 = resolveEpisodeContext(root2, strFlag(parsed2, "--episode"));
-    if (context2.legacy || context2.episode_id === null) {
-      throw new DaoyanCliError({ code: "story_not_found", message: "story \u6A21\u5F0F\u672A\u542F\u7528" });
-    }
     const shots2 = loadEpisodeShots(root2, context2.episode_id);
     if (shots2 === null) {
       throw new DaoyanCliError({
@@ -21735,9 +21693,7 @@ async function storyShots(ctx2, args) {
   }
   if (action !== "set") usageError("\u7528\u6CD5\uFF1Adaoyan story shots show|set --episode <id> [--file <shots.json>]");
   const { root } = requireProject(ctx2);
-  if (!storyEnabled(root)) {
-    throw new DaoyanCliError({ code: "story_not_found", message: "story \u6A21\u5F0F\u672A\u542F\u7528" });
-  }
+  requireStory(root);
   const parsed = parseFlags(rest, {
     "--episode": "string",
     "--file": "string",
@@ -21746,9 +21702,6 @@ async function storyShots(ctx2, args) {
   });
   if (parsed.positionals.length > 0) usageError(`\u672A\u77E5\u53C2\u6570 ${parsed.positionals.join(" ")}`);
   const context = resolveEpisodeContext(root, strFlag(parsed, "--episode"));
-  if (context.legacy || context.episode_id === null) {
-    throw new DaoyanCliError({ code: "story_not_found", message: "story \u6A21\u5F0F\u672A\u542F\u7528" });
-  }
   const script = loadScriptMeta(root, context.episode_id);
   if (script.revision <= 0) {
     throw new DaoyanCliError({ code: "story_invalid", message: "\u5267\u672C\u5C1A\u672A\u540C\u6B65\uFF0C\u4E0D\u80FD\u5199\u5206\u955C" });
@@ -21757,7 +21710,7 @@ async function storyShots(ctx2, args) {
     throw new DaoyanCliError({ code: "story_invalid", message: "\u62C6\u89E3\u4E0D\u5B58\u5728\uFF0C\u4E0D\u80FD\u5199\u5206\u955C" });
   }
   const baseSha = strFlag(parsed, "--base-sha256");
-  if (baseSha !== void 0 && existsSync40(context.shots_path) && sha256File(context.shots_path) !== baseSha) {
+  if (baseSha !== void 0 && existsSync39(context.shots_path) && sha256File(context.shots_path) !== baseSha) {
     throw new DaoyanCliError({ code: "story_conflict", message: "shots.json \u5DF2\u88AB\u5176\u5B83\u4FEE\u6539" });
   }
   const raw = requireRecord(readJsonInput(strFlag(parsed, "--file"), "--file <shots.json|->"), "shots");
@@ -21789,16 +21742,11 @@ async function storyShots(ctx2, args) {
 async function storyMap(ctx2, args) {
   const [action, ...rest] = args;
   const { root, config } = requireProject(ctx2);
-  if (!storyEnabled(root)) {
-    throw new DaoyanCliError({ code: "story_not_found", message: "story \u6A21\u5F0F\u672A\u542F\u7528" });
-  }
+  requireStory(root);
   if (action === "show") {
     const parsed = parseFlags(rest, { "--episode": "string", "--raw": "boolean" });
     if (parsed.positionals.length > 0) usageError(`\u672A\u77E5\u53C2\u6570 ${parsed.positionals.join(" ")}`);
     const context = resolveEpisodeContext(root, strFlag(parsed, "--episode"));
-    if (context.legacy || context.episode_id === null) {
-      throw new DaoyanCliError({ code: "story_not_found", message: "story \u6A21\u5F0F\u672A\u542F\u7528" });
-    }
     const path = `${context.rel_dir}/${STORY_MAP_FILE}`;
     if (boolFlag(parsed, "--raw")) {
       const doc = loadStoryMap(root, context.episode_id);
@@ -21830,9 +21778,6 @@ async function storyMap(ctx2, args) {
     const parsed = parseFlags(rest, { "--episode": "string", "--force": "boolean" });
     if (parsed.positionals.length > 0) usageError(`\u672A\u77E5\u53C2\u6570 ${parsed.positionals.join(" ")}`);
     const context = resolveEpisodeContext(root, strFlag(parsed, "--episode"));
-    if (context.legacy || context.episode_id === null) {
-      throw new DaoyanCliError({ code: "story_not_found", message: "story \u6A21\u5F0F\u672A\u542F\u7528" });
-    }
     const result = materializeStoryMap(root, context.episode_id, { force: boolFlag(parsed, "--force") });
     saveStoryMap(root, context.episode_id, result.doc);
     output(
@@ -21866,12 +21811,9 @@ async function storyMap(ctx2, args) {
       usageError("--source \u5FC5\u987B\u662F ai|user|import");
     }
     const context = resolveEpisodeContext(root, strFlag(parsed, "--episode"));
-    if (context.legacy || context.episode_id === null) {
-      throw new DaoyanCliError({ code: "story_not_found", message: "story \u6A21\u5F0F\u672A\u542F\u7528" });
-    }
     const baseSha = strFlag(parsed, "--base-sha256");
     const file = storyMapPath(root, context.episode_id);
-    if (baseSha !== void 0 && existsSync40(file) && sha256File(file) !== baseSha) {
+    if (baseSha !== void 0 && existsSync39(file) && sha256File(file) !== baseSha) {
       throw new DaoyanCliError({ code: "story_conflict", message: "story-map.json \u5DF2\u88AB\u5176\u5B83\u4FEE\u6539" });
     }
     const shots = loadEpisodeShots(root, context.episode_id);
@@ -21914,9 +21856,6 @@ async function storyMap(ctx2, args) {
     const parsed = parseFlags(rest, { "--episode": "string" });
     if (parsed.positionals.length > 0) usageError(`\u672A\u77E5\u53C2\u6570 ${parsed.positionals.join(" ")}`);
     const context = resolveEpisodeContext(root, strFlag(parsed, "--episode"));
-    if (context.legacy || context.episode_id === null) {
-      throw new DaoyanCliError({ code: "story_not_found", message: "story \u6A21\u5F0F\u672A\u542F\u7528" });
-    }
     const removed = removeStoryMap(root, context.episode_id);
     output(ctx2, { episode_id: context.episode_id, removed }, [
       removed ? `\u5DF2\u5220\u9664 ${context.rel_dir}/${STORY_MAP_FILE}` : `\u6CA1\u6709\u53EF\u5220\u9664\u7684 story-map.json`
@@ -21929,9 +21868,7 @@ async function storyStatus(ctx2, args) {
   const parsed = parseFlags(args, { "--episode": "string" });
   if (parsed.positionals.length > 0) usageError(`\u672A\u77E5\u53C2\u6570 ${parsed.positionals.join(" ")}`);
   const { root, config } = requireProject(ctx2);
-  if (!storyEnabled(root)) {
-    throw new DaoyanCliError({ code: "story_not_found", message: "story \u6A21\u5F0F\u672A\u542F\u7528" });
-  }
+  requireStory(root);
   const episode = strFlag(parsed, "--episode");
   if (episode !== void 0) {
     if (readEpisodeMeta(root, episode) === null) {
@@ -21958,9 +21895,7 @@ async function storyValidate(ctx2, args) {
   const parsed = parseFlags(args, { "--episode": "string", "--verify-hashes": "boolean" });
   if (parsed.positionals.length > 0) usageError(`\u672A\u77E5\u53C2\u6570 ${parsed.positionals.join(" ")}`);
   const { root } = requireProject(ctx2);
-  if (!storyEnabled(root)) {
-    throw new DaoyanCliError({ code: "story_not_found", message: "story \u6A21\u5F0F\u672A\u542F\u7528" });
-  }
+  requireStory(root);
   const issues = validateStory(root, strFlag(parsed, "--episode"), boolFlag(parsed, "--verify-hashes"));
   const errors = issues.filter((i) => i.severity === "error");
   if (!ctx2.json) {
@@ -21980,9 +21915,15 @@ async function storyValidate(ctx2, args) {
   if (ctx2.json) emitData({ ok: true, issues });
   return 0;
 }
+function audioDisabled() {
+  return new DaoyanCliError({
+    code: "feature_disabled",
+    message: "\u9879\u76EE\u5DF2\u5173\u95ED\u97F3\u9891\uFF0C\u4E0D\u80FD\u8BFB\u5199\u97F3\u8272",
+    hint: "\u5728 Web \u9879\u76EE\u7BA1\u7406\u5F00\u542F\u97F3\u9891\u540E\u91CD\u8BD5\u3002"
+  });
+}
 async function runStory(ctx2, args) {
   const [sub, ...rest] = args;
-  if (sub === "init") return storyInit(ctx2, rest);
   if (sub === "series") return storySeries(ctx2, rest);
   if (sub === "episode") return storyEpisode(ctx2, rest);
   if (sub === "script") return storyScript(ctx2, rest);
@@ -21996,7 +21937,7 @@ async function runStory(ctx2, args) {
   if (sub === "status") return storyStatus(ctx2, rest);
   if (sub === "validate") return storyValidate(ctx2, rest);
   usageError(
-    "\u7528\u6CD5\uFF1Adaoyan story init|series|episode|script|breakdown|characters|scenes|voices|asset|shots|map|status|validate"
+    "\u7528\u6CD5\uFF1Adaoyan story series|episode|script|breakdown|characters|scenes|voices|asset|shots|map|status|validate"
   );
 }
 var init_story = __esm({
@@ -22008,9 +21949,11 @@ var init_story = __esm({
     init_args();
     init_fs();
     init_config();
+    init_mode();
+    init_store2();
     init_types();
     init_paths();
-    init_store2();
+    init_store();
     init_validate();
     init_assets();
     init_map();
@@ -22072,7 +22015,7 @@ var init_registry = __esm({
         name: "init",
         group: "project",
         summary: "\u5728\u5F53\u524D\u76EE\u5F55\u7ACB\u9879\uFF1Alocal \u90E8\u7F72\u9879\u76EE\u4E13\u5C5E ComfyUI\uFF0Cremote \u7ED1\u5B9A\u5916\u90E8\u670D\u52A1",
-        usage: "daoyan init --mode=local [--modelpath <\u8DEF\u5F84>] [--version <tag>] [--mirror <\u955C\u50CF>] [--fallback-mirror <\u955C\u50CF|none>] [--torch-index <url>] [--torch-cuda <cuXXX>] [--torch-cpu] [--no-cache] [--no-skill] [--no-git]\ndaoyan init --mode=remote --url <url> [--no-skill] [--no-git]",
+        usage: "daoyan init --mode=local|remote [--production single|series] [--modelpath <\u8DEF\u5F84>] [--version <tag>] [--mirror <\u955C\u50CF>] [--fallback-mirror <\u955C\u50CF|none>] [--torch-index <url>] [--torch-cuda <cuXXX>] [--torch-cpu] [--no-cache] [--no-skill] [--no-git]\ndaoyan init --mode=remote --url <url> [--production single|series] [--no-skill] [--no-git]",
         flags: [
           {
             name: "--mode",
@@ -22080,6 +22023,13 @@ var init_registry = __esm({
             required: true,
             enum: ["local", "remote"],
             description: "\u6267\u884C\u6A21\u5F0F\uFF08\u5FC5\u586B\uFF0C\u65E0\u9ED8\u8BA4\u503C\uFF09"
+          },
+          {
+            name: "--production",
+            type: "single|series",
+            default: "single",
+            enum: ["single", "series"],
+            description: "\u751F\u4EA7\u6A21\u5F0F\uFF1A\u5355\u89C6\u9891 / \u591A\u96C6\uFF08\u9ED8\u8BA4 single\uFF09"
           },
           { name: "--modelpath", type: "path", description: "local\uFF1A\u5916\u90E8\u6A21\u578B\u6839\u76EE\u5F55\uFF08\u5DF2\u5B58\u5728\uFF09" },
           { name: "--url", type: "url", description: "remote\uFF1A\u5916\u90E8 ComfyUI base URL\uFF08\u5FC5\u586B\uFF09" },
@@ -22168,15 +22118,6 @@ var init_registry = __esm({
       },
       // ---- 剧本与设定 ----
       {
-        name: "story init",
-        group: "story",
-        summary: "\u542F\u7528\u591A\u96C6\u77ED\u5267\u6A21\u5F0F\uFF1A\u521B\u5EFA story/\u3001episodes/ep01\u3001\u8D44\u4EA7\u76EE\u5F55\u4E0E LFS \u89C4\u5219",
-        usage: "daoyan story init [--json]",
-        implemented: true,
-        jsonShape: { created: "string[]", episodes: "string[]" },
-        run: (ctx2, args) => runStory(ctx2, ["init", ...args])
-      },
-      {
         name: "story series",
         group: "story",
         summary: "\u67E5\u770B / \u4FEE\u6539\u7CFB\u5217\u6807\u9898\u3001\u7B80\u4ECB\u4E0E\u7C7B\u578B",
@@ -22188,7 +22129,7 @@ var init_registry = __esm({
         name: "story episode",
         group: "story",
         summary: "\u65B0\u589E / \u5217\u51FA / \u67E5\u770B / \u4FEE\u6539\u5267\u96C6\uFF08id \u4E0D\u53EF\u53D8\uFF0Cnumber \u5168\u7CFB\u5217\u552F\u4E00\uFF09",
-        usage: "daoyan story episode add --id <id> --number <n> --title <t> [--summary <s>] [--json]\ndaoyan story episode list|show|set ...",
+        usage: "daoyan story episode add --id <id> --number <n> --title <t> [--summary <s>] [--json]\ndaoyan story episode list|show|set|remove ...",
         implemented: true,
         run: (ctx2, args) => runStory(ctx2, ["episode", ...args])
       },

@@ -1812,9 +1812,9 @@ export function buildShotsView(
 /**
  * 成片列表。
  */
-export function listFinals(root: string, episodeId?: string): WebFinalItem[] {
-    // final 目录（story 模式按集）
-    const dir = episodeId !== undefined && episodeId !== "" ? join(root, FINAL_DIR, episodeId) : join(root, FINAL_DIR);
+export function listFinals(root: string, episodeId: string): WebFinalItem[] {
+    // 单集成片目录
+    const dir = join(root, FINAL_DIR, episodeId);
     if (!existsSync(dir)) return [];
     // 目录项
     const entries = readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile());
@@ -1847,7 +1847,7 @@ export function listFinals(root: string, episodeId?: string): WebFinalItem[] {
                       }))
                 : [];
             out.push({
-                episode_id: episodeId !== undefined && episodeId !== "" ? episodeId : null,
+                episode_id: episodeId,
                 name: cut,
                 manifest: entry.name,
                 media_url: mediaUrl,
@@ -1873,7 +1873,7 @@ export function listFinals(root: string, episodeId?: string): WebFinalItem[] {
             // 媒体地址
             const mediaUrl = withMediaVersion(finalMediaUrl(entry.name, episodeId), `${stat.size}-${stat.mtimeMs}`);
             out.push({
-                episode_id: episodeId !== undefined && episodeId !== "" ? episodeId : null,
+                episode_id: episodeId,
                 name: entry.name,
                 manifest: null,
                 media_url: mediaUrl,
@@ -2003,17 +2003,15 @@ function storyOverviewFields(
 /**
  * 无本机配置时的共享数据概览。
  */
-function buildSharedOverview(root: string, project: ProjectConfig, shots: ShotsFile | null): Record<string, unknown> {
+function buildSharedOverview(root: string, project: ProjectConfig): Record<string, unknown> {
     // 全部 run
     const runs = safeListRuns(root);
     // 全部 task
     const tasks = safeListTasks(root);
     // story 字段
     const storyFields = storyOverviewFields(root, project);
-    // 分镜视图（story 模式由剧集页展示）
-    const storyboard = storyFields === null ? buildShotsView(root, shots, "shot:", resolveEpisodeContext(root)) : null;
     // 基础统计
-    const stats = buildStats(shots, runs, tasks, storyboard);
+    const stats = buildStats(null, runs, tasks, null);
     return {
         project: { name: project.name, version: project.version },
         mode: null,
@@ -2027,13 +2025,10 @@ function buildSharedOverview(root: string, project: ProjectConfig, shots: ShotsF
         recent_tasks: tasks.slice(0, 10).map((task) => taskItem(root, task)),
         gpu: null,
         skill: null,
-        shots: storyFields === null ? shotProgress(root, shots, resolveEpisodeContext(root)) : [],
-        storyboard,
+        shots: [],
+        storyboard: null,
         ...(storyFields !== null ? storyFields : {}),
-        next_actions:
-            storyFields !== null
-                ? ["story status --json", "story episode list --json"]
-                : ["init --mode=local", "init --mode=remote --url <url>"],
+        next_actions: storyFields !== null ? storyFields.story.next_actions : [],
         stats: storyFields !== null ? withStoryStats(stats, storyFields.story) : stats,
         recent_artifacts: flattenArtifacts(root, runs).slice(0, OVERVIEW_ARTIFACT_LIMIT),
         generated_at: nowIso(),
@@ -2071,14 +2066,13 @@ export async function buildOverview(
     root: string,
     project: ProjectConfig,
     machine: MachineConfig | null,
-    shots: ShotsFile | null,
     commands: readonly SkillCommand[] = [],
 ): Promise<Record<string, unknown>> {
-    if (machine === null) return buildSharedOverview(root, project, shots);
+    if (machine === null) return buildSharedOverview(root, project);
     // story 字段
     const storyFields = storyOverviewFields(root, project);
-    // 复用 status 快照（story 模式不使用根 shots）
-    const base = await buildStatusSnapshot(root, project, machine, storyFields === null ? shots : null, {
+    // 复用 status 快照
+    const base = await buildStatusSnapshot(root, project, machine, null, {
         commands,
         engineTimeoutMs: OVERVIEW_ENGINE_TIMEOUT_MS,
     });
@@ -2086,14 +2080,12 @@ export async function buildOverview(
     const runs = safeListRuns(root);
     // 全部 task
     const tasks = safeListTasks(root);
-    // 分镜视图（story 模式由剧集页展示）
-    const storyboard = storyFields === null ? buildShotsView(root, shots, "shot:", resolveEpisodeContext(root)) : null;
     // 基础统计
-    const stats = buildStats(shots, runs, tasks, storyboard);
+    const stats = buildStats(null, runs, tasks, null);
     return {
         ...base,
         machine: machineViewOf(base.machine),
-        storyboard,
+        storyboard: null,
         ...(storyFields !== null ? storyFields : {}),
         next_actions: storyFields !== null ? storyFields.story.next_actions : base.next_actions,
         stats: storyFields !== null ? withStoryStats(stats, storyFields.story) : stats,

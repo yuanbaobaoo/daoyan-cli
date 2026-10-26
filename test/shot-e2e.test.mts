@@ -11,7 +11,7 @@ import { planShotRuns } from "../src/core/task/plans.mts";
 import { RemoteSession } from "../src/core/engine/remote-session.mts";
 import { fetchCatalog, runPreflight } from "../src/core/workflow/preflight.mts";
 import { executeRun } from "../src/core/run/executor.mts";
-import { loadShotsFile } from "../src/core/project/config.mts";
+import { initStory, loadEpisodeShots } from "../src/core/story/store.mts";
 import type { ProjectConfig, MachineConfig, RunRecord } from "../src/core/project/types.mts";
 
 /**
@@ -54,7 +54,12 @@ test("shot 01 02：一个会话、两 run、接力首帧", async (t) => {
     });
     const root = mkdtempSync(join(tmpdir(), "dycli-shot-e2e-"));
     try {
-        const project: ProjectConfig = { name: "shot-test", version: 2, gpu: { takeover: false } };
+        const project: ProjectConfig = {
+            name: "shot-test",
+            version: 2,
+            production: { mode: "single", audio: true },
+            gpu: { takeover: false },
+        };
         const machine: MachineConfig = {
             machine_id: "shot-machine",
             engine: { mode: "remote", url: mock.url, free_after_task: "always" },
@@ -64,6 +69,7 @@ test("shot 01 02：一个会话、两 run、接力首帧", async (t) => {
         mkdirSync(join(root, "anchors"), { recursive: true });
         writeFileSync(join(root, "project.json"), JSON.stringify(project, null, 2));
         writeFileSync(join(root, ".dycli", "machine.json"), JSON.stringify(machine, null, 2));
+        initStory(root, "shot-test");
         writeFileSync(join(root, "anchors", "start.png"), "fake-png");
         writeFileSync(
             join(root, "workflows", "t2v.json"),
@@ -93,11 +99,11 @@ test("shot 01 02：一个会话、两 run、接力首帧", async (t) => {
             ),
         );
         writeFileSync(
-            join(root, "shots.json"),
+            join(root, "episodes", "ep01", "shots.json"),
             JSON.stringify(
                 {
                     workflow: "t2v",
-                    meta: { width: 64, height: 64, anchors: { S1: "anchors/start.png" } },
+                    meta: { episode_id: "ep01", width: 64, height: 64, anchors: { S1: "anchors/start.png" } },
                     defaults: { steps: 20, negative: "bad" },
                     style_prefix: "film",
                     shots: [
@@ -110,7 +116,9 @@ test("shot 01 02：一个会话、两 run、接力首帧", async (t) => {
             ),
         );
 
-        const shots = loadShotsFile(root);
+        const loadedShots = loadEpisodeShots(root, "ep01");
+        assert.ok(loadedShots);
+        const shots = loadedShots;
         const session = new RemoteSession(mock.url, "always");
         await session.ensureReady(() => {});
         const accumulator = {

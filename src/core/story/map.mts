@@ -32,6 +32,7 @@ import {
     loadVoices,
 } from "./store.mts";
 import { loadWorkflowAssets, planWorkflowAssets, type WorkflowAssetMappingSource } from "./workflow-assets.mts";
+import { audioEnabledOf } from "../project/production.mts";
 import type {
     ScriptMeta,
     StoryAsset,
@@ -2592,7 +2593,12 @@ function buildGenerationEvent(
                 });
             }
             // 槽位规划
-            const plan = planWorkflowAssets({ root, shot: fact.shot, workflowAbs: resolved.abs });
+            const plan = planWorkflowAssets({
+                root,
+                shot: fact.shot,
+                workflowAbs: resolved.abs,
+                audio: audioEnabledOf(project),
+            });
             // 槽位明细
             const slots: StoryMapWorkflowSlot[] = plan.slots.map((slot) => ({
                 slot: slot.slot,
@@ -2899,6 +2905,19 @@ export function buildStoryMap(
     const duration = facts.some((fact) => fact.duration_seconds !== null)
         ? facts.reduce((sum, fact) => sum + (fact.duration_seconds ?? 0), 0)
         : null;
+    // 音频关闭：过滤音色数据与缺口
+    const audio = audioEnabledOf(projectConfig);
+    if (!audio) {
+        catalogResult.catalog.voices = [];
+        for (const event of generationEvents) event.voices = [];
+    }
+    // 音色相关缺口
+    const visibleGaps = audio
+        ? generationGaps
+        : generationGaps.filter((gap) => !/voice|音色/i.test(`${gap.code} ${gap.ref ?? ""} ${gap.message}`));
+    const visibleWarnings = audio
+        ? warnings
+        : warnings.filter((gap) => !/voice|音色/i.test(`${gap.code} ${gap.ref ?? ""} ${gap.message}`));
     // 当前事实
     const source = storyMapSource(root, episodeId, script);
     // stale 原因
@@ -2943,10 +2962,10 @@ export function buildStoryMap(
                 failed_shots: failedShots,
             },
             events: generationEvents,
-            gaps: generationGaps,
+            gaps: visibleGaps,
         },
         relations,
-        warnings: dedupeGaps(warnings),
+        warnings: dedupeGaps(visibleWarnings),
     };
 }
 

@@ -48,12 +48,12 @@ daoyan run cancel <task_id> --json
 ### init
 
 ```bash
-daoyan init --mode=local [--modelpath <路径>] [--version <tag>] [--mirror <镜像>] \
-    [--fallback-mirror <镜像|none>] [--torch-index <url>] [--torch-cuda <cuXXX>] [--torch-cpu] [--no-cache] [--no-skill] [--no-git]
-daoyan init --mode=remote --url <url> [--no-skill] [--no-git]
+daoyan init --mode=local [--production single|series] [--modelpath <路径>] [--version <tag>] \
+    [--mirror <镜像>] [--fallback-mirror <镜像|none>] [--torch-index <url>] [--torch-cuda <cuXXX>] [--torch-cpu] [--no-cache] [--no-skill] [--no-git]
+daoyan init --mode=remote --url <url> [--production single|series] [--no-skill] [--no-git]
 ```
 
-- `--mode` 必填；在当前目录工作，不接收项目名；
+- `--mode` 必填；在当前目录工作，不接收项目名；`--production` 默认 `single`，可选 `series`；
 - 默认维护 `.gitignore` 受管块并初始化 Git 仓库；位于父级仓库内时跳过嵌套初始化，不自动 commit；`--no-git` 只跳过仓库初始化；
 - local 在创建骨架前检查 git / python3 >= 3.10 / ensurepip，缺失时明确报错，不留下半成品；
 - local 部署 `engine/`（venv + ComfyUI + custom nodes）并生成 `extra_model_paths.yaml`；只部署不启动；
@@ -83,14 +83,13 @@ daoyan skill update --json
 
 ## 剧本与设定（story）
 
-多集短剧模式。一个项目 = 一部多集短剧；`story/` 是系列级全局设定集，`episodes/<id>/` 是单集剧本 / 拆解 / 分镜。
+story 布局：所有项目都使用 `story/` + `episodes/<id>/`。`production.mode=single` 只能一集，`series` 可多集。
 
 ```bash
-daoyan story init
 daoyan story series show|set [--title <t>] [--synopsis <s>] [--genre <g>]
 
 daoyan story episode add --id ep02 --number 2 --title "第二集" [--summary <s>]
-daoyan story episode list|show|set ...
+daoyan story episode list|show|set|remove ...
 
 daoyan story script sync --episode <id> --file <script.md|-> [--summary <s>] [--source ai|user|import]
 daoyan story script show --episode <id> [--raw]
@@ -126,6 +125,8 @@ daoyan story validate [--episode <id>] [--verify-hashes]
 - 每集剧本独立 `revision` / 审批；剧本变化只让该集 `breakdown` / `shots` stale；
 - 拆解是单集制作范围与允许清单；分镜只能使用拆解声明的角色 / 形态 / 场景 / 音色；
 - 参考图 / 音频必须显式指定主参考（`--set-reference` 或 `asset set-reference`），不会自动取第一张；
+- `production.audio=false` 时音色命令返回 `feature_disabled`，语音槽位会被忽略；
+- `production.mode=single` 禁止 `story episode add`；多集切单视频前需先删到一集；
 - 多集项目 `script sync` / `breakdown set` / `shots set` / `script show` / `breakdown show` / `shot` / `retake` / `batch` / `wrap` 必须带 `--episode`；单集可省略；legacy 不接受；
 - `story status` 输出 stage / blockers / next_actions；`shot` / `batch` / `retake` 在 strict 模式按 blockers 阻断；
 - `run` 不受剧情门禁限制，可用 `--episode` 只做归属标记；

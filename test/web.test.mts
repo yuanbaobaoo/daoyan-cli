@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startWebServer } from "../src/core/web/server.mts";
 import { parseRange } from "../src/core/web/media.mts";
+import { initStory } from "../src/core/story/store.mts";
 
 /**
  * 写 JSON 文件。
@@ -72,14 +73,29 @@ function createFixture(): string {
     mkdirSync(join(root, "runs", "r_test", "outputs"), { recursive: true });
     mkdirSync(join(root, "runs", "r_test2", "outputs"), { recursive: true });
     mkdirSync(join(root, "tasks", "t_test"), { recursive: true });
-    mkdirSync(join(root, "final"), { recursive: true });
 
     writeJson(join(root, "project.json"), {
         name: "web-test",
         version: 2,
         default_workflow: "workflows/t2v.json",
+        production: { mode: "single", audio: true },
+        story: { enforce: "off" },
     });
-    writeJson(join(root, "shots.json"), makeShots());
+    initStory(root, "web-test");
+    writeJson(join(root, "episodes", "ep01", "shots.json"), makeShots());
+    writeJson(join(root, "story", "characters.json"), {
+        version: 1,
+        updated_at: "",
+        characters: [
+            { id: "lin", name: "林默", default_form: "default", forms: [{ id: "default", name: "日常", assets: [] }] },
+            { id: "lan", name: "阿岚", default_form: "default", forms: [{ id: "default", name: "日常", assets: [] }] },
+        ],
+    });
+    writeJson(join(root, "story", "scenes.json"), {
+        version: 1,
+        updated_at: "",
+        scenes: [{ id: "city", name: "雨夜街道", assets: [] }],
+    });
     writeJson(join(root, "workflows", "t2v.json"), {
         "1": { class_type: "MockLoader", inputs: { ckpt_name: "a.safetensors" } },
         "2": { class_type: "MockSampler", inputs: { seed: 1, steps: 20 } },
@@ -91,7 +107,8 @@ function createFixture(): string {
         task_id: "t_test",
         machine_id: "test-machine",
         request_id: "req-1",
-        label: "shot:01",
+        episode_id: "ep01",
+        label: "ep:ep01:shot:01",
         workflow: { path: "workflows/t2v.json", sha256: "workflow-sha" },
         inputs: { prompt: "opening shot", seed: 1 },
         overrides: { "2.steps": 20 },
@@ -129,7 +146,8 @@ function createFixture(): string {
         task_id: "t_test",
         machine_id: "test-machine",
         request_id: "req-2",
-        label: "shot:01",
+        episode_id: "ep01",
+        label: "ep:ep01:shot:01",
         workflow: { path: "workflows/t2v.json", sha256: "workflow-sha-2" },
         inputs: { prompt: "opening shot v2", seed: 11 },
         overrides: { "2.steps": 24 },
@@ -161,6 +179,7 @@ function createFixture(): string {
         task_id: "t_test",
         kind: "run",
         machine_id: "test-machine",
+        episode_id: "ep01",
         request_id: "req-1",
         status: "succeeded",
         mode: "remote",
@@ -181,8 +200,9 @@ function createFixture(): string {
             `${JSON.stringify({ seq: 3, ts: "2026-01-01T00:05:03.000Z", type: "run_succeeded", data: { run_id: "r_test2" } })}\n`,
     );
 
-    writeFileSync(join(root, "final", "cut-20260101T000000.mp4"), "final-cut-bytes");
-    writeJson(join(root, "final", "cut-20260101T000000.json"), {
+    mkdirSync(join(root, "final", "ep01"), { recursive: true });
+    writeFileSync(join(root, "final", "ep01", "cut-20260101T000000.mp4"), "final-cut-bytes");
+    writeJson(join(root, "final", "ep01", "cut-20260101T000000.json"), {
         cut: "cut-20260101T000000.mp4",
         created_at: "2026-01-01T00:00:03.000Z",
         clips: [{ shot: "01", run_id: "r_test", artifact: "outputs/clip.mp4" }],
@@ -203,7 +223,6 @@ test("web：静态页、只读 API、媒体 Range 与关闭", async () => {
         root,
         project: { name: "web-test", version: 2, default_workflow: "workflows/t2v.json" },
         machine: null,
-        shots: makeShots(),
         assets: { index_html: "<!doctype html><title>test</title>", app_js: "console.log(1);", style_css: "body{}" },
         host: "127.0.0.1",
         port: 0,
@@ -228,26 +247,25 @@ test("web：静态页、只读 API、媒体 Range 与关闭", async () => {
         assert.equal(overviewData.ok, true);
         assert.equal((overviewData.data.project as Record<string, unknown>).name, "web-test");
         assert.equal(overviewData.data.mode, null);
-        const overviewStoryboard = overviewData.data.storyboard as Record<string, unknown>;
-        assert.equal((overviewStoryboard.summary as Record<string, unknown>).shots_total, 2);
-        assert.equal((overviewStoryboard.summary as Record<string, unknown>).characters_total, 2);
         const overviewStats = overviewData.data.stats as Record<string, unknown>;
         assert.equal(overviewStats.characters_total, 2);
         assert.equal(overviewStats.scenes_total, 1);
 
-        // 分镜
-        const shots = await fetch(`${handle.url}/api/shots`);
-        assert.equal(shots.status, 200);
-        const shotsData = (await shots.json()) as {
+        // 剧集分镜
+        const episode = await fetch(`${handle.url}/api/episodes/ep01`);
+        assert.equal(episode.status, 200);
+        const episodeData = (await episode.json()) as {
             data: {
-                synopsis: string;
-                characters: Array<Record<string, unknown>>;
-                scenes: Array<Record<string, unknown>>;
-                summary: Record<string, unknown>;
-                shots: Array<Record<string, unknown>>;
+                shots: {
+                    synopsis: string;
+                    characters: Array<Record<string, unknown>>;
+                    scenes: Array<Record<string, unknown>>;
+                    summary: Record<string, unknown>;
+                    shots: Array<Record<string, unknown>>;
+                };
             };
         };
-        assert.equal(shotsData.data.synopsis, "一个关于测试的故事");
+        const shotsData = { data: episodeData.data.shots };
         assert.equal(shotsData.data.characters.length, 2);
         assert.equal(shotsData.data.scenes.length, 1);
         assert.equal(shotsData.data.summary.shots_total, 2);
@@ -373,7 +391,6 @@ test("web：镜头定稿写接口与写约束", async () => {
         root,
         project: { name: "web-test", version: 2 },
         machine: null,
-        shots: makeShots(),
         assets: { index_html: "<!doctype html>", app_js: "", style_css: "" },
         host: "127.0.0.1",
         port: 0,
@@ -448,10 +465,14 @@ test("web：镜头定稿写接口与写约束", async () => {
         const doneData = (await jsonOf(done)).data as Record<string, unknown>;
         assert.equal(doneData.changed, true);
         assert.equal(doneData.output, "clip.mp4");
-        assert.equal(doneData.takes_file, "takes.json");
-        assert.equal(existsSync(join(root, "takes.json")), true);
+        assert.equal(doneData.takes_file, "episodes/ep01/takes.json");
+        assert.equal(existsSync(join(root, "episodes", "ep01", "takes.json")), true);
         // 分镜 DTO 反映定稿
-        const shotsData = (await jsonOf(await fetch(`${handle.url}/api/shots`))).data as Record<string, unknown>;
+        const episodeView = (await jsonOf(await fetch(`${handle.url}/api/episodes/ep01`))).data as Record<
+            string,
+            unknown
+        >;
+        const shotsData = episodeView.shots as Record<string, unknown>;
         // 镜头列表
         const items = shotsData.shots as Array<Record<string, unknown>>;
         assert.equal(items[0]?.finalized_run, "r_test");
@@ -472,7 +493,11 @@ test("web：镜头定稿写接口与写约束", async () => {
         assert.equal(revoked.status, 200);
         assert.equal(((await jsonOf(revoked)).data as Record<string, unknown>).changed, true);
         // 撤销后回到未定稿
-        const afterData = (await jsonOf(await fetch(`${handle.url}/api/shots`))).data as Record<string, unknown>;
+        const afterView = (await jsonOf(await fetch(`${handle.url}/api/episodes/ep01`))).data as Record<
+            string,
+            unknown
+        >;
+        const afterData = afterView.shots as Record<string, unknown>;
         assert.equal((afterData.shots as Array<Record<string, unknown>>)[0]?.finalized_run, null);
     } finally {
         await handle.close();
@@ -494,7 +519,6 @@ test("web：概览不泄露本机绝对路径", async () => {
             machine_id: "test-machine",
             engine: { mode: "local", port: 1, modelpath: "/tmp/dycli-secret-models" },
         },
-        shots: makeShots(),
         assets: { index_html: "<!doctype html>", app_js: "", style_css: "" },
         host: "127.0.0.1",
         port: 0,
@@ -547,7 +571,6 @@ test("web：项目变更免重启生效，并通过 SSE 推送", async () => {
         root,
         project: { name: "web-test", version: 2 },
         machine: null,
-        shots: makeShots(),
         assets: { index_html: "<!doctype html>", app_js: "", style_css: "" },
         host: "127.0.0.1",
         port: 0,
@@ -570,7 +593,12 @@ test("web：项目变更免重启生效，并通过 SSE 推送", async () => {
         }
         assert.match(text, /event: ready/);
         // 项目名变更（不重启）
-        writeJson(join(root, "project.json"), { name: "web-test-live", version: 2 });
+        writeJson(join(root, "project.json"), {
+            name: "web-test-live",
+            version: 2,
+            production: { mode: "single", audio: true },
+            story: { enforce: "off" },
+        });
         await waitFor(async () => {
             const payload = (await (await fetch(`${handle.url}/api/health`)).json()) as {
                 data: { project: string };
@@ -580,12 +608,12 @@ test("web：项目变更免重启生效，并通过 SSE 推送", async () => {
         // 分镜变更（不重启）
         const nextShots = makeShots();
         nextShots.shots[0].prompt = "hot reload prompt";
-        writeJson(join(root, "shots.json"), nextShots);
+        writeJson(join(root, "episodes", "ep01", "shots.json"), nextShots);
         await waitFor(async () => {
-            const payload = (await (await fetch(`${handle.url}/api/shots`)).json()) as {
-                data: { shots: Array<{ prompt: string }> };
+            const payload = (await (await fetch(`${handle.url}/api/episodes/ep01`)).json()) as {
+                data: { shots: { shots: Array<{ prompt: string }> } };
             };
-            return payload.data.shots[0]?.prompt === "hot reload prompt";
+            return payload.data.shots.shots[0]?.prompt === "hot reload prompt";
         });
         // SSE 推送 revision
         text = "";
@@ -656,7 +684,6 @@ test("web：镜头生成 / 重新生成接口", async () => {
         root,
         project: { name: "web-test", version: 2, default_workflow: "workflows/t2v.json" },
         machine: null,
-        shots: makeShots(),
         assets: { index_html: "<!doctype html>", app_js: "", style_css: "" },
         host: "127.0.0.1",
         port: 0,
@@ -667,7 +694,7 @@ test("web：镜头生成 / 重新生成接口", async () => {
     });
     try {
         // 重新生成
-        const regenerate = await fetch(`${handle.url}/api/shots/generate`, {
+        const regenerate = await fetch(`${handle.url}/api/episodes/ep01/shots/01/generate`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ shot_id: "01", regenerate: true }),
@@ -682,26 +709,26 @@ test("web：镜头生成 / 重新生成接口", async () => {
         assert.equal(captured?.kind, "retake");
         assert.deepEqual((captured?.options as Record<string, unknown>).shots, ["01"]);
         assert.equal((captured?.options as Record<string, unknown>).force, true);
-        assert.equal(captured?.episodeId, null);
+        assert.equal(captured?.episodeId, "ep01");
         // 首次生成
         captured = null;
-        const generate = await fetch(`${handle.url}/api/shots/generate`, {
+        const generate = await fetch(`${handle.url}/api/episodes/ep01/shots/02/generate`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ shot_id: "02" }),
+            body: JSON.stringify({}),
         });
         assert.equal(generate.status, 202);
         assert.equal(captured?.kind, "shot");
         assert.equal((captured?.options as Record<string, unknown>).force, false);
         // 非法镜号
-        const unknown = await fetch(`${handle.url}/api/shots/generate`, {
+        const unknown = await fetch(`${handle.url}/api/episodes/ep01/shots/99/generate`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ shot_id: "99" }),
+            body: JSON.stringify({}),
         });
         assert.equal(unknown.status, 400);
         // 跨源写请求
-        const crossOrigin = await fetch(`${handle.url}/api/shots/generate`, {
+        const crossOrigin = await fetch(`${handle.url}/api/episodes/ep01/shots/01/generate`, {
             method: "POST",
             headers: { "Content-Type": "application/json", Origin: "http://evil.example" },
             body: JSON.stringify({ shot_id: "01" }),

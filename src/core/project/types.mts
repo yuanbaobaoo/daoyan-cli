@@ -98,6 +98,25 @@ export interface CustomNodeSpec {
 }
 
 /**
+ * 项目生产模式：单视频 / 多集。
+ */
+export type ProductionMode = "single" | "series";
+
+/**
+ * 项目生产配置。
+ */
+export interface ProjectProduction {
+    /**
+     * 单视频（single）或多集（series）。
+     */
+    mode?: ProductionMode;
+    /**
+     * 是否需要音频；默认 true。
+     */
+    audio?: boolean;
+}
+
+/**
  * project.json（共享，进 Git，不含绝对路径与机器差异）。
  */
 export interface ProjectConfig {
@@ -114,7 +133,11 @@ export interface ProjectConfig {
      */
     default_workflow?: string;
     /**
-     * 剧本 / 设定集门禁策略（story 模式）。
+     * 生产配置：模式与音频。
+     */
+    production?: ProjectProduction;
+    /**
+     * 剧本 / 设定集门禁策略。
      */
     story?: {
         /**

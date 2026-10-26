@@ -6,6 +6,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { resolveWorkflowRef, readProjectAt } from "../project/config.mts";
+import { audioEnabledOf } from "../project/production.mts";
 import {
     BREAKDOWN_FILE,
     EPISODE_META_FILE,
@@ -70,6 +71,24 @@ const STORY_ASSET_PREFIX = "story/assets/";
 /**
  * 构造校验问题。
  */
+/**
+ * 是否为音色相关问题。
+ */
+function isVoiceIssue(item: { code?: string; path?: string; message?: string; ref?: string }): boolean {
+    const text = `${item.code ?? ""} ${item.path ?? ""} ${item.message ?? ""} ${item.ref ?? ""}`;
+    return /voice|音色/i.test(text);
+}
+
+/**
+ * 音频关闭时过滤音色相关问题。
+ */
+function filterVoiceItems<T extends { code?: string; path?: string; message?: string; ref?: string }>(
+    items: T[],
+    audio: boolean,
+): T[] {
+    return audio ? items : items.filter((item) => !isVoiceIssue(item));
+}
+
 function issue(
     episodeId: string | null,
     path: string,
@@ -287,7 +306,7 @@ function validateCharacters(
                 "characters_version_invalid",
                 "error",
                 "characters.json version 必须为 1",
-                "重新 story init 或修正 version。",
+                "重新执行 daoyan init 或修正 version。",
             ),
         );
     }
@@ -1374,7 +1393,7 @@ function checkEpisodeShotsDoc(
                     }
                     // 剧情资产槽位（文件不存在时自动跳过）
                     try {
-                        resolveWorkflowAssets({ root, shot, workflowAbs: wf.abs });
+                        resolveWorkflowAssets({ root, shot, workflowAbs: wf.abs, audio: audioEnabledOf(project) });
                     } catch (e) {
                         issues.push(
                             issue(
@@ -1701,7 +1720,7 @@ export function computeEpisodeStoryStatus(
                 }
                 // 资产槽位解析
                 try {
-                    resolveWorkflowAssets({ root, shot, workflowAbs: wf.abs });
+                    resolveWorkflowAssets({ root, shot, workflowAbs: wf.abs, audio: audioEnabledOf(effectiveProject) });
                 } catch (e) {
                     // 结构化 blocker
                     const details = isDaoyanCliError(e) ? e.details : undefined;
@@ -1737,6 +1756,11 @@ export function computeEpisodeStoryStatus(
             }
         }
     }
+    // 音频开关
+    const audio = audioEnabledOf(effectiveProject);
+    // 过滤音色 blocker
+    const filteredBlockers = filterVoiceItems(blockers, audio);
+    blockers.splice(0, blockers.length, ...filteredBlockers);
     // 阶段
     let stage: EpisodeStoryStatus["stage"] = "ready";
     if (blockers.some((b) => b.code === "script_missing" || b.code === "script_draft")) stage = "script";
@@ -1758,14 +1782,17 @@ export function computeEpisodeStoryStatus(
             warnings.push(blocker("take_stale", `镜头 ${id} 的定稿稿件已失效，需重新定稿`, undefined, [id]));
         }
     }
+    // 过滤音色 warning
+    const filteredWarnings = filterVoiceItems(warnings, audio);
+    warnings.splice(0, warnings.length, ...filteredWarnings);
     // 计数
     const counts = {
         characters: breakdown?.characters.length ?? 0,
         forms: breakdown?.characters.reduce((sum, c) => sum + c.forms.length, 0) ?? 0,
         scenes: breakdown?.scenes.length ?? 0,
-        voices: breakdown?.voices.length ?? 0,
+        voices: audio ? (breakdown?.voices.length ?? 0) : 0,
         shots: shots?.shots.length ?? 0,
-        assets: breakdownAssetCount(breakdown, characters, scenes, voices),
+        assets: breakdownAssetCount(breakdown, characters, scenes, audio ? voices : { ...voices, voices: [] }),
         finalized_shots: takes?.finalized ?? 0,
     };
     // next actions
@@ -1934,14 +1961,14 @@ export function validateStory(root: string, episodeId?: string, verifyHashes = f
     // 问题
     const issues: StoryIssue[] = [];
     if (!storyEnabled(root)) {
-        issues.push(issue(null, "story/", "story_not_found", "error", "story 模式未启用", "运行 daoyan story init。"));
+        issues.push(issue(null, "story/", "story_not_found", "error", "项目缺少 story 结构", "重新执行 daoyan init。"));
         return issues;
     }
     // 系列
     const series = readSeries(root);
     if (series === null || !existsSync(seriesPath(root))) {
         issues.push(
-            issue(null, "story/series.json", "series_missing", "error", "系列元数据不存在", "重新 story init。"),
+            issue(null, "story/series.json", "series_missing", "error", "系列元数据不存在", "重新执行 daoyan init。"),
         );
     } else if (stringOf(series.title) === null) {
         issues.push(
@@ -1957,6 +1984,20 @@ export function validateStory(root: string, episodeId?: string, verifyHashes = f
     }
     // 剧集目录
     const metas = listEpisodeMetas(root);
+    // 单视频模式只允许一集
+    const initialProject = readProjectAt(root);
+    if (initialProject !== null && (initialProject.production?.mode ?? "series") === "single" && metas.length > 1) {
+        issues.push(
+            issue(
+                null,
+                "episodes/",
+                "episode_count_invalid",
+                "error",
+                `单视频项目只能有 1 集，当前 ${metas.length} 集`,
+                "用 story episode remove <id> 删除多余剧集。",
+            ),
+        );
+    }
     // 剧集 id 集合
     const episodeIds = new Set(metas.map((m) => m.id));
     // 集数集合
@@ -1996,14 +2037,25 @@ export function validateStory(root: string, episodeId?: string, verifyHashes = f
     const voices = loadVoices(root);
     if (!existsSync(charactersPath(root))) {
         issues.push(
-            issue(null, "story/characters.json", "characters_missing", "error", "角色设定不存在", "重新 story init。"),
+            issue(
+                null,
+                "story/characters.json",
+                "characters_missing",
+                "error",
+                "角色设定不存在",
+                "重新执行 daoyan init。",
+            ),
         );
     }
     if (!existsSync(scenesPath(root))) {
-        issues.push(issue(null, "story/scenes.json", "scenes_missing", "error", "场景设定不存在", "重新 story init。"));
+        issues.push(
+            issue(null, "story/scenes.json", "scenes_missing", "error", "场景设定不存在", "重新执行 daoyan init。"),
+        );
     }
     if (!existsSync(voicesPath(root))) {
-        issues.push(issue(null, "story/voices.json", "voices_missing", "error", "音色设定不存在", "重新 story init。"));
+        issues.push(
+            issue(null, "story/voices.json", "voices_missing", "error", "音色设定不存在", "重新执行 daoyan init。"),
+        );
     }
     validateCharacters(root, characters, voices, episodeIds, verifyHashes, issues);
     validateScenes(root, scenes, episodeIds, verifyHashes, issues);
@@ -2097,7 +2149,9 @@ export function validateStory(root: string, episodeId?: string, verifyHashes = f
         // 成片 manifest
         validateEpisodeFinals(root, meta.id, issues);
     }
-    return issues;
+    // 音频关闭时忽略音色问题
+    const project = readProjectAt(root);
+    return filterVoiceItems(issues, audioEnabledOf(project));
 }
 
 /**

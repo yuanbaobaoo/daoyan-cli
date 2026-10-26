@@ -1,29 +1,30 @@
 /** story 命令族 —— 多集剧本、全局设定集、拆解、资产、分镜与门禁状态。
  *  写入统一走 story/store / story/assets；校验统一走 story/validate。 */
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, renameSync } from "node:fs";
+import { basename, join } from "node:path";
 import { DaoyanCliError } from "../shared/errors.mts";
 import { emitData } from "../shared/json.mts";
 import { say } from "../shared/log.mts";
 import type { CliContext } from "../shared/context.mts";
 import { boolFlag, parseFlags, strFlag, usageError } from "../shared/args.mts";
-import { nowIso, sha256File, writeJsonAtomic } from "../shared/fs.mts";
+import { ensureDir, nowIso, sha256File, writeJsonAtomic } from "../shared/fs.mts";
 import { requireProject } from "../core/project/config.mts";
-import { SHOTS_FILE, STORY_MAP_FILE, type ShotsFile } from "../core/project/types.mts";
+import { readProduction } from "../core/story/mode.mts";
+import { listTasks } from "../core/task/store.mts";
+import { EPISODES_DIR, SHOTS_FILE, STORY_MAP_FILE, isTerminalStatus, type ShotsFile } from "../core/project/types.mts";
 import {
     episodeDir,
     listEpisodeMetas,
     readEpisodeMeta,
     readSeries,
+    requireStory,
     resolveEpisodeContext,
     seriesPath,
-    storyEnabled,
     storyMapPath,
 } from "../core/story/paths.mts";
 import {
     addEpisode,
     approveScript,
-    initStory,
     loadBreakdown,
     loadCharacters,
     loadEpisodeShots,
@@ -135,27 +136,6 @@ function throwIssues(issues: Array<{ severity: string; message: string }>, label
 }
 
 /**
- * story init。
- */
-async function storyInit(ctx: CliContext, args: string[]): Promise<number> {
-    // 解析结果
-    const parsed = parseFlags(args, { "--json": "boolean" });
-    if (parsed.positionals.length > 0) usageError(`story init 不接受参数：${parsed.positionals.join(" ")}`);
-    // 解构值
-    const { root, config } = requireProject(ctx);
-    // 结果
-    const result = initStory(root, config.name);
-    output(ctx, { ...result, episodes: listEpisodeMetas(root).map((e) => e.id) }, [
-        `story 已就绪：${result.created.length} 个新文件 / 目录`,
-        `剧集：${listEpisodeMetas(root)
-            .map((e) => `${e.id} ${e.title}`)
-            .join("，")}`,
-        "下一步：story script sync --episode ep01 --file <script.md>",
-    ]);
-    return 0;
-}
-
-/**
  * story series show/set。
  */
 async function storySeries(ctx: CliContext, args: string[]): Promise<number> {
@@ -163,9 +143,7 @@ async function storySeries(ctx: CliContext, args: string[]): Promise<number> {
     const [action, ...rest] = args;
     // 解构值
     const { root, config } = requireProject(ctx);
-    if (!storyEnabled(root)) {
-        throw new DaoyanCliError({ code: "story_not_found", message: "story 模式未启用" });
-    }
+    requireStory(root);
     if (action === "show") {
         // 系列
         const series = readSeries(root);
@@ -210,10 +188,17 @@ async function storyEpisode(ctx: CliContext, args: string[]): Promise<number> {
     const [action, ...rest] = args;
     // 解构值
     const { root } = requireProject(ctx);
-    if (!storyEnabled(root)) {
-        throw new DaoyanCliError({ code: "story_not_found", message: "story 模式未启用" });
-    }
+    requireStory(root);
+    // 生产模式
+    const production = readProduction(root);
     if (action === "add") {
+        if (production.mode === "single") {
+            throw new DaoyanCliError({
+                code: "mode_conflict",
+                message: "单视频项目不能新增剧集",
+                hint: "先在 Web 项目管理切换为多集模式。",
+            });
+        }
         // 解析结果
         const parsed = parseFlags(rest, {
             "--id": "string",
@@ -250,6 +235,40 @@ async function storyEpisode(ctx: CliContext, args: string[]): Promise<number> {
             { episodes: metas },
             metas.map((m) => `${m.id}  第 ${m.number} 集  ${m.title}`),
         );
+        return 0;
+    }
+    if (action === "remove") {
+        // 剧集 id
+        const id = rest.find((x) => !x.startsWith("-"));
+        if (id === undefined) usageError("usage: story episode remove <episode-id>");
+        // 剧集列表
+        const metas = listEpisodeMetas(root);
+        if (!metas.some((meta) => meta.id === id)) {
+            throw new DaoyanCliError({ code: "episode_not_found", message: `未找到剧集 ${id}` });
+        }
+        if (metas.length <= 1) {
+            throw new DaoyanCliError({
+                code: "story_invalid",
+                message: "项目至少保留一集，不能删除最后一集",
+            });
+        }
+        // 进行中的任务
+        const active = listTasks(root).find((task) => !isTerminalStatus(task.status) && task.episode_id === id);
+        if (active !== undefined) {
+            throw new DaoyanCliError({
+                code: "story_conflict",
+                message: `剧集 ${id} 仍有进行中的任务 ${active.task_id}`,
+                hint: "等任务结束或取消后再删除。",
+            });
+        }
+        // 移到回收目录（不直接物理删除）
+        const trashDir = join(root, EPISODES_DIR, "_trash");
+        ensureDir(trashDir);
+        const trashPath = join(trashDir, `${id}-${Date.now()}`);
+        renameSync(episodeDir(root, id), trashPath);
+        output(ctx, { episode_id: id, trash_path: `${EPISODES_DIR}/_trash/${basename(trashPath)}` }, [
+            `已移除剧集 ${id}（移入 ${EPISODES_DIR}/_trash/）`,
+        ]);
         return 0;
     }
     if (action === "show") {
@@ -299,7 +318,7 @@ async function storyEpisode(ctx: CliContext, args: string[]): Promise<number> {
         output(ctx, { episode: meta }, [`剧集已更新：${meta.id} 第 ${meta.number} 集 ${meta.title}`]);
         return 0;
     }
-    usageError("用法：daoyan story episode add|list|show|set");
+    usageError("用法：daoyan story episode add|list|show|set|remove");
 }
 
 /**
@@ -310,9 +329,7 @@ async function storyScript(ctx: CliContext, args: string[]): Promise<number> {
     const [action, ...rest] = args;
     // 解构值
     const { root } = requireProject(ctx);
-    if (!storyEnabled(root)) {
-        throw new DaoyanCliError({ code: "story_not_found", message: "story 模式未启用" });
-    }
+    requireStory(root);
     if (action === "sync") {
         // 解析结果
         const parsed = parseFlags(rest, {
@@ -326,9 +343,6 @@ async function storyScript(ctx: CliContext, args: string[]): Promise<number> {
         if (parsed.positionals.length > 0) usageError(`未知参数 ${parsed.positionals.join(" ")}`);
         // 剧集上下文
         const context = resolveEpisodeContext(root, strFlag(parsed, "--episode"));
-        if (context.legacy || context.episode_id === null) {
-            throw new DaoyanCliError({ code: "story_not_found", message: "story 模式未启用" });
-        }
         // 来源
         const source = strFlag(parsed, "--source") ?? "ai";
         if (source !== "ai" && source !== "user" && source !== "import") {
@@ -385,9 +399,6 @@ async function storyScript(ctx: CliContext, args: string[]): Promise<number> {
         if (parsed.positionals.length > 0) usageError(`未知参数 ${parsed.positionals.join(" ")}`);
         // 上下文
         const context = resolveEpisodeContext(root, strFlag(parsed, "--episode"));
-        if (context.legacy || context.episode_id === null) {
-            throw new DaoyanCliError({ code: "story_not_found", message: "story 模式未启用" });
-        }
         // 内容
         const meta = loadScriptMeta(root, context.episode_id);
         // 内容
@@ -408,9 +419,6 @@ async function storyScript(ctx: CliContext, args: string[]): Promise<number> {
         if (parsed.positionals.length > 0) usageError(`未知参数 ${parsed.positionals.join(" ")}`);
         // 上下文
         const context = resolveEpisodeContext(root, strFlag(parsed, "--episode"));
-        if (context.legacy || context.episode_id === null) {
-            throw new DaoyanCliError({ code: "story_not_found", message: "story 模式未启用" });
-        }
         // 确认
         const meta = approveScript(root, context.episode_id);
         output(ctx, { episode_id: context.episode_id, meta }, [
@@ -429,9 +437,7 @@ async function storyBreakdown(ctx: CliContext, args: string[]): Promise<number> 
     const [action, ...rest] = args;
     // 解构值
     const { root } = requireProject(ctx);
-    if (!storyEnabled(root)) {
-        throw new DaoyanCliError({ code: "story_not_found", message: "story 模式未启用" });
-    }
+    requireStory(root);
     if (action === "set") {
         // 解析结果
         const parsed = parseFlags(rest, {
@@ -443,9 +449,6 @@ async function storyBreakdown(ctx: CliContext, args: string[]): Promise<number> 
         if (parsed.positionals.length > 0) usageError(`未知参数 ${parsed.positionals.join(" ")}`);
         // 上下文
         const context = resolveEpisodeContext(root, strFlag(parsed, "--episode"));
-        if (context.legacy || context.episode_id === null) {
-            throw new DaoyanCliError({ code: "story_not_found", message: "story 模式未启用" });
-        }
         // 剧本
         const script = loadScriptMeta(root, context.episode_id);
         if (script.revision <= 0) {
@@ -504,9 +507,6 @@ async function storyBreakdown(ctx: CliContext, args: string[]): Promise<number> 
         if (parsed.positionals.length > 0) usageError(`未知参数 ${parsed.positionals.join(" ")}`);
         // 上下文
         const context = resolveEpisodeContext(root, strFlag(parsed, "--episode"));
-        if (context.legacy || context.episode_id === null) {
-            throw new DaoyanCliError({ code: "story_not_found", message: "story 模式未启用" });
-        }
         // 拆解
         const doc = loadBreakdown(root, context.episode_id);
         if (doc === null) {
@@ -529,9 +529,10 @@ async function storyGlobal(ctx: CliContext, kind: "characters" | "scenes" | "voi
     const [action, ...rest] = args;
     // 解构值
     const { root } = requireProject(ctx);
-    if (!storyEnabled(root)) {
-        throw new DaoyanCliError({ code: "story_not_found", message: "story 模式未启用" });
-    }
+    requireStory(root);
+    // 生产配置
+    const production = readProduction(root);
+    if (kind === "voices" && !production.audio) throw audioDisabled();
     if (action === "show") {
         // 解析结果
         const parsed = parseFlags(rest, { "--id": "string" });
@@ -646,9 +647,9 @@ async function storyAsset(ctx: CliContext, args: string[]): Promise<number> {
     const [action, ...rest] = args;
     // 解构值
     const { root } = requireProject(ctx);
-    if (!storyEnabled(root)) {
-        throw new DaoyanCliError({ code: "story_not_found", message: "story 模式未启用" });
-    }
+    requireStory(root);
+    // 生产配置
+    const production = readProduction(root);
     if (action === "add") {
         // 解析结果
         const parsed = parseFlags(rest, {
@@ -670,6 +671,7 @@ async function storyAsset(ctx: CliContext, args: string[]): Promise<number> {
         if (ownerText === undefined || id === undefined) usageError("需要 --owner 与 --id");
         // owner
         const owner = parseAssetOwner(ownerText, strFlag(parsed, "--form"));
+        if (owner.kind === "voice" && !production.audio) throw audioDisabled();
         // 入库
         const result = addStoryAsset({
             root,
@@ -716,6 +718,7 @@ async function storyAsset(ctx: CliContext, args: string[]): Promise<number> {
         if (ownerText === undefined || id === undefined) usageError("需要 --owner 与 --id");
         // owner
         const owner = parseAssetOwner(ownerText, strFlag(parsed, "--form"));
+        if (owner.kind === "voice" && !production.audio) throw audioDisabled();
         // 设置
         const asset = setReferenceAsset(root, owner, id);
         output(ctx, { asset, reference_set: true }, [`主参考已设置：${asset.path}`]);
@@ -737,6 +740,7 @@ async function storyAsset(ctx: CliContext, args: string[]): Promise<number> {
         if (ownerText === undefined || id === undefined) usageError("需要 --owner 与 --id");
         // owner
         const owner = parseAssetOwner(ownerText, strFlag(parsed, "--form"));
+        if (owner.kind === "voice" && !production.audio) throw audioDisabled();
         // 删除
         const asset = removeAsset(root, owner, id, boolFlag(parsed, "--force"));
         output(ctx, { removed: asset }, [`资产已删除：${asset.path}`]);
@@ -773,14 +777,9 @@ async function storyShots(ctx: CliContext, args: string[]): Promise<number> {
         if (parsed.positionals.length > 0) usageError(`未知参数 ${parsed.positionals.join(" ")}`);
         // 解构值
         const { root } = requireProject(ctx);
-        if (!storyEnabled(root)) {
-            throw new DaoyanCliError({ code: "story_not_found", message: "story 模式未启用" });
-        }
+        requireStory(root);
         // 上下文
         const context = resolveEpisodeContext(root, strFlag(parsed, "--episode"));
-        if (context.legacy || context.episode_id === null) {
-            throw new DaoyanCliError({ code: "story_not_found", message: "story 模式未启用" });
-        }
         // 分镜
         const shots = loadEpisodeShots(root, context.episode_id);
         if (shots === null) {
@@ -798,9 +797,7 @@ async function storyShots(ctx: CliContext, args: string[]): Promise<number> {
     if (action !== "set") usageError("用法：daoyan story shots show|set --episode <id> [--file <shots.json>]");
     // 解构值
     const { root } = requireProject(ctx);
-    if (!storyEnabled(root)) {
-        throw new DaoyanCliError({ code: "story_not_found", message: "story 模式未启用" });
-    }
+    requireStory(root);
     // 解析结果
     const parsed = parseFlags(rest, {
         "--episode": "string",
@@ -811,9 +808,6 @@ async function storyShots(ctx: CliContext, args: string[]): Promise<number> {
     if (parsed.positionals.length > 0) usageError(`未知参数 ${parsed.positionals.join(" ")}`);
     // 上下文
     const context = resolveEpisodeContext(root, strFlag(parsed, "--episode"));
-    if (context.legacy || context.episode_id === null) {
-        throw new DaoyanCliError({ code: "story_not_found", message: "story 模式未启用" });
-    }
     // 剧本
     const script = loadScriptMeta(root, context.episode_id);
     if (script.revision <= 0) {
@@ -873,18 +867,13 @@ async function storyMap(ctx: CliContext, args: string[]): Promise<number> {
     const [action, ...rest] = args;
     // 解构值
     const { root, config } = requireProject(ctx);
-    if (!storyEnabled(root)) {
-        throw new DaoyanCliError({ code: "story_not_found", message: "story 模式未启用" });
-    }
+    requireStory(root);
     if (action === "show") {
         // 解析结果
         const parsed = parseFlags(rest, { "--episode": "string", "--raw": "boolean" });
         if (parsed.positionals.length > 0) usageError(`未知参数 ${parsed.positionals.join(" ")}`);
         // 上下文
         const context = resolveEpisodeContext(root, strFlag(parsed, "--episode"));
-        if (context.legacy || context.episode_id === null) {
-            throw new DaoyanCliError({ code: "story_not_found", message: "story 模式未启用" });
-        }
         // 标注路径
         const path = `${context.rel_dir}/${STORY_MAP_FILE}`;
         if (boolFlag(parsed, "--raw")) {
@@ -921,9 +910,6 @@ async function storyMap(ctx: CliContext, args: string[]): Promise<number> {
         if (parsed.positionals.length > 0) usageError(`未知参数 ${parsed.positionals.join(" ")}`);
         // 上下文
         const context = resolveEpisodeContext(root, strFlag(parsed, "--episode"));
-        if (context.legacy || context.episode_id === null) {
-            throw new DaoyanCliError({ code: "story_not_found", message: "story 模式未启用" });
-        }
         // 骨架
         const result = materializeStoryMap(root, context.episode_id, { force: boolFlag(parsed, "--force") });
         saveStoryMap(root, context.episode_id, result.doc);
@@ -961,9 +947,6 @@ async function storyMap(ctx: CliContext, args: string[]): Promise<number> {
         }
         // 上下文
         const context = resolveEpisodeContext(root, strFlag(parsed, "--episode"));
-        if (context.legacy || context.episode_id === null) {
-            throw new DaoyanCliError({ code: "story_not_found", message: "story 模式未启用" });
-        }
         // 并发检查
         const baseSha = strFlag(parsed, "--base-sha256");
         const file = storyMapPath(root, context.episode_id);
@@ -1017,9 +1000,6 @@ async function storyMap(ctx: CliContext, args: string[]): Promise<number> {
         if (parsed.positionals.length > 0) usageError(`未知参数 ${parsed.positionals.join(" ")}`);
         // 上下文
         const context = resolveEpisodeContext(root, strFlag(parsed, "--episode"));
-        if (context.legacy || context.episode_id === null) {
-            throw new DaoyanCliError({ code: "story_not_found", message: "story 模式未启用" });
-        }
         // 删除
         const removed = removeStoryMap(root, context.episode_id);
         output(ctx, { episode_id: context.episode_id, removed }, [
@@ -1039,9 +1019,7 @@ async function storyStatus(ctx: CliContext, args: string[]): Promise<number> {
     if (parsed.positionals.length > 0) usageError(`未知参数 ${parsed.positionals.join(" ")}`);
     // 解构值
     const { root, config } = requireProject(ctx);
-    if (!storyEnabled(root)) {
-        throw new DaoyanCliError({ code: "story_not_found", message: "story 模式未启用" });
-    }
+    requireStory(root);
     // 单集
     const episode = strFlag(parsed, "--episode");
     if (episode !== undefined) {
@@ -1077,9 +1055,7 @@ async function storyValidate(ctx: CliContext, args: string[]): Promise<number> {
     if (parsed.positionals.length > 0) usageError(`未知参数 ${parsed.positionals.join(" ")}`);
     // 解构值
     const { root } = requireProject(ctx);
-    if (!storyEnabled(root)) {
-        throw new DaoyanCliError({ code: "story_not_found", message: "story 模式未启用" });
-    }
+    requireStory(root);
     // 问题
     const issues = validateStory(root, strFlag(parsed, "--episode"), boolFlag(parsed, "--verify-hashes"));
     // 错误
@@ -1105,12 +1081,22 @@ async function storyValidate(ctx: CliContext, args: string[]): Promise<number> {
 }
 
 /**
+ * 音频关闭时的统一错误。
+ */
+function audioDisabled(): DaoyanCliError {
+    return new DaoyanCliError({
+        code: "feature_disabled",
+        message: "项目已关闭音频，不能读写音色",
+        hint: "在 Web 项目管理开启音频后重试。",
+    });
+}
+
+/**
  * story 命令入口。
  */
 export async function runStory(ctx: CliContext, args: string[]): Promise<number> {
     // 解构值
     const [sub, ...rest] = args;
-    if (sub === "init") return storyInit(ctx, rest);
     if (sub === "series") return storySeries(ctx, rest);
     if (sub === "episode") return storyEpisode(ctx, rest);
     if (sub === "script") return storyScript(ctx, rest);
@@ -1124,6 +1110,6 @@ export async function runStory(ctx: CliContext, args: string[]): Promise<number>
     if (sub === "status") return storyStatus(ctx, rest);
     if (sub === "validate") return storyValidate(ctx, rest);
     usageError(
-        "用法：daoyan story init|series|episode|script|breakdown|characters|scenes|voices|asset|shots|map|status|validate",
+        "用法：daoyan story series|episode|script|breakdown|characters|scenes|voices|asset|shots|map|status|validate",
     );
 }

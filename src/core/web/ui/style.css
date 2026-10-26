@@ -191,20 +191,88 @@ a:hover {
     color: color-mix(in srgb, var(--accent) 72%, var(--text-muted));
 }
 
-.sidebar-foot {
+.sidebar-bottom {
     margin-top: auto;
-    padding: 12px 10px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+}
+
+.settings-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 14px;
+}
+
+.settings-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.settings-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 6px 0;
+    border-bottom: 1px dashed var(--border);
+}
+
+.settings-row:last-child {
+    border-bottom: none;
+}
+
+.settings-label {
+    color: var(--text-muted);
+    font-size: 12px;
+}
+
+.settings-value {
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.settings-options {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.settings-option,
+.settings-check {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 12px;
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
+    background: var(--bg-soft);
+    cursor: pointer;
+}
+
+.settings-option.disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.settings-option input,
+.settings-check input {
+    margin-top: 3px;
+}
+
+.settings-option span,
+.settings-check span {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.settings-hint {
     color: var(--text-muted);
     font-size: 11px;
     line-height: 1.5;
-}
-
-.sidebar-foot code {
-    color: var(--text-soft);
-    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-    font-size: 11px;
 }
 
 .main {
@@ -1674,8 +1742,7 @@ a:hover {
         border-bottom: 1px solid var(--border);
     }
 
-    .brand-sub,
-    .sidebar-foot {
+    .brand-sub {
         display: none;
     }
 

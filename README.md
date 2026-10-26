@@ -67,26 +67,25 @@ dycli --version
 
 ### 项目
 
-- `daoyan init --mode=local [--modelpath <路径>] [--version <tag>] [--mirror <镜像>] [--fallback-mirror <镜像|none>] [--torch-index <url>] [--torch-cuda <cuXXX>] [--torch-cpu] [--no-cache] [--no-skill] [--no-git]` — 在当前目录立项并部署项目专属 ComfyUI。
-- `daoyan init --mode=remote --url <url> [--no-skill] [--no-git]` — 在当前目录立项并绑定外部 ComfyUI。
+- `daoyan init --mode=local [--production single|series] [--modelpath <路径>] [--version <tag>] [--mirror <镜像>] [--fallback-mirror <镜像|none>] [--torch-index <url>] [--torch-cuda <cuXXX>] [--torch-cpu] [--no-cache] [--no-skill] [--no-git]` — 在当前目录立项并部署项目专属 ComfyUI。
+- `daoyan init --mode=remote --url <url> [--production single|series] [--no-skill] [--no-git]` — 在当前目录立项并绑定外部 ComfyUI。
 - `daoyan validate [--json]` — 项目级离线校验（配置 / workflows / bindings / overrides / shots / 引擎目录 / Skill）。
 - `daoyan skill update [--json]` — 重新生成项目内 Agent Skill 与 `AGENTS.md` 管理块。
 
-`init` 默认维护 `.gitignore` 受管块并初始化 Git 仓库；位于父级仓库内时跳过嵌套初始化，不自动 commit。`--no-git` 只跳过仓库初始化。
+`init` 默认维护 `.gitignore` 受管块并初始化 Git 仓库；位于父级仓库内时跳过嵌套初始化，不自动 commit。`--no-git` 只跳过仓库初始化。新项目默认 `--production single`（单视频），可用 `--production series` 创建多集项目；所有项目都使用 story 布局。
 
 ### 剧本与设定
 
-- `daoyan story init [--json]` — 启用多集短剧模式，创建 `story/`、`episodes/ep01`、资产目录与 LFS 规则。
 - `daoyan story series show|set [--title <t>] [--synopsis <s>] [--genre <g>] [--json]` — 查看 / 修改系列标题、简介与类型。
 - `daoyan story episode add --id <id> --number <n> --title <t> [--summary <s>] [--json]` — 新增剧集。
-- `daoyan story episode list|show|set ...` — 列出 / 查看 / 修改剧集（id 不可变，number 全系列唯一）。
+- `daoyan story episode list|show|set|remove ...` — 列出 / 查看 / 修改 / 移除剧集（id 不可变，number 全系列唯一）。
 - `daoyan story script sync --episode <id> --file <script.md|-> [--summary <s>] [--source ai|user|import] [--json]` — 同步某一集剧本，生成独立 revision。
 - `daoyan story script show --episode <id> [--raw] [--json]` — 查看某一集剧本。
 - `daoyan story script approve --episode <id> [--json]` — 确认某一集剧本。
 - `daoyan story breakdown set|show --episode <id> [--file <breakdown.json|->] [--json]` — 写入 / 查看单集拆解（本集角色、形态、场景、音色允许清单）。
 - `daoyan story characters set|show [--file <characters.json|->] [--id <id>] [--json]` — 写入 / 查看全局角色与形态。
 - `daoyan story scenes set|show [--file <scenes.json|->] [--id <id>] [--json]` — 写入 / 查看全局场景。
-- `daoyan story voices set|show [--file <voices.json|->] [--id <id>] [--json]` — 写入 / 查看全局音色。
+- `daoyan story voices set|show [--file <voices.json|->] [--id <id>] [--json]` — 写入 / 查看全局音色；项目关闭音频时返回 `feature_disabled`。
 - `daoyan story asset add --owner <character:id|scene:id|voice:id> [--form <form>] --id <asset> (--from <file>|--from-run <run> --output <name>) [--set-reference] [--json]` — 参考图 / 参考音频入库并记录来源。
 - `daoyan story asset set-reference|remove|list ...` — 指定主参考、删除与列出参考资产。
 - `daoyan story shots show --episode <id> [--json]` — 读取某一集完整 `shots.json`（供 AI 修改后写回）。
@@ -128,7 +127,7 @@ dycli --version
 - `daoyan status --run <run_id> [--wait] [--timeout <秒>] [--json]` — 查看单 run 详情，可等待终态。
 - `daoyan logs [-f] [-n N] [--task <task_id> | --run <run_id>] [--json]` — 结构化事件流。
 - `daoyan logs [-f] [-n N] [--src daoyan-cli|engine|worker|all]` — 引擎 / worker 文本日志。
-- `daoyan web [--port <n>] [--host <addr>] [--open] [--json]` — 启动 Web UI 查看项目、分镜、任务与产出物；可确认剧本、生成 / 重新生成镜头，并定稿 / 撤销镜头稿件。
+- `daoyan web [--port <n>] [--host <addr>] [--open] [--json]` — 启动 Web UI；可确认剧本、生成 / 重新生成镜头、定稿，并在项目管理页切换 single/series 与音频开关。
 
 ### 引擎
 

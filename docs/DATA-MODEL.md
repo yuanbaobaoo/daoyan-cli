@@ -8,8 +8,6 @@
 project.json                 # 共享：项目配置 v2
 workflows/<name>.json        # 共享：ComfyUI API JSON
 workflows/<name>.bindings.json
-shots.json                   # 共享：shot/batch recipe
-takes.json                   # 共享：镜头定稿台账（legacy 项目在根目录）
 tasks/<task_id>/task.json    # 共享：任务状态
 tasks/<task_id>/events.jsonl # 共享：结构化事件
 runs/<run_id>/run.json       # 共享：不可变运行记录
@@ -17,7 +15,7 @@ runs/<run_id>/workflow.json  # 共享：实际提交的图快照
 runs/<run_id>/inputs.json    # 共享：逻辑输入 + 输入文件哈希
 runs/<run_id>/inputs/        # 共享：输入副本（LFS）
 runs/<run_id>/outputs/       # 共享：引擎产物（LFS）
-final/cut-*.mp4|.json        # 共享：合片
+final/<episode-id>/cut-*.mp4|.json  # 共享：单集合片
 .agents/skills/daoyan/       # 共享：Agent Skill
 AGENTS.md                    # 共享：daoyan 管理块
 .dycli/machine.json          # 本机（gitignored）
@@ -28,9 +26,9 @@ logs/                        # 本机
 relay_frames/                # 本机：接力尾帧缓存
 ```
 
-## 1.1 story 模式（多集）
+## 1.1 story 布局与生产模式
 
-`daoyan story init` 启用后，项目增加：
+所有项目都由 `daoyan init` 创建为 story 布局；`project.json` 的 `production` 决定单视频 / 多集：
 
 ```text
 story/series.json                 系列标题 / 简介 / 类型
@@ -47,12 +45,27 @@ episodes/<id>/story-map.json      可选：剧情图谱叙事标注（标题 / �
 final/<episode-id>/cut-*          单集成片
 ```
 
+生产配置：
+
+```json
+{
+  "production": {
+    "mode": "single",
+    "audio": true
+  }
+}
+```
+
+- `mode`: `single`（只能一集）/ `series`（1..N 集）；旧 story 项目缺失时按 `series` 兼容；
+- `audio`: `false` 时隐藏并忽略音色 / 语音槽位，数据保留；
+- `single → series` 直接允许；`series → single` 仅当只有一集。
+
 - 角色 / 场景 / 音色 / 资产是系列级，跨集共享；新形态加 `form`，新地点加 `scene`；
 - `breakdown.json` 的 `characters[].forms` / `scenes[]` / `voices[]` 是本集允许清单；
 - 分镜引用拆解内的对象；`characters` 支持 `"id"`、`"id/form"`、`{id,form}`；
 - 每个被使用的形态 / 场景 / 音色必须有显式 `reference_asset`；不存在自动取第一张；
 - 每集 `script.json.revision` 独立；`breakdown.source_revision` / `shots.meta.script_revision` 用于 stale 检测；
-- task/run 增加 `episode_id`（legacy / 系列级为 null）；多集 label 为 `ep:<id>:shot:<shot-id>`；
+- task/run 的 `episode_id` 指向所属剧集；独立 `run` 可为 null；镜头 label 固定为 `ep:<id>:shot:<shot-id>`；
 - `run` 可选 `--episode` 归属；`shot` / `batch` / `retake` / `wrap` 多集必须显式；
 - 完整需求和契约见 [REQUIREMENTS.md](REQUIREMENTS.md)。
 
@@ -131,7 +144,7 @@ final/<episode-id>/cut-*          单集成片
 - **消费点**：接力首帧抽上游定稿稿件的尾帧（`plans.mts`）、合片按定稿稿件选段（`wrap`）、状态与图谱以定稿稿件为准；
 - 回退策略按 `project.story.enforce`：`strict` = 有产出但未定稿的镜头阻断接力与合片（`take_pending`，可用 `--allow-incomplete` 绕过）；`warn` / `off` = 回退最新成功 run 并记 warning；
 - 定稿记录指向的 run 被删除、状态非 succeeded、稿件改名或产物不在工作区时判为失效（`take_stale`），按上面的回退策略处理，需重新定稿；
-- 不含绝对路径；legacy 项目落在根目录 `takes.json`，`episode_id` 为 `null`。
+- 不含绝对路径；台账固定位于 `episodes/<id>/takes.json`，`episode_id` 为剧集 id。
 
 ## 2. project.json（共享）
 
@@ -139,6 +152,7 @@ final/<episode-id>/cut-*          单集成片
 {
   "name": "demo",
   "version": 2,
+  "production": { "mode": "single", "audio": true },
   "default_workflow": "workflows/t2v.json",
   "gpu": { "takeover": false },
   "comfyui": {
@@ -301,7 +315,7 @@ shot/batch 必须有 bindings，至少映射 `prompt` 与 `seed`；`run` 不强�
 - `title` / `summary` 用于展示，缺省回退到 `slug` 与 `prompt`；
 - `meta.fps` + 镜头 `length` 可推导时长；镜头也可用 `duration`（秒）显式覆盖；
 - 以上字段都是向后兼容的可选项，旧 `shots.json` 不受影响；`daoyan web` 会读取并展示这些信息；
-- story 模式下分镜位于 `episodes/<id>/shots.json`，并增加 `meta.episode_id` / `meta.script_revision` / `meta.script_sha256`；
+- 分镜位于 `episodes/<id>/shots.json`，并包含 `meta.episode_id` / `meta.script_revision` / `meta.script_sha256`；
 - story 分镜的 `characters` 使用 `{id, form}`；`dialogue[]` 引用音色；`script_refs[]` 引用拆解 beats；`asset_slots` 可显式映射工作流资产槽位。
 
 ## 6. task
@@ -337,7 +351,7 @@ shot/batch 必须有 bindings，至少映射 `prompt` 与 `seed`；`run` 不强�
 }
 ```
 
-story 模式额外字段：`episode_id`（legacy / 系列级为 `null`）。多集 label 为 `ep:<episode-id>:shot:<shot-id>`。
+额外字段：`episode_id` 指向所属剧集；独立 `run` 可为 `null`。镜头 label 固定为 `ep:<episode-id>:shot:<shot-id>`。
 
 `tasks/<task_id>/events.jsonl` 每行：
 

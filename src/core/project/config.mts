@@ -12,13 +12,11 @@ import type { CliContext } from "../../shared/context.mts";
 import {
     MACHINE_FILE,
     PROJECT_FILE,
-    SHOTS_FILE,
     WORKFLOWS_DIR,
     type MachineConfig,
     type MachineLocalEngine,
     type MachineRemoteEngine,
     type ProjectConfig,
-    type ShotsFile,
 } from "./types.mts";
 
 /**
@@ -65,6 +63,13 @@ export function readProjectAt(root: string): ProjectConfig | null {
 }
 
 /**
+ * 写回项目根 project.json。
+ */
+export function saveProjectAt(root: string, project: ProjectConfig): void {
+    writeJsonAtomic(join(root, PROJECT_FILE), project);
+}
+
+/**
  * 解析并校验 project.json v2。
  */
 function readProject(file: string): ProjectConfig {
@@ -100,6 +105,13 @@ function isProjectConfig(v: unknown): v is ProjectConfig {
     if (typeof o.name !== "string" || o.name.trim() === "") return false;
     if (o.version !== 2) return false;
     if (o.default_workflow !== undefined && typeof o.default_workflow !== "string") return false;
+    if (o.production !== undefined) {
+        if (typeof o.production !== "object" || o.production === null) return false;
+        // 生产配置宽松视图
+        const p = o.production as Record<string, unknown>;
+        if (p.mode !== undefined && p.mode !== "single" && p.mode !== "series") return false;
+        if (p.audio !== undefined && typeof p.audio !== "boolean") return false;
+    }
     if (o.story !== undefined) {
         if (typeof o.story !== "object" || o.story === null) return false;
         // story 段宽松视图
@@ -251,42 +263,6 @@ export function requireProject(ctx: CliContext): FoundProject {
         });
     }
     return found;
-}
-
-/**
- * 加载项目根下的 shots.json（解析失败抛 config_invalid）。
- */
-export function loadShotsFile(root: string): ShotsFile {
-    // 分镜表的绝对路径
-    const file = join(root, SHOTS_FILE);
-    if (!existsSync(file)) {
-        throw new DaoyanCliError({
-            code: "config_invalid",
-            message: `缺少 ${file}（init 生成或手工创建）`,
-        });
-    }
-    try {
-        // 解析出的原始 JSON
-        const raw: unknown = JSON.parse(readFileSync(file, "utf8"));
-        if (typeof raw !== "object" || raw === null) throw new Error("顶层不是对象");
-        // 顶层对象的宽松视图
-        const o = raw as Record<string, unknown>;
-        if (typeof o.meta !== "object" || o.meta === null) throw new Error("缺少 meta");
-        if (!Array.isArray(o.shots)) throw new Error("缺少 shots 数组");
-        return raw as ShotsFile;
-    } catch (e) {
-        throw new DaoyanCliError({
-            code: "config_invalid",
-            message: `${file} 不是合法的 shots.json：${e instanceof Error ? e.message : String(e)}`,
-        });
-    }
-}
-
-/**
- * 加载 shots.json；不存在返回 null（validate/status 容错）。
- */
-export function loadShotsIfExists(root: string): ShotsFile | null {
-    return existsSync(join(root, SHOTS_FILE)) ? loadShotsFile(root) : null;
 }
 
 /**

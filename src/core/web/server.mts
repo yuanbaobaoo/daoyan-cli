@@ -7,8 +7,8 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
-import type { MachineConfig, ProjectConfig, ShotsFile, TaskOptions } from "../project/types.mts";
-import { loadMachineIfExists, loadShotsIfExists, readProjectAt } from "../project/config.mts";
+import type { MachineConfig, ProjectConfig, TaskOptions } from "../project/types.mts";
+import { loadMachineIfExists, readProjectAt } from "../project/config.mts";
 import { buildAccessUrls, isLoopbackHost, normalizeHost, type AccessUrls } from "./addresses.mts";
 import type { SkillCommand } from "../agent/skill.mts";
 import { SCHEMA_VERSION } from "../../shared/json.mts";
@@ -16,7 +16,6 @@ import { DaoyanCliError, isDaoyanCliError } from "../../shared/errors.mts";
 import { VERSION } from "../../shared/version.mts";
 import {
     buildOverview,
-    buildShotsView,
     getRunDetail,
     getTaskDetail,
     listArtifacts,
@@ -24,13 +23,7 @@ import {
     listTasksView,
     listWorkflows,
 } from "./data.mts";
-import {
-    resolveEpisodeFinalMedia,
-    resolveFinalMedia,
-    resolveRunMedia,
-    resolveStoryMedia,
-    serveMedia,
-} from "./media.mts";
+import { resolveEpisodeFinalMedia, resolveRunMedia, resolveStoryMedia, serveMedia } from "./media.mts";
 import {
     buildStoryEpisodeView,
     buildStorySeriesView,
@@ -39,7 +32,9 @@ import {
     listStoryScenesView,
     listStoryVoicesView,
 } from "./story-data.mts";
-import { listEpisodeMetas, resolveEpisodeContext, storyEnabled } from "../story/paths.mts";
+import { listEpisodeMetas, resolveEpisodeContext } from "../story/paths.mts";
+import { productionOf } from "../project/production.mts";
+import { updateProduction } from "../story/mode.mts";
 import { checkStoryGate, gateError, loadContextShots } from "../story/production.mts";
 import { approveScript } from "../story/store.mts";
 import { finalizeTake, revokeTake, takesRelPath } from "../story/takes.mts";
@@ -137,10 +132,6 @@ export interface WebServerOptions {
      */
     machine: MachineConfig | null;
     /**
-     * 分镜配置。
-     */
-    shots: ShotsFile | null;
-    /**
      * 当前命令注册表（Skill stale 判定）。
      */
     commands?: readonly SkillCommand[];
@@ -208,10 +199,6 @@ interface RouteContext {
      * 本机配置。
      */
     machine: MachineConfig | null;
-    /**
-     * 分镜配置。
-     */
-    shots: ShotsFile | null;
     /**
      * 当前命令注册表（Skill stale 判定）。
      */
@@ -296,8 +283,8 @@ const ALLOWED_METHODS = "GET, HEAD, POST";
 const TAKE_WRITE_PATHS = new Set(["/api/takes/finalize", "/api/takes/revoke"]);
 // 剧本确认路径
 const SCRIPT_APPROVE_PATH = "/api/script/approve";
-// legacy 镜头生成路径
-const SHOT_GENERATE_PATH = "/api/shots/generate";
+// 项目管理设置路径
+const PROJECT_SETTINGS_PATH = "/api/project/settings";
 // story 镜头生成路径
 const EPISODE_SHOT_GENERATE_RE = /^\/api\/episodes\/([^/]+)\/shots\/([^/]+)\/generate$/;
 // 写接口请求体上限（64 KiB）
@@ -519,13 +506,6 @@ function refreshContext(ctx: RouteContext): void {
     } catch {
         // 保留上一次有效配置
     }
-    try {
-        // 分镜
-        const shots = loadShotsIfExists(ctx.root);
-        if (shots !== null) ctx.shots = shots;
-    } catch {
-        // 保留上一次有效分镜
-    }
 }
 
 /**
@@ -586,7 +566,7 @@ async function overviewOf(ctx: RouteContext, cache: OverviewCache): Promise<Reco
     const now = Date.now();
     if (cache.data !== null && now - cache.at < OVERVIEW_CACHE_MS) return cache.data;
     // 重新构建
-    const data = await buildOverview(ctx.root, ctx.project, ctx.machine, ctx.shots, ctx.commands);
+    const data = await buildOverview(ctx.root, ctx.project, ctx.machine, ctx.commands);
     cache.at = now;
     cache.data = data;
     return data;
@@ -681,7 +661,7 @@ function sendWriteError(res: ServerResponse, error: unknown): void {
         const status =
             error.code === "run_not_found" || error.code === "take_not_found"
                 ? 404
-                : error.code === "machine_busy" || error.code === "story_gate_failed"
+                : error.code === "machine_busy" || error.code === "story_gate_failed" || error.code === "mode_conflict"
                   ? 409
                   : error.code === "episode_required" || error.code === "episode_not_found"
                     ? 400
@@ -804,6 +784,53 @@ function decodePathSegment(value: string | undefined): string | null {
 }
 
 /**
+ * 更新项目模式 / 音频设置。
+ */
+async function handleProjectSettings(
+    req: IncomingMessage,
+    res: ServerResponse,
+    ctx: RouteContext,
+    cache: OverviewCache,
+): Promise<void> {
+    try {
+        // 请求体
+        const body = await requireWriteBody(req);
+        // 模式
+        const mode = body.mode;
+        if (mode !== undefined && mode !== "single" && mode !== "series") {
+            throw new WriteRequestError(400, "bad_request", "mode 只能是 single / series");
+        }
+        // 音频
+        const audio = body.audio;
+        if (audio !== undefined && typeof audio !== "boolean") {
+            throw new WriteRequestError(400, "bad_request", "audio 必须是 boolean");
+        }
+        if (mode === undefined && audio === undefined) {
+            throw new WriteRequestError(400, "bad_request", "至少提供 mode 或 audio");
+        }
+        // 更新
+        const updated = updateProduction(ctx.root, {
+            ...(mode !== undefined ? { mode: mode as "single" | "series" } : {}),
+            ...(audio !== undefined ? { audio: audio as boolean } : {}),
+        });
+        ctx.project = updated;
+        // 缓存失效
+        cache.at = 0;
+        cache.data = null;
+        // 生产配置
+        const production = productionOf(updated);
+        sendJson(res, 200, {
+            name: updated.name,
+            mode: production.mode,
+            audio: production.audio,
+            episode_count: listEpisodeMetas(ctx.root).length,
+        });
+    } catch (e) {
+        sendWriteError(res, e);
+    }
+}
+
+/**
  * 确认剧本。
  */
 async function handleScriptApprove(
@@ -830,26 +857,16 @@ async function handleScriptApprove(
 }
 
 /**
- * 解析镜头生成请求（story 路径或 legacy 请求体）。
+ * 解析镜头生成请求路径。
  */
-function parseShotGenerateTarget(
-    pathname: string,
-    body: Record<string, unknown>,
-): { episodeId: string | undefined; shotId: string } | null {
+function parseShotGenerateTarget(pathname: string): { episodeId: string; shotId: string } | null {
     // story 路径
     const matched = EPISODE_SHOT_GENERATE_RE.exec(pathname);
-    if (matched !== null) {
-        const episodeId = decodePathSegment(matched[1]);
-        const shotId = decodePathSegment(matched[2]);
-        if (episodeId === null || shotId === null) return null;
-        return { episodeId, shotId };
-    }
-    // legacy 路径
-    if (pathname === SHOT_GENERATE_PATH) {
-        const shotId = stringField(body.shot_id);
-        return shotId === undefined ? null : { episodeId: undefined, shotId };
-    }
-    return null;
+    if (matched === null) return null;
+    const episodeId = decodePathSegment(matched[1]);
+    const shotId = decodePathSegment(matched[2]);
+    if (episodeId === null || shotId === null) return null;
+    return { episodeId, shotId };
 }
 
 /**
@@ -866,7 +883,7 @@ async function handleShotGenerate(
         // 请求体
         const body = await requireWriteBody(req);
         // 目标
-        const target = parseShotGenerateTarget(pathname, body);
+        const target = parseShotGenerateTarget(pathname);
         if (target === null) throw new WriteRequestError(400, "bad_request", "缺少有效的剧集 / 镜号");
         // 是否重拍
         const regenerate = body.regenerate === true;
@@ -992,7 +1009,11 @@ async function handleRequest(
                 await handleScriptApprove(req, res, ctx, cache);
                 return;
             }
-            if (pathname === SHOT_GENERATE_PATH || EPISODE_SHOT_GENERATE_RE.test(pathname)) {
+            if (pathname === PROJECT_SETTINGS_PATH) {
+                await handleProjectSettings(req, res, ctx, cache);
+                return;
+            }
+            if (EPISODE_SHOT_GENERATE_RE.test(pathname)) {
                 await handleShotGenerate(req, res, ctx, cache, pathname);
                 return;
             }
@@ -1036,6 +1057,32 @@ async function handleRequest(
             return;
         }
 
+        // 项目设置
+        if (pathname === "/api/project") {
+            // 生产配置
+            const production = productionOf(ctx.project);
+            // 剧集
+            const episodes = listEpisodeMetas(ctx.root).map((meta) => ({
+                id: meta.id,
+                number: meta.number,
+                title: meta.title,
+            }));
+            sendJson(
+                res,
+                200,
+                {
+                    name: ctx.project.name,
+                    version: ctx.project.version,
+                    mode: production.mode,
+                    audio: production.audio,
+                    episode_count: episodes.length,
+                    episodes,
+                },
+                headOnly,
+            );
+            return;
+        }
+
         // 实时变更（SSE）
         if (pathname === "/api/events") {
             if (headOnly) {
@@ -1060,20 +1107,12 @@ async function handleRequest(
 
         // 系列 / 剧集（story 模式）
         if (pathname === "/api/episodes") {
-            if (!storyEnabled(ctx.root)) {
-                sendJson(res, 200, { episodes: [] }, headOnly);
-                return;
-            }
             // 系列视图
             const view = buildStorySeriesView(ctx.root, ctx.project);
             sendJson(res, 200, { episodes: view.episodes, series: view.series, status: view.status }, headOnly);
             return;
         }
         if (pathname.startsWith("/api/episodes/")) {
-            if (!storyEnabled(ctx.root)) {
-                sendJsonError(res, 404, "not_found", "story 模式未启用", headOnly);
-                return;
-            }
             // 路径段
             const segments = pathname.split("/");
             // 剧集 id
@@ -1129,16 +1168,6 @@ async function handleRequest(
         }
         if (pathname === "/api/story/assets") {
             sendJson(res, 200, { items: listStoryAssetsView(ctx.root) }, headOnly);
-            return;
-        }
-
-        // 分镜
-        if (pathname === "/api/shots") {
-            if (storyEnabled(ctx.root)) {
-                sendJsonError(res, 410, "use_episode_api", "story 模式请使用 /api/episodes/<id>/shots", headOnly);
-                return;
-            }
-            sendJson(res, 200, buildShotsView(ctx.root, ctx.shots, "shot:", resolveEpisodeContext(ctx.root)), headOnly);
             return;
         }
 
@@ -1218,8 +1247,8 @@ async function handleRequest(
         if (pathname === "/api/finals") {
             // 指定剧集
             const episode = url.searchParams.get("episode") ?? undefined;
-            if (episode === undefined && storyEnabled(ctx.root)) {
-                // story 模式聚合每集成片
+            if (episode === undefined || episode === "") {
+                // 聚合每集成片
                 const items = listEpisodeMetas(ctx.root).flatMap((meta) => listFinals(ctx.root, meta.id));
                 sendJson(res, 200, items, headOnly);
                 return;
@@ -1285,7 +1314,7 @@ async function handleRequest(
             return;
         }
 
-        // 成片媒体（按集 / legacy）
+        // 成片媒体（按集）
         if (pathname.startsWith(`${MEDIA_PREFIX}/final/`)) {
             // 路径段
             const segments = pathname.split("/");
@@ -1307,23 +1336,7 @@ async function handleRequest(
                 await serveMedia(req, res, target, url.searchParams.get("download") === "1");
                 return;
             }
-            if (segments.length !== 4) {
-                sendJsonError(res, 404, "not_found", "媒体不存在", headOnly);
-                return;
-            }
-            // 文件名
-            const name = decodeSegment(segments[3] ?? "");
-            if (name === null) {
-                sendJsonError(res, 400, "bad_request", "媒体路径非法", headOnly);
-                return;
-            }
-            // 媒体目标
-            const target = resolveFinalMedia(ctx.root, name);
-            if (target === null) {
-                sendJsonError(res, 404, "not_found", "媒体不存在", headOnly);
-                return;
-            }
-            await serveMedia(req, res, target, url.searchParams.get("download") === "1");
+            sendJsonError(res, 404, "not_found", "媒体不存在", headOnly);
             return;
         }
 
@@ -1382,7 +1395,6 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
         root: options.root,
         project: options.project,
         machine: options.machine,
-        shots: options.shots,
         commands: options.commands ?? [],
         assets: options.assets,
         taskStarter,

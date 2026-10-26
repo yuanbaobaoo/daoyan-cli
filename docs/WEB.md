@@ -66,17 +66,23 @@ daoyan web · demo · local
 
 ## 2. 页面
 
-### story 模式（多集）
+### 项目模式（single / series）
 
-`story/series.json` 存在时，Web 切换为系列 / 剧集视图：
+所有项目都使用 story 布局；`project.json.production.mode` 决定页面形态：
+
+- `single`：单视频，直接展示唯一视频；隐藏剧集列表与剧情图谱；
+- `series`：多集，展示系列、剧集与剧情图谱。
+
+左侧底部「项目管理」可切换模式与音频开关。`series → single` 仅当项目只有一集。
 
 | 页面 | 内容 |
 |---|---|
-| 概览 | 系列标题、剧集卡片（stage / 剧本 revision / blockers / 下一步） |
-| 剧集详情 | 单集剧本、拆解、分镜、本集任务与成片；含剧情图谱（拓扑 / 时序 / 生成上下文）；hash 路由 `#/episode/<id>` |
+| 概览 | single：唯一视频卡片；series：系列标题、剧集卡片（stage / 剧本 revision / blockers / 下一步） |
+| 剧集详情 | 单集剧本、拆解、分镜、本集任务与成片；series 含剧情图谱；hash 路由 `#/episode/<id>` |
+| 项目管理 | 视频模式（single / series）、音频开关；保存后热更新导航与页面 |
 | 角色 | 全局角色、形态、主参考图与其它资产 |
 | 场景 | 全局场景与参考图 |
-| 音色 | 音色档案、参考音频与试听 |
+| 音色 | 音频开启时显示；关闭后隐藏 |
 | 设定资产 | 全部参考图 / 音频，`*` 标记当前主参考 |
 | 分镜 / 产出物 / 任务 / 成片 / 工作流 | 继续提供跨集或全局视图 |
 
@@ -87,6 +93,8 @@ GET /api/episodes                     剧集列表
 GET /api/episodes/:id                 单集完整视图（含 map）
 GET /api/episodes/:id/{script,breakdown,shots,map,tasks,runs,artifacts,finals}
 GET /api/story/{characters,scenes,voices,assets}
+GET /api/project                   项目设置（mode / audio / 剧集）
+POST /api/project/settings         修改 mode / audio
 GET /media/story/<owner-relative-path>   参考图 / 音频
 GET /media/final/<episode>/<name>        单集成片
 ```
@@ -117,38 +125,7 @@ AI 通过 `daoyan story map show --episode <id> --json` 获取同一份生成上
 - 参考图等媒体改为 `Cache-Control: private, no-cache` + ETag，同名文件替换后立即重新校验；
 - 任务进度：任务卡展示当前阶段、运行时长（每秒走动）与事件数；`tasks/*/events.jsonl` 追加事件会触发 SSE，展开详情自动跟随最新事件。
 
-legacy 项目继续使用原有 `/api/shots`、`/api/finals`、`/media/final/<name>`。
-
-### legacy
-
-| 页面 | 内容 |
-|---|---|
-| 概览 | 镜头/人物/场景/产出统计、剧情简介、项目档案、人物设定、场景设定、分镜一览、引擎/机器状态、最近产出与任务 |
-| 分镜 | 每个镜头的标题、内容摘要、完整提示词、人物、场景、seed/帧数/时长/分辨率/采样参数、全部历史产物与 run 历史；支持按人物/场景/状态/关键词筛选 |
-| 产出物 | 所有 run outputs 的扁平画廊；按镜头/状态/类型筛选，支持搜索 |
-| 任务 | task 列表，展开查看 run 与 `events.jsonl` 时间线 |
-| 成片 | `final/cut-*` 成片与 manifest 片段清单 |
-| 工作流 | `workflows/*.json`、节点数、bindings、默认 workflow |
-
-人物与场景来自 `shots.json` 的可选字段：
-
-```json
-{
-  "meta": {
-    "synopsis": "剧情简介",
-    "characters": [{ "id": "lin", "name": "林默", "description": "调查员" }],
-    "scenes": [{ "id": "city", "name": "雨夜城市", "description": "霓虹与积水" }]
-  },
-  "shots": [
-    { "id": "01", "title": "雨夜信号", "summary": "林默发现线索", "characters": ["lin"], "scene": "city" }
-  ]
-}
-```
-
-- 人物/场景可写字符串或对象；镜头用 id 或名称引用；
-- 可选 `fps` + 镜头 `length` 推导时长，也可用镜头 `duration` 显式指定；
-- 没有登记人物/场景时，页面会显示“未标注”，不影响其他功能；
-- 每个镜头会列出**全部历史产物**（不只是最新一条），可直接播放、下载或按 run 追溯。
+旧 `/api/shots`、根 `final/` 与 legacy 项目结构已移除。
 
 视频与音频使用 HTML5 播放器；服务端支持 HTTP Range，因此可以拖动进度条。图片打开灯箱；JSON/文本提供预览；其他格式提供下载。
 
@@ -166,13 +143,12 @@ legacy 项目继续使用原有 `/api/shots`、`/api/finals`、`/media/final/<na
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/health` | 健康检查与项目名/模式 |
-| GET | `/api/overview` | 概览数据（2 秒内存缓存，引擎探测超时 1.5 秒）；含 `storyboard` 项目档案 |
-| GET | `/api/episodes` | story 模式剧集列表 |
+| GET | `/api/overview` | 概览数据（2 秒内存缓存，引擎探测超时 1.5 秒）；含 story 字段 |
+| GET | `/api/episodes` | 剧集列表 |
 | GET | `/api/episodes/:id` | 单集完整视图；含 `map` 剧情图谱与生成上下文 |
 | GET | `/api/episodes/:id/map` | 剧情图谱 + 生成上下文（workflow 候选 / 槽位 / 连续性 / 渲染状态 / 缺口） |
 | GET | `/api/episodes/:id/{script,breakdown,shots,tasks,runs,artifacts,finals}` | 单集子资源 |
 | GET | `/api/story/{characters,scenes,voices,assets}` | 全局设定与资产 |
-| GET | `/api/shots` | 分镜视图：人物/场景聚合、统计、每镜全部历史产物与 run；无 `shots.json` 时 data 为 `null` |
 | GET | `/api/artifacts?limit=&label=&status=&kind=&search=` | 扁平化产物列表 |
 | GET | `/api/runs/:run_id` | run 详情、inputs、outputs、task 事件 |
 | GET | `/api/tasks` | 任务列表 |
@@ -180,12 +156,11 @@ legacy 项目继续使用原有 `/api/shots`、`/api/finals`、`/media/final/<na
 | GET | `/api/finals` | 成片列表与 manifest |
 | GET | `/api/workflows` | 工作流列表 |
 | GET/HEAD | `/media/run/:run_id/:name` | run 产出物流 |
-| GET/HEAD | `/media/final/:name` | 成片流 |
+| GET/HEAD | `/media/final/:episode/:name` | 成片流 |
 | POST | `/api/takes/finalize` | 镜头定稿；body `{shot_id, run_id, output?, note?, episode_id?}` |
 | POST | `/api/takes/revoke` | 撤销定稿；body `{shot_id, episode_id?}` |
 | POST | `/api/script/approve` | 确认剧本；body `{episode_id}` |
 | POST | `/api/episodes/:id/shots/:shot_id/generate` | 生成 / 重拍镜头；body `{regenerate?: boolean}` |
-| POST | `/api/shots/generate` | legacy 镜头生成；body `{shot_id, regenerate?: boolean}` |
 | GET | `/api/events` | SSE 项目变更推送（`ready` / `revision`） |
 | GET | `/api/revision` | 当前项目版本号 |
 

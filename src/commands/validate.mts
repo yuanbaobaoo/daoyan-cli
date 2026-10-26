@@ -8,7 +8,7 @@ import { DaoyanCliError } from "../shared/errors.mts";
 import { emitData } from "../shared/json.mts";
 import { say } from "../shared/log.mts";
 import type { CliContext } from "../shared/context.mts";
-import { loadMachineIfExists, loadShotsIfExists, requireProject, resolveWorkflowRef } from "../core/project/config.mts";
+import { loadMachineIfExists, requireProject, resolveWorkflowRef } from "../core/project/config.mts";
 import {
     BINDINGS_SUFFIX,
     WORKFLOWS_DIR,
@@ -30,7 +30,6 @@ import { loadWorkflowAssets, validateWorkflowAssetsGraph } from "../core/story/w
 import { skillState } from "../core/agent/skill.mts";
 import { inspectMachineLock } from "../core/machine/lock.mts";
 import { VERSION } from "../shared/version.mts";
-import { storyEnabled } from "../core/story/paths.mts";
 import { validateStory } from "../core/story/validate.mts";
 
 // 尺寸建议（warning，不阻断）
@@ -180,216 +179,6 @@ function validateWorkflows(root: string, machine: MachineConfig | null, issues: 
     }
 }
 
-/**
- * 校验 shots.json。
- */
-function validateShots(root: string, shots: ShotsFile | null, issues: ValidationIssue[]): void {
-    if (shots === null) {
-        issues.push({
-            path: "shots.json",
-            code: "shots_missing",
-            severity: "warning",
-            message: "没有 shots.json（单 run 模式可忽略）",
-            hint: "需要 shot/batch 时创建 shots.json。",
-        });
-        return;
-    }
-    // 尺寸
-    if (!Number.isFinite(shots.meta.width) || shots.meta.width <= 0) {
-        issues.push({
-            path: "shots.meta.width",
-            code: "shots_width_invalid",
-            severity: "error",
-            message: "meta.width 必须是正数",
-            hint: "填写生成宽度。",
-        });
-    } else if (shots.meta.width % DIM_MULTIPLE !== 0) {
-        issues.push({
-            path: "shots.meta.width",
-            code: "shots_width_not_aligned",
-            severity: "warning",
-            message: `meta.width=${shots.meta.width} 不是 32 的倍数`,
-            hint: "某些模型会对齐到 32/64，建议主动对齐。",
-        });
-    }
-    if (!Number.isFinite(shots.meta.height) || shots.meta.height <= 0) {
-        issues.push({
-            path: "shots.meta.height",
-            code: "shots_height_invalid",
-            severity: "error",
-            message: "meta.height 必须是正数",
-            hint: "填写生成高度。",
-        });
-    } else if (shots.meta.height % DIM_MULTIPLE !== 0) {
-        issues.push({
-            path: "shots.meta.height",
-            code: "shots_height_not_aligned",
-            severity: "warning",
-            message: `meta.height=${shots.meta.height} 不是 32 的倍数`,
-            hint: "建议对齐到 32 的倍数。",
-        });
-    }
-    if (shots.shots.length === 0) {
-        issues.push({
-            path: "shots.shots",
-            code: "shots_empty",
-            severity: "error",
-            message: "分镜表为空",
-            hint: "添加至少一个镜头。",
-        });
-    }
-    // 镜号 / seed / prompt
-    const seenId = new Set<string>();
-    const seenSeed = new Set<string>();
-    const byId = new Map(shots.shots.map((s) => [s.id, s]));
-    for (const s of shots.shots) {
-        // 定位标签
-        const tag = `shots.${s.id}`;
-        if (seenId.has(s.id)) {
-            issues.push({
-                path: tag,
-                code: "shot_id_duplicate",
-                severity: "error",
-                message: `镜号 ${s.id} 重复`,
-                hint: "镜号必须唯一。",
-            });
-        }
-        seenId.add(s.id);
-        if (typeof s.seed !== "number") {
-            issues.push({
-                path: tag,
-                code: "shot_seed_invalid",
-                severity: "error",
-                message: "缺少数值 seed",
-                hint: "为每个镜头设置 seed。",
-            });
-        } else if (seenSeed.has(String(s.seed))) {
-            issues.push({
-                path: tag,
-                code: "shot_seed_duplicate",
-                severity: "warning",
-                message: `seed ${s.seed} 与其他镜头重复`,
-                hint: "重复 seed 可能产生相似结果（并非错误）。",
-            });
-        }
-        if (typeof s.seed === "number") seenSeed.add(String(s.seed));
-        if (typeof s.prompt !== "string" || s.prompt.trim() === "") {
-            issues.push({
-                path: tag,
-                code: "shot_prompt_empty",
-                severity: "error",
-                message: "prompt 为空",
-                hint: "填写镜头提示词。",
-            });
-        }
-        // 帧网格
-        const len = s.length ?? shots.defaults.length;
-        if (typeof len === "number" && len % FRAME_GRID_STEP !== FRAME_GRID_OFFSET) {
-            issues.push({
-                path: tag,
-                code: "shot_length_not_aligned",
-                severity: "warning",
-                message: `length ${len} 不符合 17k+5 帧网格`,
-                hint: "引擎可能静默对齐；建议使用 17k+5。",
-            });
-        }
-        // workflow 文件
-        const ref = s.workflow ?? shots.workflow ?? null;
-        if (ref !== null) {
-            const wf = resolveWorkflowRef(root, ref);
-            if (!existsSync(wf.abs)) {
-                issues.push({
-                    path: tag,
-                    code: "shot_workflow_missing",
-                    severity: "error",
-                    message: `workflow 文件不存在：${wf.rel}`,
-                    hint: "先创建/导入该 workflow。",
-                });
-            } else if (!existsSync(bindingsPathOf(wf.abs))) {
-                issues.push({
-                    path: tag,
-                    code: "shot_bindings_missing",
-                    severity: "warning",
-                    message: `workflow 缺少 bindings：${wf.rel.replace(/\.json$/, ".bindings.json")}`,
-                    hint: "shot/batch 需要 bindings 注入 prompt/seed。",
-                });
-            }
-        }
-    }
-    // 首帧与接力
-    for (const s of shots.shots) {
-        // 首帧
-        const ff: FirstFrame = s.first_frame;
-        if (ff === undefined) continue;
-        // 定位标签
-        const tag = `shots.${s.id}.first_frame`;
-        if (typeof ff === "string") {
-            const rel = shots.meta.anchors[ff];
-            if (rel === undefined) {
-                issues.push({
-                    path: tag,
-                    code: "anchor_missing_key",
-                    severity: "error",
-                    message: `锚点 key "${ff}" 不在 meta.anchors`,
-                    hint: "在 meta.anchors 登记或改用存在的 key。",
-                });
-            } else if (!existsSync(join(root, rel))) {
-                issues.push({
-                    path: tag,
-                    code: "anchor_file_missing",
-                    severity: "error",
-                    message: `锚点图片不存在：${rel}`,
-                    hint: "放入锚点文件，或修正 meta.anchors 路径。",
-                });
-            }
-        } else if (typeof ff === "object" && typeof ff.relay === "string") {
-            if (!byId.has(ff.relay)) {
-                issues.push({
-                    path: tag,
-                    code: "relay_upstream_missing",
-                    severity: "error",
-                    message: `接力上游 ${ff.relay} 不存在`,
-                    hint: "修正 relay 镜号。",
-                });
-            }
-        } else {
-            issues.push({
-                path: tag,
-                code: "first_frame_invalid",
-                severity: "error",
-                message: 'first_frame 非法（应为锚点字符串或 {"relay":"id"}）',
-                hint: "修正 first_frame。",
-            });
-        }
-    }
-    // 接力环
-    for (const s of shots.shots) {
-        const seen = new Set<string>([s.id]);
-        let cur = s;
-        for (;;) {
-            const ff = cur.first_frame;
-            if (typeof ff !== "object" || ff === undefined) break;
-            const next = byId.get(ff.relay);
-            if (next === undefined) break;
-            if (seen.has(next.id)) {
-                issues.push({
-                    path: `shots.${s.id}`,
-                    code: "relay_cycle",
-                    severity: "error",
-                    message: `接力链成环（经过 ${next.id}）`,
-                    hint: "打断接力环。",
-                });
-                break;
-            }
-            seen.add(next.id);
-            cur = next;
-        }
-    }
-}
-
-/**
- * 校验本机引擎与模型目录。
- */
 function validateMachine(root: string, machine: MachineConfig | null, issues: ValidationIssue[]): void {
     if (machine === null) {
         issues.push({
@@ -450,7 +239,6 @@ function validateMachine(root: string, machine: MachineConfig | null, issues: Va
 export async function runValidate(ctx: CliContext): Promise<number> {
     const { root, config: project } = requireProject(ctx);
     const machine = loadMachineIfExists(root);
-    const shots = loadShotsIfExists(root);
     // 问题列表
     const issues: ValidationIssue[] = [];
 
@@ -470,20 +258,16 @@ export async function runValidate(ctx: CliContext): Promise<number> {
 
     validateMachine(root, machine, issues);
     validateWorkflows(root, machine, issues);
-    if (storyEnabled(root)) {
-        // story 模式：根 shots.json 被忽略，校验分集剧本 / 设定集 / 拆解 / 分镜
-        for (const item of validateStory(root)) {
-            issues.push({
-                path: item.path,
-                episode_id: item.episode_id,
-                code: item.code,
-                severity: item.severity === "error" ? "error" : "warning",
-                message: item.message,
-                hint: item.hint,
-            });
-        }
-    } else {
-        validateShots(root, shots, issues);
+    // 校验分集剧本 / 设定集 / 拆解 / 分镜
+    for (const item of validateStory(root)) {
+        issues.push({
+            path: item.path,
+            episode_id: item.episode_id,
+            code: item.code,
+            severity: item.severity === "error" ? "error" : "warning",
+            message: item.message,
+            hint: item.hint,
+        });
     }
 
     // 机器锁

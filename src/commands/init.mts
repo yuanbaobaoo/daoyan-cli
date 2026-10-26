@@ -22,7 +22,8 @@ import {
     readProjectAt,
     saveMachine,
 } from "../core/project/config.mts";
-import type { MachineConfig, MachineLocalEngine, ProjectConfig } from "../core/project/types.mts";
+import type { MachineConfig, MachineLocalEngine, ProductionMode, ProjectConfig } from "../core/project/types.mts";
+import { storyEnabled } from "../core/story/paths.mts";
 import {
     allocatePort,
     assertLocalPrereqs,
@@ -81,6 +82,10 @@ interface InitFlags {
      * --no-git：不初始化 Git 仓库（.gitignore 仍维护）。
      */
     noGit: boolean;
+    /**
+     * --production：single（默认）/ series。
+     */
+    production: ProductionMode;
 }
 
 /**
@@ -88,7 +93,7 @@ interface InitFlags {
  */
 function parseArgs(args: string[]): InitFlags {
     // 解析结果
-    const flags: InitFlags = { noSkill: false, noGit: false, toolchain: {} };
+    const flags: InitFlags = { noSkill: false, noGit: false, toolchain: {}, production: "single" };
     for (let i = 0; i < args.length; i++) {
         // 当前参数
         const a = args[i];
@@ -101,6 +106,16 @@ function parseArgs(args: string[]): InitFlags {
         }
         if (name === "--no-git") {
             flags.noGit = true;
+            continue;
+        }
+        if (name === "--production") {
+            // 生产模式取值
+            const { value, skip } = takeValue(args, i, inline, "--production");
+            if (value !== "single" && value !== "series") {
+                usageError(`--production 仅接受 single / series（收到 ${value}）`);
+            }
+            flags.production = value;
+            i += skip;
             continue;
         }
         if (name === "--mode") {
@@ -223,12 +238,19 @@ export async function runInit(ctx: CliContext, args: string[]): Promise<void> {
     // 是否创建新项目
     let projectCreated = false;
     if (existingProject === null) {
-        say(`在 ${root} 创建新项目（v2 骨架）`);
+        say(`在 ${root} 创建新项目（v2 story 骨架，${flags.production}）`);
         // 目录名作为项目名
-        scaffoldProject(root, basename(root));
+        scaffoldProject(root, basename(root), flags.production);
         project = readProjectAt(root) as ProjectConfig;
         projectCreated = true;
     } else {
+        if (!storyEnabled(root)) {
+            throw new DaoyanCliError({
+                code: "story_not_found",
+                message: "旧项目结构不再支持（缺少 story/series.json）",
+                hint: "请在一个新目录重新执行 daoyan init --mode=local|remote。",
+            });
+        }
         project = existingProject;
         say(`复用已有 project.json（不覆盖共享文件）：${root}`);
     }
@@ -375,6 +397,10 @@ export async function runInit(ctx: CliContext, args: string[]): Promise<void> {
         root,
         mode: flags.mode,
         project_created: projectCreated,
+        production: {
+            mode: project.production?.mode ?? flags.production,
+            audio: project.production?.audio ?? true,
+        },
         git: {
             repo: git.status,
             branch: git.branch,

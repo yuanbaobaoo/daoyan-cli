@@ -7,8 +7,8 @@ import { emitData } from "../shared/json.mts";
 import { say } from "../shared/log.mts";
 import type { CliContext } from "../shared/context.mts";
 import { splitInlineFlag, takeValue, usageError } from "../shared/args.mts";
-import { loadMachine, loadShotsIfExists, requireProject } from "../core/project/config.mts";
-import { isTerminalStatus, type RunRecord, type TaskRecord } from "../core/project/types.mts";
+import { loadMachine, requireProject } from "../core/project/config.mts";
+import { isTerminalStatus, type RunRecord, type ShotsFile, type TaskRecord } from "../core/project/types.mts";
 import { listRuns, readRun } from "../core/run/store.mts";
 import { runSummary } from "../core/run/summary.mts";
 import { listTasks, readTask, taskSummary } from "../core/task/store.mts";
@@ -16,7 +16,7 @@ import { readEvents } from "../core/task/events.mts";
 import { taskDir } from "../core/task/store.mts";
 import { taskExitCode, taskRuns, waitForTask } from "../core/task/create.mts";
 import { buildStatusSnapshot } from "../core/status/snapshot.mts";
-import { resolveEpisodeContext, storyEnabled } from "../core/story/paths.mts";
+import { requireStory, resolveEpisodeContext } from "../core/story/paths.mts";
 import { loadContextShots } from "../core/story/production.mts";
 import { computeEpisodeStoryStatus, computeSeriesStoryStatus } from "../core/story/validate.mts";
 import type { EpisodeContext, EpisodeStoryStatus, SeriesStoryStatus } from "../core/story/types.mts";
@@ -98,8 +98,8 @@ export async function runStatus(ctx: CliContext, args: string[]): Promise<number
     const flags = parseArgs(args);
     const { root, config: project } = requireProject(ctx);
     const machine = loadMachine(root);
-    // 分镜（story 模式在 --task/--run 分支之后再解析）
-    let shots = loadShotsIfExists(root);
+    // 分镜（在 --task/--run 分支之后再解析）
+    let shots: ShotsFile | null = null;
 
     // --task
     if (flags.taskId !== undefined) {
@@ -191,26 +191,20 @@ export async function runStatus(ctx: CliContext, args: string[]): Promise<number
         return flags.wait ? (run.status === "succeeded" ? 0 : 1) : 0;
     }
 
-    // story 模式：系列概览或单集视图
-    const storyOn = storyEnabled(root);
+    // 剧集视图
+    requireStory(root);
     // 单集上下文
     let episodeContext: EpisodeContext | null = null;
     // 单集剧情状态
     let episodeStatus: EpisodeStoryStatus | null = null;
     // 系列剧情概览
     let seriesStatus: SeriesStoryStatus | null = null;
-    if (storyOn) {
-        if (flags.episode !== undefined) {
-            episodeContext = resolveEpisodeContext(root, flags.episode);
-            shots = loadContextShots(root, episodeContext);
-            episodeStatus = computeEpisodeStoryStatus(root, flags.episode, project);
-        } else {
-            shots = null;
-            seriesStatus = computeSeriesStoryStatus(root, project);
-        }
-    } else if (flags.episode !== undefined) {
-        // legacy 不接受 --episode
-        resolveEpisodeContext(root, flags.episode);
+    if (flags.episode !== undefined) {
+        episodeContext = resolveEpisodeContext(root, flags.episode);
+        shots = loadContextShots(root, episodeContext);
+        episodeStatus = computeEpisodeStoryStatus(root, flags.episode, project);
+    } else {
+        seriesStatus = computeSeriesStoryStatus(root, project);
     }
 
     // 当前命令注册表（Skill stale 判定）

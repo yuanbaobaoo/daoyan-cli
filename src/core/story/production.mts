@@ -1,7 +1,5 @@
-/** Story 生产接入 —— 剧集 shots 加载与拍摄门禁。
- *  legacy 项目不启用门禁；story 项目按 project.story.enforce 执行。 */
+/** Story 生产接入 —— 剧集 shots 加载与拍摄门禁。 */
 import { DaoyanCliError } from "../../shared/errors.mts";
-import { loadShotsFile } from "../project/config.mts";
 import type { ProjectConfig, ShotsFile } from "../project/types.mts";
 import type { EpisodeContext, EpisodeStoryStatus, StoryBlocker } from "./types.mts";
 import { computeEpisodeStoryStatus } from "./validate.mts";
@@ -34,10 +32,6 @@ export interface StoryGateResult {
  * 读取剧集上下文的分镜。
  */
 export function loadContextShots(root: string, context: EpisodeContext): ShotsFile {
-    if (context.legacy) return loadShotsFile(root);
-    if (context.episode_id === null) {
-        throw new DaoyanCliError({ code: "story_invalid", message: "缺少 episode_id" });
-    }
     // 分镜
     const shots = loadEpisodeShots(root, context.episode_id);
     if (shots === null) {
@@ -67,7 +61,7 @@ export function storyEnforceOf(project: ProjectConfig): StoryEnforce {
 export function checkStoryGate(root: string, context: EpisodeContext, project: ProjectConfig): StoryGateResult {
     // 模式
     const mode = storyEnforceOf(project);
-    if (context.legacy || context.episode_id === null || mode === "off") {
+    if (mode === "off") {
         return { mode, blockers: [], stage: null };
     }
     // 单集状态

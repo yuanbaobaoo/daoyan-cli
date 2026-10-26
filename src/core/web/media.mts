@@ -157,33 +157,6 @@ export function resolveRunMedia(root: string, runId: string, name: string): Medi
 }
 
 /**
- * 解析成片文件。
- */
-export function resolveFinalMedia(root: string, name: string): MediaTarget | null {
-    // final 目录
-    const dir = join(root, FINAL_DIR);
-    // 项目根真实路径
-    const projectRoot = safeRealpath(root);
-    if (projectRoot === null) return null;
-    // 目录真实路径
-    const base = safeRealpath(dir);
-    if (base === null || !isWithin(projectRoot, base)) return null;
-    // 只允许 basename，杜绝路径分隔符
-    if (basename(name) !== name || name.includes("/") || name.includes("\\")) return null;
-    // 文件真实路径
-    const abs = safeRealpath(join(dir, name));
-    if (abs === null || !isWithin(base, abs)) return null;
-    try {
-        // 文件状态
-        const stat = statSync(abs);
-        if (!stat.isFile()) return null;
-        return makeTarget(abs, name, `"${stat.size}-${stat.mtimeMs}"`);
-    } catch {
-        return null;
-    }
-}
-
-/**
  * 解析 story 资产文件（story/assets/...）。
  */
 export function resolveStoryMedia(root: string, relPath: string): MediaTarget | null {

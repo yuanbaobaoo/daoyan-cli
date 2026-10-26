@@ -272,7 +272,7 @@ export function validateTakeTarget(
             details: { run_id: run.run_id, shot_id: shotId, expected_label: label, actual_label: run.label },
         });
     }
-    if (!context.legacy && run.episode_id !== context.episode_id) {
+    if (run.episode_id !== context.episode_id) {
         throw new DaoyanCliError({
             code: "take_invalid",
             message: `run ${run.run_id} 属于剧集 ${String(run.episode_id ?? "未归属")}，不是 ${String(context.episode_id)}`,

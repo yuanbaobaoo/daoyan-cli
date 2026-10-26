@@ -1,7 +1,7 @@
 /** Story 路径与剧集上下文 —— 让所有单集命令共用同一套路径解析规则。
- *  - legacy（没有 story/series.json）：根 shots.json / final，episode_id = null；
- *  - story 单集：--episode 可省略；
- *  - story 多集：必须显式 --episode，否则 episode_required。 */
+ *  - 所有项目都使用 story 布局；
+ *  - single：恰好一集，--episode 可省略；
+ *  - series：多集时必须显式 --episode，否则 episode_required。 */
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { DaoyanCliError } from "../../shared/errors.mts";
@@ -23,6 +23,8 @@ import {
     STORY_VOICES_FILE,
     TAKES_FILE,
 } from "../project/types.mts";
+import { readProjectAt } from "../project/config.mts";
+import { productionOf } from "../project/production.mts";
 import type { EpisodeContext, StoryEpisodeMeta, StorySeriesFile } from "./types.mts";
 
 /**
@@ -92,10 +94,9 @@ export function storyMapPath(root: string, episodeId: string): string {
 }
 
 /**
- * 镜头定稿台账绝对路径；episodeId 为 null 表示 legacy（项目根）。
+ * 镜头定稿台账绝对路径。
  */
-export function takesPath(root: string, episodeId: string | null): string {
-    if (episodeId === null || episodeId === "") return join(root, TAKES_FILE);
+export function takesPath(root: string, episodeId: string): string {
     if (!STORY_ID_RE.test(episodeId)) {
         throw new DaoyanCliError({
             code: "story_invalid",
@@ -107,10 +108,22 @@ export function takesPath(root: string, episodeId: string | null): string {
 }
 
 /**
- * story 模式是否启用。
+ * 项目是否已初始化 story 结构。
  */
 export function storyEnabled(root: string): boolean {
     return existsSync(seriesPath(root));
+}
+
+/**
+ * 旧项目 / 未初始化 story 时统一报错。
+ */
+export function requireStory(root: string): void {
+    if (storyEnabled(root)) return;
+    throw new DaoyanCliError({
+        code: "story_not_found",
+        message: "项目缺少 story/series.json：旧项目结构不再支持",
+        hint: "请在新目录重新执行 daoyan init --mode=local|remote。",
+    });
 }
 
 /**
@@ -175,27 +188,7 @@ export function listEpisodeMetas(root: string): StoryEpisodeMeta[] {
 }
 
 /**
- * 构造 legacy 剧集上下文。
- */
-function legacyContext(root: string): EpisodeContext {
-    return {
-        episode_id: null,
-        legacy: true,
-        dir: root,
-        rel_dir: "",
-        shots_path: join(root, SHOTS_FILE),
-        final_dir: join(root, FINAL_DIR),
-        final_rel: FINAL_DIR,
-        label_prefix: "shot:",
-        script_meta_path: null,
-        script_text_path: null,
-        breakdown_path: null,
-        episode_meta_path: null,
-    };
-}
-
-/**
- * 构造 story 剧集上下文。
+ * 构造剧集上下文。
  */
 function storyContext(root: string, meta: StoryEpisodeMeta): EpisodeContext {
     // 剧集目录
@@ -206,7 +199,6 @@ function storyContext(root: string, meta: StoryEpisodeMeta): EpisodeContext {
     const finalRel = `${FINAL_DIR}/${meta.id}`;
     return {
         episode_id: meta.id,
-        legacy: false,
         dir,
         rel_dir: relDir,
         shots_path: join(dir, SHOTS_FILE),
@@ -222,29 +214,34 @@ function storyContext(root: string, meta: StoryEpisodeMeta): EpisodeContext {
 
 /**
  * 解析剧集上下文。
- * - legacy：不接受 --episode；
- * - story 单集：可省略；
- * - story 多集：必须显式 --episode。
+ * - single：可省略 --episode；
+ * - series 单集：可省略；
+ * - series 多集：必须显式 --episode。
  */
 export function resolveEpisodeContext(root: string, episodeId?: string): EpisodeContext {
-    if (!storyEnabled(root)) {
-        if (episodeId !== undefined && episodeId !== "") {
-            throw new DaoyanCliError({
-                code: "story_not_found",
-                message: "当前项目未启用 story 模式，不能使用 --episode",
-                details: { episode_id: episodeId },
-                hint: "先运行 daoyan story init。",
-            });
-        }
-        return legacyContext(root);
+    requireStory(root);
+    // 项目配置
+    const project = readProjectAt(root);
+    if (project === null) {
+        throw new DaoyanCliError({ code: "project_not_found", message: "未找到 project.json" });
     }
+    // 生产模式
+    const production = productionOf(project);
     // 全部剧集
     const metas = listEpisodeMetas(root);
     if (metas.length === 0) {
         throw new DaoyanCliError({
             code: "story_invalid",
-            message: "story 模式已启用，但 episodes/ 下没有有效剧集",
-            hint: "运行 daoyan story episode add --id ep01 --number 1 --title <标题>。",
+            message: "项目没有有效剧集",
+            hint: "运行 daoyan init 初始化第一集。",
+        });
+    }
+    if (production.mode === "single" && metas.length > 1) {
+        throw new DaoyanCliError({
+            code: "mode_conflict",
+            message: `单视频项目只能有一集，当前有 ${metas.length} 集`,
+            details: { episodes: metas.map((m) => m.id) },
+            hint: "删除多余剧集，或在项目管理切换为多集模式。",
         });
     }
     if (episodeId !== undefined && episodeId !== "") {

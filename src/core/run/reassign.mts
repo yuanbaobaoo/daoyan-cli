@@ -1,15 +1,14 @@
 /** run 归属迁移 —— 把 story 化之前（或手工 run）产出的 run 归到某一集的某个镜头。
  *  run 记录默认不可变；这是唯一的显式例外：只改 episode_id 与 label，
  *  并写 reassigned 审计段。task 记录属于历史执行事实，不改写。 */
-import { existsSync } from "node:fs";
 import { DaoyanCliError } from "../../shared/errors.mts";
-import { nowIso, readJsonIfExists } from "../../shared/fs.mts";
+import { nowIso } from "../../shared/fs.mts";
 import type { RunRecord } from "../project/types.mts";
 import { requireRun, writeRun } from "./store.mts";
 import { readTask } from "../task/store.mts";
-import { resolveEpisodeContext, takesPath } from "../story/paths.mts";
+import { resolveEpisodeContext } from "../story/paths.mts";
 import { loadEpisodeShots } from "../story/store.mts";
-import type { TakeSourceKind, TakesFile } from "../story/types.mts";
+import type { TakeSourceKind } from "../story/types.mts";
 
 // legacy 镜头 label：shot:<镜号>
 const LEGACY_SHOT_LABEL_RE = /^shot:(.+)$/;
@@ -140,12 +139,6 @@ export function reassignRunToEpisode(opts: {
     writeRun(opts.root, next);
     // 注意事项
     const warnings: string[] = [];
-    // legacy 台账引用
-    if (legacyTakeReferences(opts.root, opts.runId)) {
-        warnings.push(
-            `根目录 takes.json 里有指向该 run 的定稿记录；迁移后该记录会判为失效，需要在 ${context.episode_id} 重新 take finalize。`,
-        );
-    }
     // task 归属保持原样
     const task = readTask(opts.root, run.task_id);
     if (task !== null && (task.episode_id ?? null) !== context.episode_id) {
@@ -154,17 +147,4 @@ export function reassignRunToEpisode(opts: {
         );
     }
     return { record: next, changed: true, prior_label: priorLabel, prior_episode_id: priorEpisode, label, warnings };
-}
-
-/**
- * 判断 legacy 台账是否引用了该 run。
- */
-function legacyTakeReferences(root: string, runId: string): boolean {
-    // 根目录台账
-    const file = takesPath(root, null);
-    if (!existsSync(file)) return false;
-    // 台账内容
-    const takes = readJsonIfExists<TakesFile>(file);
-    if (takes === null || !Array.isArray(takes.shots)) return false;
-    return takes.shots.some((s) => s.finalized !== null && s.finalized !== undefined && s.finalized.run_id === runId);
 }

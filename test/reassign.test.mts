@@ -1,4 +1,4 @@
-/** run 归属迁移测试 —— legacy run 迁到某集某镜后才能定稿。 */
+/** run 归属迁移测试 —— 未归属 run 迁到某集某镜后才能定稿。 */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -118,7 +118,7 @@ function errorCodeOf(fn: () => unknown): string {
     return "no_error";
 }
 
-test("legacy run 迁移到某集后可以直接定稿", () => {
+test("未归属 run 迁移到某集后可以直接定稿", () => {
     // 项目根
     const root = setupStory();
     try {
@@ -183,44 +183,6 @@ test("迁移约束：已归属、镜号缺失与自定义 label", () => {
             errorCodeOf(() => reassignRunToEpisode({ root, episodeId: "ep01", runId: "r_none" })),
             "run_not_found",
         );
-    } finally {
-        rmSync(root, { recursive: true, force: true });
-    }
-});
-
-test("迁移会提示 legacy 台账里的定稿失效", () => {
-    // 项目根
-    const root = setupStory();
-    try {
-        // 未归属产出
-        seedRun(root, { runId: "r_ref", label: "shot:01" });
-        // 根目录 legacy 台账引用它
-        writeJson(join(root, "takes.json"), {
-            version: 1,
-            episode_id: null,
-            updated_at: "2026-10-20T06:00:00.000Z",
-            shots: [
-                {
-                    shot_id: "01",
-                    finalized: {
-                        run_id: "r_ref",
-                        output: "clip.mp4",
-                        sha256: "x",
-                        source: "ai",
-                        finalized_at: "2026-10-20T06:00:00.000Z",
-                    },
-                    history: [],
-                },
-            ],
-        });
-        // 迁移并检查警告
-        const done = reassignRunToEpisode({ root, episodeId: "ep01", runId: "r_ref", by: "user" });
-        assert.equal(done.changed, true);
-        assert.equal(
-            done.warnings.some((w) => w.includes("takes.json")),
-            true,
-        );
-        assert.equal(done.record.reassigned?.by, "user");
     } finally {
         rmSync(root, { recursive: true, force: true });
     }

@@ -649,19 +649,15 @@ export interface StoryMapFile {
  */
 export interface EpisodeContext {
     /**
-     * 剧集 id；legacy 为 null。
+     * 剧集 id。
      */
-    episode_id: string | null;
+    episode_id: string;
     /**
-     * 是否 legacy（没有 story/）。
-     */
-    legacy: boolean;
-    /**
-     * 剧集目录绝对路径；legacy 为项目根。
+     * 剧集目录绝对路径。
      */
     dir: string;
     /**
-     * 剧集目录相对路径（legacy 为空串）。
+     * 剧集目录相对路径。
      */
     rel_dir: string;
     /**
@@ -677,25 +673,25 @@ export interface EpisodeContext {
      */
     final_rel: string;
     /**
-     * 本集 label 前缀（legacy: shot:；多集: ep:<id>:shot:）。
+     * 本集 label 前缀。
      */
     label_prefix: string;
     /**
      * 剧本元数据路径。
      */
-    script_meta_path: string | null;
+    script_meta_path: string;
     /**
      * 剧本文本路径。
      */
-    script_text_path: string | null;
+    script_text_path: string;
     /**
      * 拆解路径。
      */
-    breakdown_path: string | null;
+    breakdown_path: string;
     /**
      * 剧集元数据路径。
      */
-    episode_meta_path: string | null;
+    episode_meta_path: string;
 }
 
 /**

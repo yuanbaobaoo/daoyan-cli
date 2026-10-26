@@ -526,9 +526,16 @@ function gapFromError(err: DaoyanCliError, slot: string | null, owner: string | 
 /**
  * 规划一个镜头的资产槽位（不抛错，返回缺口）。
  */
-export function planWorkflowAssets(opts: { root: string; shot: ShotSpec; workflowAbs: string }): PlannedWorkflowAssets {
+export function planWorkflowAssets(opts: {
+    root: string;
+    shot: ShotSpec;
+    workflowAbs: string;
+    audio?: boolean;
+}): PlannedWorkflowAssets {
     // 空结果
     const empty: PlannedWorkflowAssets = { uploads: [], records: [], slots: [], gaps: [] };
+    // 音频开关
+    const audio = opts.audio ?? true;
     // 槽位文件
     let file: WorkflowAssetsFile | null;
     try {
@@ -583,6 +590,19 @@ export function planWorkflowAssets(opts: { root: string; shot: ShotSpec; workflo
     for (const slot of file.slots) {
         // 必填
         const required = slot.required !== false;
+        // 音频关闭：忽略音色槽位
+        if (slot.kind === "voice" && !audio) {
+            gaps.push({
+                code: "voice_disabled",
+                error_code: "story_gate_failed",
+                severity: "warning",
+                slot: slot.name,
+                owner: null,
+                message: `项目已关闭音频，忽略音色槽位 ${slot.name}`,
+                hint: "在 Web 项目管理开启音频后重新生成。",
+            });
+            continue;
+        }
         // 节点 id
         const node = slot.target.slice(0, slot.target.indexOf("."));
         if (loaded.graph[node] === undefined) {
@@ -784,6 +804,7 @@ export function resolveWorkflowAssets(opts: {
     root: string;
     shot: ShotSpec;
     workflowAbs: string;
+    audio?: boolean;
 }): ResolvedWorkflowAssets {
     // 规划结果
     const plan = planWorkflowAssets(opts);

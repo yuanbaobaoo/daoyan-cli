@@ -21,6 +21,7 @@ import {
 } from "../workflow/load.mts";
 import type { WorkflowGraph } from "../workflow/graph.mts";
 import { resolveWorkflowAssets } from "../story/workflow-assets.mts";
+import { audioEnabledOf } from "../project/production.mts";
 
 /**
  * 一个待上传的输入文件。
@@ -504,7 +505,12 @@ export async function planShotRuns(opts: {
         // 首帧
         const ff = firstFrameUpload({ root: opts.root, shots: opts.shots, shot, bindings, context, enforceTakes });
         // 剧情资产槽位
-        const assetPlan = resolveWorkflowAssets({ root: opts.root, shot, workflowAbs: wf.abs });
+        const assetPlan = resolveWorkflowAssets({
+            root: opts.root,
+            shot,
+            workflowAbs: wf.abs,
+            audio: audioEnabledOf(opts.project),
+        });
         // 应用逻辑值
         const applied = applyLogicalValues(over.graph, bindings, values);
         const applyError = applied.issues.find((i) => i.severity === "error");

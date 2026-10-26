@@ -9,7 +9,7 @@ import { DaoyanCliError, asCliError, isDaoyanCliError } from "../../shared/error
 import { nowIso } from "../../shared/fs.mts";
 import { say, warn } from "../../shared/log.mts";
 import { onSignal } from "../../shared/signals.mts";
-import { loadMachine, loadShotsFile, readProjectAt } from "../project/config.mts";
+import { loadMachine, readProjectAt } from "../project/config.mts";
 import { LOG_DIR, isTerminalStatus, type MachineConfig, type ProjectConfig } from "../project/types.mts";
 import { resolveEpisodeContext } from "../story/paths.mts";
 import { storyEnforceOf } from "../story/production.mts";
@@ -257,17 +257,11 @@ export async function runWorker(opts: WorkerOptions): Promise<number> {
         } else {
             // 剧集上下文；story 模式必须已有 episode_id
             const context = resolveEpisodeContext(root, task.episode_id ?? undefined);
-            if (!context.legacy && (task.episode_id === null || task.episode_id === undefined)) {
-                throw new DaoyanCliError({
-                    code: "story_invalid",
-                    message: "story 模式的 shot 任务缺少 episode_id",
-                });
-            }
             labelPrefix = context.label_prefix;
             // 接力选稿上下文；--allow-incomplete 绕过时不强制定稿
             episodeContext = context;
             enforceTakes = storyEnforceOf(project) === "strict" && task.options.story_gate_bypassed !== true;
-            shotsFile = context.legacy ? loadShotsFile(root) : loadEpisodeShots(root, context.episode_id as string);
+            shotsFile = loadEpisodeShots(root, context.episode_id);
             if (shotsFile === null) {
                 throw new DaoyanCliError({
                     code: "story_invalid",

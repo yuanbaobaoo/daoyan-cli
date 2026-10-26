@@ -20,8 +20,11 @@ import {
     SHOTS_FILE,
     WORKFLOWS_DIR,
     type CustomNodeSpec,
+    type ProductionMode,
     type ProjectConfig,
 } from "../project/types.mts";
+import { initStory } from "../story/store.mts";
+import { episodeDir } from "../story/paths.mts";
 import {
     DEFAULT_PIP_MIRROR,
     resolveToolchainOptions,
@@ -134,10 +137,11 @@ export interface ToolchainSummary {
 /**
  * 生成 project.json v2 骨架内容。
  */
-export function projectTemplate(name: string): ProjectConfig {
+export function projectTemplate(name: string, mode: ProductionMode): ProjectConfig {
     return {
         name,
         version: 2,
+        production: { mode, audio: true },
         gpu: { takeover: false },
         comfyui: {
             custom_nodes: [],
@@ -148,7 +152,7 @@ export function projectTemplate(name: string): ProjectConfig {
 /**
  * 创建新项目骨架（不覆盖已有文件）。
  */
-export function scaffoldProject(root: string, name: string): { created: string[] } {
+export function scaffoldProject(root: string, name: string, mode: ProductionMode): { created: string[] } {
     // 已创建文件
     const created: string[] = [];
     // 目录
@@ -158,14 +162,25 @@ export function scaffoldProject(root: string, name: string): { created: string[]
     // project.json
     const projectFile = join(root, PROJECT_FILE);
     if (!existsSync(projectFile)) {
-        writeFileAtomically(projectFile, JSON.stringify(projectTemplate(name), null, 2) + "\n");
+        writeFileAtomically(projectFile, JSON.stringify(projectTemplate(name, mode), null, 2) + "\n");
         created.push(PROJECT_FILE);
     }
-    // shots.json
-    const shotsFile = join(root, SHOTS_FILE);
-    if (!existsSync(shotsFile)) {
-        writeFileAtomically(shotsFile, JSON.stringify(shotsTemplate(), null, 2) + "\n");
-        created.push(SHOTS_FILE);
+    // story 骨架（含默认 ep01）
+    const story = initStory(root, name);
+    created.push(...story.created);
+    // 首集分镜模板（只填充空分镜）
+    const firstShots = join(episodeDir(root, "ep01"), SHOTS_FILE);
+    if (existsSync(firstShots)) {
+        try {
+            // 当前分镜
+            const current = JSON.parse(readFileSync(firstShots, "utf8")) as { shots?: unknown[] };
+            if (!Array.isArray(current.shots) || current.shots.length === 0) {
+                writeFileAtomically(firstShots, JSON.stringify(shotsTemplate(), null, 2) + "\n");
+                created.push(`episodes/ep01/${SHOTS_FILE}`);
+            }
+        } catch {
+            // 坏文件留给 story validate 报错
+        }
     }
     // 空 workflow 占位（workflow new/import 可直接替换空图）
     const wf = join(root, WORKFLOWS_DIR, "t2v.json");

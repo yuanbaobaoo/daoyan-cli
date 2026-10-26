@@ -5,7 +5,8 @@
 > 日期：2026-10-20  
 > 适用：daoyan-cli v0.0.7+  
 > 相关文档：[PLAN.md](PLAN.md)、[DATA-MODEL.md](DATA-MODEL.md)、[COMMANDS.md](COMMANDS.md)、[AGENT-SKILL.md](AGENT-SKILL.md)、[WEB.md](WEB.md)  
-> v0.3 变更：确认第 14 节 1–8、10–13、15–16；第 9 条补充 `--episode` 策略对比；第 14 条改为「参考资产由 AI / 用户显式指定」。
+> v0.3 变更：确认第 14 节 1–8、10–13、15–16；第 9 条补充 `--episode` 策略对比；第 14 条改为「参考资产由 AI / 用户显式指定」。  
+> v0.4 变更（覆盖本文历史描述）：legacy 项目结构已移除；所有项目使用 story 布局；`production.mode` 取 `single` / `series`，`production.audio` 控制音频；`story init` 已移除，统一由 `init --production` 创建。
 
 ## 0. 一句话理解
 

@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { startWebServer } from "../src/core/web/server.mts";
 import { addAsset, parseAssetOwner } from "../src/core/story/assets.mts";
 import {
+    addEpisode,
     approveScript,
     initStory,
     saveCharacters,
@@ -85,7 +86,6 @@ test("web story：系列 / 剧集 / 设定资产 / 媒体", async () => {
         root,
         project,
         machine: null,
-        shots: null,
         commands: [],
         assets: { index_html: "<!doctype html>", app_js: "", style_css: "" },
     });
@@ -126,9 +126,9 @@ test("web story：系列 / 剧集 / 设定资产 / 媒体", async () => {
         assert.equal(mapData.data.episode_id, "ep01");
         assert.equal(mapData.data.events.length, 0);
         assert.equal(mapData.data.generation.readiness.counts.shots, 0);
-        // legacy shots API 在 story 模式不可用
+        // 旧 /api/shots 已移除
         const legacyShots = await fetch(`${handle.url}/api/shots`);
-        assert.equal(legacyShots.status, 410);
+        assert.equal(legacyShots.status, 404);
         // 设定
         const characters = await fetch(`${handle.url}/api/story/characters`);
         const charactersData = (await characters.json()) as {
@@ -148,6 +148,39 @@ test("web story：系列 / 剧集 / 设定资产 / 媒体", async () => {
             headers: { "If-None-Match": String(etag) },
         });
         assert.equal(revalidated.status, 304);
+        // 项目设置
+        const projectInfo = await fetch(`${handle.url}/api/project`);
+        assert.equal(projectInfo.status, 200);
+        const projectData = (await projectInfo.json()) as {
+            data: { mode: string; audio: boolean; episode_count: number };
+        };
+        assert.equal(projectData.data.mode, "series");
+        assert.equal(projectData.data.audio, true);
+        assert.equal(projectData.data.episode_count, 1);
+        // 关闭音频
+        const audioOff = await fetch(`${handle.url}/api/project/settings`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ audio: false }),
+        });
+        assert.equal(audioOff.status, 200);
+        assert.equal(((await audioOff.json()) as { data: { audio: boolean } }).data.audio, false);
+        // 一集时可切单视频
+        const single = await fetch(`${handle.url}/api/project/settings`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ mode: "single" }),
+        });
+        assert.equal(single.status, 200);
+        assert.equal(((await single.json()) as { data: { mode: string } }).data.mode, "single");
+        // 多集时禁止切单视频
+        addEpisode(root, { id: "ep02", number: 2, title: "第二集" });
+        const conflict = await fetch(`${handle.url}/api/project/settings`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ mode: "single" }),
+        });
+        assert.equal(conflict.status, 409);
         // 穿越
         const traversal = await fetch(`${handle.url}/media/story/..%2F..%2Fproject.json`);
         assert.notEqual(traversal.status, 200);
@@ -217,7 +250,6 @@ test("web story：镜头卡参考图与 workflow 槽位", async () => {
         root,
         project,
         machine: null,
-        shots: null,
         commands: [],
         assets: { index_html: "<!doctype html>", app_js: "", style_css: "" },
     });
@@ -295,7 +327,6 @@ test("web story：确认剧本", async () => {
         root,
         project,
         machine: null,
-        shots: null,
         commands: [],
         assets: { index_html: "<!doctype html>", app_js: "", style_css: "" },
     });

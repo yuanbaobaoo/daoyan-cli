@@ -2,7 +2,8 @@
  *  - 默认只监听 loopback；静态资源与 API 同源，不开放 CORS；
  *  - 业务数据通过 core/web/data.mts 组装，媒体通过 core/web/media.mts 白名单读取；
  *  - 不启动引擎、不占 machine lock、不改工作流；
- *  - 写能力：镜头定稿（takes.json）、确认剧本（script.json）、创建镜头生成任务。 */
+ *  - 写能力：镜头定稿（takes.json）、确认剧本（script.json）、创建镜头生成任务、角色主参考（characters.json）、
+ *    删除设定资产 / run 产物、勾选镜头发起合片（final/）。 */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -33,11 +34,14 @@ import {
     listStoryVoicesView,
 } from "./story-data.mts";
 import { listEpisodeMetas, resolveEpisodeContext } from "../story/paths.mts";
+import { parseAssetOwner, referenceAssetOf, removeAsset, setReferenceAsset } from "../story/assets.mts";
 import { productionOf } from "../project/production.mts";
 import { updateProduction } from "../story/mode.mts";
 import { checkStoryGate, gateError, loadContextShots } from "../story/production.mts";
 import { approveScript } from "../story/store.mts";
-import { finalizeTake, revokeTake, takesRelPath } from "../story/takes.mts";
+import { finalizedTakeOf, finalizeTake, revokeTake, takesRelPath } from "../story/takes.mts";
+import { buildFinal } from "../story/final.mts";
+import { removeRunOutput } from "../run/remove.mts";
 import { createAndStartTask } from "../task/create.mts";
 
 /**
@@ -277,12 +281,21 @@ const REVISION_RECORD_FILES: ReadonlyArray<readonly [string, string]> = [
 ];
 // URL 解析基准
 const URL_BASE = "http://127.0.0.1";
-// 允许的 HTTP 方法（POST 仅镜头定稿两个路径）
+// 允许的 HTTP 方法（POST 仅限显式注册的写接口）
 const ALLOWED_METHODS = "GET, HEAD, POST";
 // 定稿写接口路径
 const TAKE_WRITE_PATHS = new Set(["/api/takes/finalize", "/api/takes/revoke"]);
 // 剧本确认路径
 const SCRIPT_APPROVE_PATH = "/api/script/approve";
+// 角色形态主参考路径
+const STORY_REFERENCE_PATH = "/api/story/reference";
+// 角色 / 场景资产删除路径
+const STORY_ASSET_REMOVE_PATH = "/api/story/assets/remove";
+// run 产物删除路径
+const RUN_OUTPUT_REMOVE_PATH = "/api/runs/outputs/remove";
+// 成片候选与合片路径
+const FINALS_CANDIDATES_PATH = "/api/finals/candidates";
+const FINALS_MERGE_PATH = "/api/finals/merge";
 // 项目管理设置路径
 const PROJECT_SETTINGS_PATH = "/api/project/settings";
 // story 镜头生成路径
@@ -659,7 +672,7 @@ function sendWriteError(res: ServerResponse, error: unknown): void {
     if (isDaoyanCliError(error)) {
         // 状态码按错误码分类
         const status =
-            error.code === "run_not_found" || error.code === "take_not_found"
+            error.code === "run_not_found" || error.code === "take_not_found" || error.code === "asset_not_found"
                 ? 404
                 : error.code === "machine_busy" || error.code === "story_gate_failed" || error.code === "mode_conflict"
                   ? 409
@@ -857,6 +870,189 @@ async function handleScriptApprove(
 }
 
 /**
+ * 设置角色形态主参考。
+ * 只接受 character_id / form / asset_id；资产必须在形态内已入库。
+ */
+async function handleStoryReference(
+    req: IncomingMessage,
+    res: ServerResponse,
+    ctx: RouteContext,
+    cache: OverviewCache,
+): Promise<void> {
+    try {
+        // 请求体
+        const body = await requireWriteBody(req);
+        // 角色 id
+        const characterId = stringField(body.character_id);
+        if (characterId === undefined) throw new WriteRequestError(400, "bad_request", "缺少 character_id");
+        // 形态 id
+        const formId = stringField(body.form);
+        if (formId === undefined) throw new WriteRequestError(400, "bad_request", "缺少 form");
+        // 资产 id
+        const assetId = stringField(body.asset_id);
+        if (assetId === undefined) throw new WriteRequestError(400, "bad_request", "缺少 asset_id");
+        // 主参考
+        const asset = setReferenceAsset(ctx.root, parseAssetOwner(`character:${characterId}`, formId), assetId);
+        // 概览缓存失效
+        cache.at = 0;
+        cache.data = null;
+        sendJson(res, 200, { character_id: characterId, form: formId, reference_asset: asset.id });
+    } catch (e) {
+        sendWriteError(res, e);
+    }
+}
+
+/**
+ * 删除角色 / 场景资产。
+ * 只接受 owner_kind / owner_id / form / asset_id；被引用时由 core 拒绝删空。
+ */
+async function handleStoryAssetRemove(
+    req: IncomingMessage,
+    res: ServerResponse,
+    ctx: RouteContext,
+    cache: OverviewCache,
+): Promise<void> {
+    try {
+        // 请求体
+        const body = await requireWriteBody(req);
+        // owner 类型
+        const kind = stringField(body.owner_kind);
+        if (kind !== "character" && kind !== "scene") {
+            throw new WriteRequestError(400, "bad_request", "owner_kind 只能是 character / scene");
+        }
+        // owner id
+        const ownerId = stringField(body.owner_id);
+        if (ownerId === undefined) throw new WriteRequestError(400, "bad_request", "缺少 owner_id");
+        // 资产 id
+        const assetId = stringField(body.asset_id);
+        if (assetId === undefined) throw new WriteRequestError(400, "bad_request", "缺少 asset_id");
+        // owner
+        const owner = parseAssetOwner(`${kind}:${ownerId}`, stringField(body.form));
+        // 删除
+        const removed = removeAsset(ctx.root, owner, assetId, false);
+        // 删除后的主参考
+        const reference = referenceAssetOf(ctx.root, owner);
+        // 概览缓存失效
+        cache.at = 0;
+        cache.data = null;
+        sendJson(res, 200, {
+            owner_kind: kind,
+            owner_id: ownerId,
+            form: owner.form,
+            removed: removed.id,
+            path: removed.path,
+            reference_asset: reference?.id ?? null,
+        });
+    } catch (e) {
+        sendWriteError(res, e);
+    }
+}
+
+/**
+ * 删除 run 产物；被定稿引用的会先撤销定稿。
+ */
+async function handleRunOutputRemove(
+    req: IncomingMessage,
+    res: ServerResponse,
+    ctx: RouteContext,
+    cache: OverviewCache,
+): Promise<void> {
+    try {
+        // 请求体
+        const body = await requireWriteBody(req);
+        // run id
+        const runId = stringField(body.run_id);
+        if (runId === undefined) throw new WriteRequestError(400, "bad_request", "缺少 run_id");
+        // 产物名
+        const output = stringField(body.output);
+        if (output === undefined) throw new WriteRequestError(400, "bad_request", "缺少 output");
+        // 删除
+        const result = removeRunOutput(ctx.root, runId, output);
+        // 概览缓存失效
+        cache.at = 0;
+        cache.data = null;
+        sendJson(res, 200, result);
+    } catch (e) {
+        sendWriteError(res, e);
+    }
+}
+
+/**
+ * 合片候选：本集镜头 + 定稿可用性。
+ */
+function handleFinalsCandidates(res: ServerResponse, ctx: RouteContext, url: URL, headOnly: boolean): void {
+    try {
+        // 剧集上下文
+        const context = resolveEpisodeContext(ctx.root, url.searchParams.get("episode") ?? undefined);
+        // 本集分镜
+        const shots = loadContextShots(ctx.root, context);
+        sendJson(
+            res,
+            200,
+            {
+                episode_id: context.episode_id,
+                shots: shots.shots.map((shot) => {
+                    // 定稿查询
+                    const take = finalizedTakeOf(ctx.root, context, shot.id);
+                    return {
+                        id: shot.id,
+                        title: shot.title ?? shot.slug ?? `镜头 ${shot.id}`,
+                        finalized: take.kind === "finalized",
+                        run_id: take.kind === "finalized" ? take.run.run_id : null,
+                        output: take.kind === "finalized" ? take.output.name : null,
+                        stale: take.kind === "stale" ? take.message : null,
+                    };
+                }),
+            },
+            headOnly,
+        );
+    } catch (e) {
+        sendWriteError(res, e);
+    }
+}
+
+/**
+ * 勾选镜头合片：只接受本集已定稿且有文件的稿件。
+ */
+async function handleFinalsMerge(
+    req: IncomingMessage,
+    res: ServerResponse,
+    ctx: RouteContext,
+    cache: OverviewCache,
+): Promise<void> {
+    try {
+        // 请求体
+        const body = await requireWriteBody(req);
+        // 剧集
+        const episodeId = stringField(body.episode_id);
+        // 镜号
+        const raw = body.shots;
+        if (!Array.isArray(raw) || raw.some((x) => typeof x !== "string" || x === "")) {
+            throw new WriteRequestError(400, "bad_request", "shots 必须是镜号数组");
+        }
+        const shots = [...new Set(raw as string[])];
+        if (shots.length < 2) throw new WriteRequestError(400, "bad_request", "至少选择 2 个镜头才能合片");
+        // 上下文
+        const context = resolveEpisodeContext(ctx.root, episodeId);
+        // 合片
+        const result = await buildFinal({
+            root: ctx.root,
+            project: ctx.project,
+            context,
+            shots,
+        });
+        // 概览缓存失效
+        cache.at = 0;
+        cache.data = null;
+        // 不向浏览器暴露绝对路径
+        const { abs_path: _absPath, ...view } = result;
+        sendJson(res, 200, view);
+    } catch (e) {
+        sendWriteError(res, e);
+    }
+}
+
+/**
  * 解析镜头生成请求路径。
  */
 function parseShotGenerateTarget(pathname: string): { episodeId: string; shotId: string } | null {
@@ -999,7 +1195,7 @@ async function handleRequest(
         // API 请求先刷新磁盘上的项目上下文（免重启）
         if (pathname.startsWith(API_PREFIX)) refreshContext(ctx);
 
-        // 写接口（定稿 / 剧本确认 / 镜头生成）
+        // 写接口（定稿 / 剧本确认 / 镜头生成 / 主参考 / 删除 / 合片）
         if (isWrite) {
             if (TAKE_WRITE_PATHS.has(pathname)) {
                 await handleTakeWrite(req, res, ctx, cache, pathname);
@@ -1007,6 +1203,22 @@ async function handleRequest(
             }
             if (pathname === SCRIPT_APPROVE_PATH) {
                 await handleScriptApprove(req, res, ctx, cache);
+                return;
+            }
+            if (pathname === STORY_REFERENCE_PATH) {
+                await handleStoryReference(req, res, ctx, cache);
+                return;
+            }
+            if (pathname === STORY_ASSET_REMOVE_PATH) {
+                await handleStoryAssetRemove(req, res, ctx, cache);
+                return;
+            }
+            if (pathname === RUN_OUTPUT_REMOVE_PATH) {
+                await handleRunOutputRemove(req, res, ctx, cache);
+                return;
+            }
+            if (pathname === FINALS_MERGE_PATH) {
+                await handleFinalsMerge(req, res, ctx, cache);
                 return;
             }
             if (pathname === PROJECT_SETTINGS_PATH) {
@@ -1018,7 +1230,13 @@ async function handleRequest(
                 return;
             }
             res.setHeader("Allow", ALLOWED_METHODS);
-            sendJsonError(res, 405, "method_not_allowed", "POST 仅用于镜头定稿 / 剧本确认 / 镜头生成", headOnly);
+            sendJsonError(
+                res,
+                405,
+                "method_not_allowed",
+                "POST 仅用于镜头定稿 / 剧本确认 / 镜头生成 / 主参考 / 删除 / 合片",
+                headOnly,
+            );
             return;
         }
 
@@ -1240,6 +1458,12 @@ async function handleRequest(
                 return;
             }
             sendJson(res, 200, detail, headOnly);
+            return;
+        }
+
+        // 合片候选
+        if (pathname === FINALS_CANDIDATES_PATH) {
+            handleFinalsCandidates(res, ctx, url, headOnly);
             return;
         }
 

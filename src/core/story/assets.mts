@@ -10,6 +10,7 @@ import { requireRun, runOutputAbs } from "../run/store.mts";
 import { STORY_ASSETS_DIR } from "../project/types.mts";
 import { charactersPath, scenesPath, voicesPath, STORY_ID_RE, REFERENCE_ASSET_RESERVED } from "./paths.mts";
 import { loadCharacters, loadScenes, loadVoices, saveCharacters, saveScenes, saveVoices } from "./store.mts";
+import { entityReferenceUsage, type EntityReferenceUsage } from "./references.mts";
 import type {
     StoryAsset,
     StoryCharacter,
@@ -518,6 +519,7 @@ export function setReferenceAsset(root: string, owner: ParsedAssetOwner, assetId
 
 /**
  * 删除资产。
+ * 角色 / 场景被分镜引用时不允许删空；删除主参考后自动改用剩余第一张。
  */
 export function removeAsset(root: string, owner: ParsedAssetOwner, assetId: string, force: boolean): StoryAsset {
     // 删除实现按 owner 分支
@@ -526,8 +528,10 @@ export function removeAsset(root: string, owner: ParsedAssetOwner, assetId: stri
         const doc = loadCharacters(root);
         // 形态
         const { form } = findCharacterForm(doc, owner.id, owner.form ?? "");
+        // 引用情况
+        const usage = entityReferenceUsage(root, "character", owner.id, assetId, form.id);
         // 局部值
-        const removed = removeFromList(root, form.assets, form, assetId, force);
+        const removed = removeFromList(root, form.assets, form, assetId, force, usage);
         saveCharacters(root, doc);
         return removed;
     }
@@ -536,8 +540,10 @@ export function removeAsset(root: string, owner: ParsedAssetOwner, assetId: stri
         const doc = loadScenes(root);
         // 场景
         const scene = findScene(doc, owner.id);
+        // 引用情况
+        const usage = entityReferenceUsage(root, "scene", owner.id, assetId);
         // 局部值
-        const removed = removeFromList(root, scene.assets, scene, assetId, force);
+        const removed = removeFromList(root, scene.assets, scene, assetId, force, usage);
         saveScenes(root, doc);
         return removed;
     }
@@ -560,26 +566,42 @@ function removeFromList(
     holder: { reference_asset?: string | null },
     assetId: string,
     force: boolean,
+    usage?: EntityReferenceUsage,
 ): StoryAsset {
     // 资产
     const asset = list.find((a) => a.id === assetId);
     if (asset === undefined) {
         throw new DaoyanCliError({ code: "asset_not_found", message: `未找到资产 ${assetId}` });
     }
-    if (holder.reference_asset === assetId && !force) {
+    if (usage?.asset === true && !force) {
         throw new DaoyanCliError({
             code: "story_invalid",
-            message: `资产 ${assetId} 是当前主参考，不能直接删除`,
-            hint: "先用 story asset set-reference 指向另一资产，或 --force 删除并接受 missing_reference。",
+            message: `资产 ${assetId} 被分镜槽位显式绑定，不能直接删除`,
+            hint: "先在 shots.json 的 asset_slots / scene_asset 解除绑定，或 --force 强制删除。",
         });
     }
-    // 文件
+    if (usage?.entity === true && list.length === 1) {
+        throw new DaoyanCliError({
+            code: "story_invalid",
+            message: `角色/场景仍被分镜引用，至少保留一张参考图`,
+            hint: "先补充新的参考图，或在分镜中取消对该角色/场景的引用。",
+        });
+    }
+    // 文件（必须位于 story/assets 内）
+    if (!asset.path.startsWith(`${STORY_ASSETS_DIR}/`)) {
+        throw new DaoyanCliError({
+            code: "story_invalid",
+            message: `资产路径不在 ${STORY_ASSETS_DIR} 内：${asset.path}`,
+        });
+    }
+    // 绝对路径
     const abs = join(root, asset.path);
     if (existsSync(abs)) rmSync(abs, { force: true });
     // 记录
     const index = list.findIndex((a) => a.id === assetId);
     if (index >= 0) list.splice(index, 1);
-    if (holder.reference_asset === assetId) holder.reference_asset = null;
+    // 主参考失效时自动改用剩余第一张
+    if (holder.reference_asset === assetId) holder.reference_asset = list[0]?.id ?? null;
     return asset;
 }
 

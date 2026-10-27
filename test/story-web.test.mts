@@ -76,6 +76,14 @@ function fixture(): string {
         setReference: true,
         replace: false,
     });
+    addAsset({
+        root,
+        owner: parseAssetOwner("character:lin", "default"),
+        assetId: "pose",
+        from: image,
+        setReference: false,
+        replace: false,
+    });
     return root;
 }
 
@@ -132,8 +140,14 @@ test("web story：系列 / 剧集 / 设定资产 / 媒体", async () => {
         // 设定
         const characters = await fetch(`${handle.url}/api/story/characters`);
         const charactersData = (await characters.json()) as {
-            data: { items: Array<{ forms: Array<{ assets: Array<{ media_url: string }> }> }> };
+            data: {
+                items: Array<{
+                    forms: Array<{ reference_asset: string | null; assets: Array<{ id: string; media_url: string }> }>;
+                }>;
+            };
         };
+        const formView = charactersData.data.items[0]?.forms[0];
+        assert.equal(formView?.reference_asset, "front");
         const mediaUrl = charactersData.data.items[0]?.forms[0]?.assets[0]?.media_url;
         assert.match(String(mediaUrl), /^\/media\/story\/characters\/lin\/default\/front\.png(\?|$)/);
         // 媒体
@@ -148,6 +162,34 @@ test("web story：系列 / 剧集 / 设定资产 / 媒体", async () => {
             headers: { "If-None-Match": String(etag) },
         });
         assert.equal(revalidated.status, 304);
+        // 切换角色形态主参考
+        const setReference = await fetch(`${handle.url}/api/story/reference`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ character_id: "lin", form: "default", asset_id: "pose" }),
+        });
+        assert.equal(setReference.status, 200);
+        assert.equal(
+            ((await setReference.json()) as { data: { reference_asset: string } }).data.reference_asset,
+            "pose",
+        );
+        const switched = (await (await fetch(`${handle.url}/api/story/characters`)).json()) as {
+            data: { items: Array<{ forms: Array<{ reference_asset: string | null }> }> };
+        };
+        assert.equal(switched.data.items[0]?.forms[0]?.reference_asset, "pose");
+        // 未知资产 / 跨源拒绝
+        const unknownReference = await fetch(`${handle.url}/api/story/reference`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ character_id: "lin", form: "default", asset_id: "missing" }),
+        });
+        assert.equal(unknownReference.status, 404);
+        const crossOriginReference = await fetch(`${handle.url}/api/story/reference`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Origin: "http://evil.example" },
+            body: JSON.stringify({ character_id: "lin", form: "default", asset_id: "front" }),
+        });
+        assert.equal(crossOriginReference.status, 403);
         // 项目设置
         const projectInfo = await fetch(`${handle.url}/api/project`);
         assert.equal(projectInfo.status, 200);
@@ -288,6 +330,54 @@ test("web story：镜头卡参考图与 workflow 槽位", async () => {
         assert.equal(references[1]?.slot, "scene");
         assert.equal(references[1]?.target, "20.image");
         assert.match(String(references[1]?.asset?.media_url), /^\/media\/story\/scenes\/city\/establishing\.png(\?|$)/);
+        // 合片候选：尚无定稿
+        const candidates = await fetch(`${handle.url}/api/finals/candidates?episode=ep01`);
+        assert.equal(candidates.status, 200);
+        const candidatesData = (await candidates.json()) as {
+            data: { episode_id: string; shots: Array<{ id: string; finalized: boolean }> };
+        };
+        assert.equal(candidatesData.data.episode_id, "ep01");
+        assert.equal(candidatesData.data.shots.length, 1);
+        assert.equal(candidatesData.data.shots[0]?.finalized, false);
+        // 合片至少 2 镜
+        const tooFew = await fetch(`${handle.url}/api/finals/merge`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ episode_id: "ep01", shots: ["01"] }),
+        });
+        assert.equal(tooFew.status, 400);
+        // 产物删除：run 不存在
+        const missingOutput = await fetch(`${handle.url}/api/runs/outputs/remove`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ run_id: "missing-run", output: "01.mp4" }),
+        });
+        assert.equal(missingOutput.status, 404);
+        // 角色有两张图：删除主参考并自动切换
+        const removedFront = await fetch(`${handle.url}/api/story/assets/remove`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ owner_kind: "character", owner_id: "lin", form: "default", asset_id: "front" }),
+        });
+        assert.equal(removedFront.status, 200);
+        assert.equal(
+            ((await removedFront.json()) as { data: { reference_asset: string | null } }).data.reference_asset,
+            "pose",
+        );
+        // 仅剩一张且仍被分镜引用：拒绝删空
+        const guardedLast = await fetch(`${handle.url}/api/story/assets/remove`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ owner_kind: "character", owner_id: "lin", form: "default", asset_id: "pose" }),
+        });
+        assert.equal(guardedLast.status, 400);
+        // 场景唯一图：拒绝
+        const guardedScene = await fetch(`${handle.url}/api/story/assets/remove`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ owner_kind: "scene", owner_id: "city", asset_id: "establishing" }),
+        });
+        assert.equal(guardedScene.status, 400);
         // 移除槽位后：有图但未接入
         rmSync(assetsFile);
         const unwired = await fetch(`${handle.url}/api/episodes/ep01`);

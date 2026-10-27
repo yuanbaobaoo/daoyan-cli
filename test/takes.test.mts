@@ -6,7 +6,8 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createRunDir, writeRun, writeRunOutput } from "../src/core/run/store.mts";
+import { createRunDir, readRun, writeRun, writeRunOutput } from "../src/core/run/store.mts";
+import { removeRunOutput } from "../src/core/run/remove.mts";
 import {
     finalizedTakeOf,
     finalizeTake,
@@ -669,3 +670,72 @@ async function planErrorCode(
     }
     return "no_error";
 }
+
+test("run output remove：删除产物并自动撤销定稿", () => {
+    const root = setupStory({ name: "takes", version: 2 });
+    try {
+        const context = resolveEpisodeContext(root);
+        seedRun(root, {
+            runId: "d_01",
+            label: "ep:ep01:shot:01",
+            startedAt: "2026-10-20T10:00:00.000Z",
+            outputs: [{ name: "01.mp4", bytes: makeClipBytes("red") }],
+        });
+        finalizeTake({ root, context, shotId: "01", runId: "d_01", source: "ai" });
+        assert.equal(finalizedTakeOf(root, context, "01").kind, "finalized");
+        // 删除被定稿引用的产物
+        const result = removeRunOutput(root, "d_01", "01.mp4");
+        assert.deepEqual(result.revoked_shots, ["01"]);
+        assert.equal(existsSync(join(root, "runs", "d_01", "outputs", "01.mp4")), false);
+        assert.deepEqual(readRun(root, "d_01")?.outputs, []);
+        assert.equal(finalizedTakeOf(root, context, "01").kind, "none");
+        // 重复删除 / 未知产物
+        assert.throws(
+            () => removeRunOutput(root, "d_01", "01.mp4"),
+            (e: unknown) => e instanceof Error && (e as { code?: string }).code === "asset_not_found",
+        );
+    } finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("wrap --shots：只合指定镜头并要求定稿", async (t) => {
+    if (!hasFfmpeg()) {
+        t.skip("ffmpeg/ffprobe 不可用");
+        return;
+    }
+    const root = setupStory({ name: "takes", version: 2 });
+    try {
+        const context = resolveEpisodeContext(root);
+        for (const [runId, shot, color] of [
+            ["s_01", "01", "red"],
+            ["s_02", "02", "green"],
+        ] as const) {
+            seedRun(root, {
+                runId,
+                label: `ep:ep01:shot:${shot}`,
+                startedAt: "2026-10-20T10:00:00.000Z",
+                outputs: [{ name: `${shot}.mp4`, bytes: makeClipBytes(color) }],
+            });
+            finalizeTake({ root, context, shotId: shot, runId, source: "ai" });
+        }
+        // 单镜不足 2 段
+        assert.equal(await asyncErrorCode(() => runWrap(commandContext(root), ["--shots", "02"])), "wrap_failed");
+        // 顺序仍按 shots.json
+        assert.equal(await runWrap(commandContext(root), ["--shots", "02,01"]), 0);
+        assert.deepEqual(
+            lastManifest(root).clips.map((c) => [c.shot, c.source]),
+            [
+                ["01", "finalized"],
+                ["02", "finalized"],
+            ],
+        );
+        // 未定稿镜头进入子集：阻断
+        revokeTake({ root, context, shotId: "02", source: "user" });
+        assert.equal(await asyncErrorCode(() => runWrap(commandContext(root), ["--shots", "01,02"])), "take_pending");
+        // 未知镜号
+        assert.equal(await asyncErrorCode(() => runWrap(commandContext(root), ["--shots", "01,99"])), "story_invalid");
+    } finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});

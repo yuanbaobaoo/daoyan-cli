@@ -352,13 +352,20 @@ test("story：工作流资产槽位解析与 label 前缀", async () => {
     }
 });
 
-test("story：引用资产主参考必须显式指定，删除需 force", () => {
+test("story：删除主参考自动切换，被引用时不允许删空", () => {
     const root = setup();
     try {
         buildEpisode(root);
-        // 新形态草稿：只入库不指定主参考
+        // 新形态草稿 + 未被分镜引用的角色
         const doc = loadCharacters(root);
         doc.characters[0].forms.push({ id: "draft", name: "草稿", assets: [] });
+        doc.characters.push({
+            id: "extra",
+            name: "路人",
+            default_form: "default",
+            forms: [{ id: "default", name: "日常", assets: [] }],
+            voice_ids: [],
+        });
         saveCharacters(root, doc);
         const sources = writeSources(root);
         const draft = parseAssetOwner("character:lin-mo", "draft");
@@ -376,13 +383,31 @@ test("story：引用资产主参考必须显式指定，删除需 force", () => 
             loadCharacters(root).characters[0].forms.find((f) => f.id === "draft")?.reference_asset,
             undefined,
         );
-        // 删除主参考需要 force
-        assert.throws(
-            () => removeAsset(root, parseAssetOwner("character:lin-mo", "default"), "front", false),
-            (e: unknown) => e instanceof Error && (e as { code?: string }).code === "story_invalid",
-        );
-        const removed = removeAsset(root, parseAssetOwner("character:lin-mo", "default"), "front", true);
+        // default 形态补第二张图
+        const primary = parseAssetOwner("character:lin-mo", "default");
+        addAsset({ root, owner: primary, assetId: "side", from: sources.image, setReference: false, replace: false });
+        // 删除主参考：自动切到剩余第一张
+        const removed = removeAsset(root, primary, "front", false);
         assert.equal(removed.id, "front");
+        const form = loadCharacters(root).characters[0]?.forms.find((f) => f.id === "default");
+        assert.equal(form?.reference_asset, "side");
+        assert.deepEqual(
+            form?.assets.map((a) => a.id),
+            ["side"],
+        );
+        // 仅剩一张且被分镜引用：force 也不允许删空
+        for (const force of [false, true]) {
+            assert.throws(
+                () => removeAsset(root, primary, "side", force),
+                (e: unknown) => e instanceof Error && (e as { code?: string }).code === "story_invalid",
+            );
+        }
+        // 未被分镜引用的角色可以删空
+        const extra = parseAssetOwner("character:extra", "default");
+        addAsset({ root, owner: extra, assetId: "front", from: sources.image, setReference: true, replace: false });
+        const extraRemoved = removeAsset(root, extra, "front", false);
+        assert.equal(extraRemoved.id, "front");
+        assert.deepEqual(loadCharacters(root).characters.find((c) => c.id === "extra")?.forms[0]?.assets, []);
     } finally {
         rmSync(root, { recursive: true, force: true });
     }

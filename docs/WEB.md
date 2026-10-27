@@ -79,13 +79,14 @@ daoyan web · demo · local
 |---|---|
 | 概览 | 项目统计、引擎与机器运行环境、最近产出与任务（不再展示视频/剧集） |
 | 剧集 | series：分集列表，点击卡片进入详情；single：直接展示唯一视频详情（含剧本、拆解、分镜；隐藏剧情图谱） |
-| 剧集详情 | 单集剧本、拆解、分镜、本集任务与成片；series 含剧情图谱；hash 路由 `#/episode/<id>` |
+| 剧集详情 | 单集剧本、拆解、分镜、本集任务与成片；series 含剧情图谱；hash 路由 `#/episode/<id>`。分镜产出物默认只展示 1 条，其余「查看全部」弹窗；提示词默认展开并截断 5 行，超出显示「显示全部」 |
 | 项目管理 | 视频模式（single / series）、音频开关；保存后热更新导航与页面 |
-| 角色 | 全局角色、形态、主参考图与其它资产 |
-| 场景 | 全局场景与参考图 |
+| 角色 | 全局角色、形态、主参考图与其它资产；可删除单张图（被分镜引用时至少保留一张，删主参考会自动切换） |
+| 场景 | 全局场景与参考图；删除规则同角色 |
 | 音色 | 音频开启时显示；关闭后隐藏 |
 | 设定资产 | 全部参考图 / 音频，`*` 标记当前主参考 |
-| 分镜 / 产出物 / 任务 / 成片 / 工作流 | 继续提供跨集或全局视图 |
+| 成片 | 选剧集、勾选本集已定稿镜头，按分镜顺序合成新成片；播放 / 下载已有 `final/cut-*` |
+| 分镜 / 产出物 / 任务 / 工作流 | 继续提供跨集或全局视图 |
 
 story API：
 
@@ -96,6 +97,11 @@ GET /api/episodes/:id/{script,breakdown,shots,map,tasks,runs,artifacts,finals}
 GET /api/story/{characters,scenes,voices,assets}
 GET /api/project                   项目设置（mode / audio / 剧集）
 POST /api/project/settings         修改 mode / audio
+POST /api/story/reference          设置角色形态主参考
+POST /api/story/assets/remove      删除角色 / 场景参考图（被引用时拒绝删空）
+POST /api/runs/outputs/remove      删除 run 产出视频（定稿引用自动撤销）
+GET /api/finals/candidates?episode=<id>  本集可合片的定稿镜头
+POST /api/finals/merge             勾选镜头合片（body `{episode_id, shots[]}`）
 GET /media/story/<owner-relative-path>   参考图 / 音频
 GET /media/final/<episode>/<name>        单集成片
 ```
@@ -155,6 +161,11 @@ AI 通过 `daoyan story map show --episode <id> --json` 获取同一份生成上
 | GET | `/api/tasks` | 任务列表 |
 | GET | `/api/tasks/:task_id` | 任务详情、run 摘要、事件 |
 | GET | `/api/finals` | 成片列表与 manifest |
+| GET | `/api/finals/candidates?episode=` | 本集镜头与定稿可用性（合片面板） |
+| POST | `/api/finals/merge` | 勾选定稿镜头合片；body `{episode_id, shots[]}` |
+| POST | `/api/story/reference` | 设置角色形态主参考；body `{character_id, form, asset_id}` |
+| POST | `/api/story/assets/remove` | 删除角色 / 场景参考图；body `{owner_kind, owner_id, form?, asset_id}` |
+| POST | `/api/runs/outputs/remove` | 删除 run 产出视频；body `{run_id, output}` |
 | GET | `/api/workflows` | 工作流列表 |
 | GET/HEAD | `/media/run/:run_id/:name` | run 产出物流 |
 | GET/HEAD | `/media/final/:episode/:name` | 成片流 |

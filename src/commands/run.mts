@@ -17,6 +17,7 @@ import { isHttpUrl } from "../shared/fs.mts";
 import { loadMachine, requireProject, resolveWorkflowRef } from "../core/project/config.mts";
 import { resolveEpisodeContext } from "../core/story/paths.mts";
 import { reassignRunToEpisode } from "../core/run/reassign.mts";
+import { removeRunOutput } from "../core/run/remove.mts";
 import type { TakeSourceKind } from "../core/story/types.mts";
 import type { JsonValue } from "../core/project/types.mts";
 import { planSingleRun } from "../core/task/plans.mts";
@@ -284,6 +285,31 @@ export async function runRun(ctx: CliContext, args: string[]): Promise<number> {
     if (waited.interrupted) return 130;
     if (waited.timedOut) return 0;
     return taskExitCode(waited.task);
+}
+
+/**
+ * run output remove <run_id> <output> —— 删除单个产物；定稿引用会被撤销。
+ */
+export async function runOutputRemove(ctx: CliContext, args: string[]): Promise<number> {
+    // 位置参数
+    const [runId, outputName, ...rest] = args;
+    if (runId === undefined || runId === "" || runId.startsWith("-")) {
+        usageError("用法：daoyan run output remove <run_id> <output>");
+    }
+    if (outputName === undefined || outputName === "" || outputName.startsWith("-")) {
+        usageError("用法：daoyan run output remove <run_id> <output>");
+    }
+    if (rest.length > 0) usageError(`未知参数 ${rest.join(" ")}`);
+    const { root } = requireProject(ctx);
+    // 删除结果
+    const result = removeRunOutput(root, runId, outputName);
+    if (ctx.json) {
+        emitData(result);
+        return 0;
+    }
+    say(`已删除产物：${result.run_id}/${result.output}`);
+    if (result.revoked_shots.length > 0) say(`已撤销定稿：${result.revoked_shots.join(" ")}`);
+    return 0;
 }
 
 /**

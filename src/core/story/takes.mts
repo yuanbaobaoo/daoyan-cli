@@ -14,7 +14,7 @@ import {
     runOutputAbs,
     runsByLabel,
 } from "../run/store.mts";
-import { takesPath } from "./paths.mts";
+import { listEpisodeMetas, resolveEpisodeContext, takesPath } from "./paths.mts";
 import type {
     EpisodeContext,
     FinalizedTake,
@@ -429,6 +429,39 @@ export function revokeTake(opts: { root: string; context: EpisodeContext; shotId
     });
     saveTakes(opts.root, opts.context, file);
     return { record, revoked: prior, changed: true };
+}
+
+/**
+ * 撤销所有引用该产物的定稿；返回被撤销的镜号。
+ */
+export function revokeTakesUsingOutput(root: string, runId: string, output: string): string[] {
+    // 被撤销的镜号
+    const revoked: string[] = [];
+    for (const meta of listEpisodeMetas(root)) {
+        // 剧集上下文
+        const context = resolveEpisodeContext(root, meta.id);
+        // 当前台账
+        const file = loadTakes(root, context);
+        // 是否变更
+        let changed = false;
+        for (const record of file.shots) {
+            // 定稿条目
+            const entry = record.finalized;
+            if (entry === null || entry.run_id !== runId || entry.output !== output) continue;
+            record.finalized = null;
+            pushHistory(record, {
+                action: "revoke",
+                run_id: entry.run_id,
+                output: entry.output,
+                source: "user",
+                at: nowIso(),
+            });
+            revoked.push(record.shot_id);
+            changed = true;
+        }
+        if (changed) saveTakes(root, context, file);
+    }
+    return revoked;
 }
 
 /**

@@ -15,7 +15,7 @@ import { runLogs } from "./logs.mts";
 import { runStatus } from "./status.mts";
 import { runEngine } from "./engine.mts";
 import { runWorkflow } from "./workflow.mts";
-import { runRun, runCancel, runReassign } from "./run.mts";
+import { runRun, runCancel, runReassign, runOutputRemove } from "./run.mts";
 import { runSkill } from "./skill.mts";
 import { runWeb } from "./web.mts";
 import { runStory } from "./story.mts";
@@ -593,6 +593,26 @@ export const COMMANDS: CommandMeta[] = [
         run: (ctx, args) => runReassign(ctx, args),
     },
     {
+        name: "run output remove",
+        group: "production",
+        summary: "删除 run 的单个产物文件；被定稿引用的会先撤销定稿",
+        usage: "daoyan run output remove <run_id> <output> [--json]",
+        args: [
+            { name: "run_id", type: "string", required: true, description: "run id" },
+            { name: "output", type: "string", required: true, description: "产物文件名（outputs/ 下）" },
+        ],
+        detail: ["只删除指定产物并同步 run.json；run 目录与其它产物保留。"],
+        implemented: true,
+        jsonShape: {
+            run_id: "string",
+            output: "string",
+            path: "string",
+            bytes: "number",
+            revoked_shots: "string[]",
+        },
+        run: (ctx, args) => runOutputRemove(ctx, args),
+    },
+    {
         name: "shot",
         group: "production",
         summary: "拍摄指定镜头（一个 task 多个 run；默认异步）",
@@ -748,9 +768,16 @@ export const COMMANDS: CommandMeta[] = [
         name: "wrap",
         group: "production",
         summary: "按集用定稿稿件合片，写 final/<episode>/cut-*.mp4 与清单（不占机器锁）",
-        usage: "daoyan wrap [--episode <id>] [--select <镜号>=<run_id> ...] [--allow-incomplete] [--json]",
+        usage:
+            "daoyan wrap [--episode <id>] [--shots <镜号,...>] [--select <镜号>=<run_id> ...]\n" +
+            "                  [--allow-incomplete] [--json]",
         flags: [
             { name: "--episode", type: "string", description: "多集项目必填；单集可省略" },
+            {
+                name: "--shots",
+                type: "镜号,...",
+                description: "只合这些镜头（按分镜顺序）；省略表示整集",
+            },
             {
                 name: "--select",
                 type: "镜号=run_id",
@@ -764,6 +791,7 @@ export const COMMANDS: CommandMeta[] = [
         ],
         detail: [
             "选段优先级：--select > take finalize 的定稿稿件 > 最新成功 run。",
+            "--shots 只合指定镜号，且要求每镜都有可用定稿稿件；片段顺序仍按 shots.json。",
             "project.story.enforce=strict 时，有产出但未定稿的镜头会阻断合片（take_pending）。",
             "清单 cut-*.json 的 clips[].source 记录每段来源：finalized / latest / explicit。",
         ],

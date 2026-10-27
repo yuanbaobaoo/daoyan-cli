@@ -46,6 +46,11 @@ const API = {
     overview: "/api/overview",
     episodes: "/api/episodes",
     characters: "/api/story/characters",
+    storyReference: "/api/story/reference",
+    storyAssetRemove: "/api/story/assets/remove",
+    runOutputRemove: "/api/runs/outputs/remove",
+    finalsCandidates: "/api/finals/candidates",
+    finalsMerge: "/api/finals/merge",
     scenes: "/api/story/scenes",
     voices: "/api/story/voices",
     assets: "/api/story/assets",
@@ -984,11 +989,17 @@ function stageBadge(stage) {
 }
 
 /**
- * 资产缩略 / 播放节点。
+ * 资产缩略 / 播放节点；options 可控主参考标记、设为参考与删除。
  */
-function assetNode(asset, compact) {
+function assetNode(asset, compact, options) {
+    // 主参考标记
+    const isReference = options !== undefined && options.isReference === true;
     // 容器
-    const box = createElement("div", compact === true ? "asset-compact" : "asset-tile");
+    const box = createElement(
+        "div",
+        `${compact === true ? "asset-compact" : "asset-tile"}${isReference ? " is-reference" : ""}`,
+    );
+    if (isReference) box.append(createElement("span", "asset-primary-badge", "主参考"));
     if (asset === null || asset === undefined) {
         box.append(createElement("span", "muted", "无资产"));
         return box;
@@ -1024,6 +1035,23 @@ function assetNode(asset, compact) {
         box.append(createElement("span", "preview-icon", KIND_ICON[asset.kind] ?? "↓"));
     }
     box.append(createElement("span", "asset-name mono", asset.path));
+    // 操作
+    const actions = createElement("div", "asset-actions");
+    if (options !== undefined && options.onSetReference !== undefined) {
+        // 设为主参考
+        const button = createElement("button", "button ghost asset-reference-action", "设为主参考");
+        button.type = "button";
+        button.addEventListener("click", () => options.onSetReference(button));
+        actions.append(button);
+    }
+    if (options !== undefined && options.onDelete !== undefined) {
+        // 删除
+        const button = createElement("button", "button ghost danger asset-delete-action", "删除");
+        button.type = "button";
+        button.addEventListener("click", () => options.onDelete(button));
+        actions.append(button);
+    }
+    if (actions.childElementCount > 0) box.append(actions);
     return box;
 }
 
@@ -2466,6 +2494,42 @@ function modeOption(name, value, label, hint, checked, disabled) {
 }
 
 /**
+ * 设置角色形态主参考（写 characters.json 后刷新视图）。
+ */
+async function setFormReference(characterId, formId, assetId, button) {
+    button.disabled = true;
+    try {
+        await postJson(API.storyReference, { character_id: characterId, form: formId, asset_id: assetId });
+        await reloadView();
+    } catch (error) {
+        button.disabled = false;
+        showError(error instanceof Error ? error.message : String(error));
+    }
+}
+
+/**
+ * 删除角色 / 场景资产（被引用时后端会拒绝删空）。
+ */
+async function deleteStoryAsset(kind, ownerId, formId, asset, button) {
+    const target = `${kind === "character" ? "角色" : "场景"}参考图 ${asset.path}`;
+    if (!window.confirm(`删除 ${target}？删除后不可撤销。`)) return;
+    button.disabled = true;
+    try {
+        const data = await postJson(API.storyAssetRemove, {
+            owner_kind: kind,
+            owner_id: ownerId,
+            ...(formId !== null && formId !== undefined ? { form: formId } : {}),
+            asset_id: asset.id,
+        });
+        showToast(typeof data.reference_asset === "string" ? `已删除；主参考切换为 ${data.reference_asset}` : "已删除");
+        await reloadView();
+    } catch (error) {
+        button.disabled = false;
+        showToast(error instanceof Error ? error.message : "删除失败", true);
+    }
+}
+
+/**
  * 角色页。
  */
 function renderCharacters(data) {
@@ -2515,14 +2579,40 @@ function renderCharacters(data) {
             block.append(createElement("h4", "form-title", `${form.name} · ${form.id}`));
             // 主参考
             const reference = form.reference_asset
-                ? form.assets.find((asset) => asset.id === form.reference_asset)
+                ? (form.assets.find((asset) => asset.id === form.reference_asset) ?? null)
                 : null;
-            block.append(assetNode(reference, false));
+            if (reference !== null) {
+                block.append(
+                    assetNode(reference, false, {
+                        isReference: true,
+                        onDelete: (button) => {
+                            void deleteStoryAsset("character", character.id, form.id, reference, button);
+                        },
+                    }),
+                );
+            } else {
+                block.append(
+                    createElement(
+                        "p",
+                        "asset-hint",
+                        form.assets.length === 0 ? "暂无资产。" : "未指定主参考；点击下方图片的「设为主参考」。",
+                    ),
+                );
+            }
             // 其它资产
             const more = createElement("div", "asset-row");
             for (const asset of form.assets) {
                 if (reference !== null && asset.id === reference.id) continue;
-                more.append(assetNode(asset, true));
+                more.append(
+                    assetNode(asset, true, {
+                        onSetReference: (button) => {
+                            void setFormReference(character.id, form.id, asset.id, button);
+                        },
+                        onDelete: (button) => {
+                            void deleteStoryAsset("character", character.id, form.id, asset, button);
+                        },
+                    }),
+                );
             }
             if (more.childElementCount > 0) block.append(more);
             body.append(block);
@@ -2564,10 +2654,23 @@ function renderScenes(data) {
     for (const scene of items) {
         const card = createElement("article", "card entity-card media-entity-card");
         const reference = scene.reference_asset
-            ? scene.assets.find((asset) => asset.id === scene.reference_asset)
+            ? (scene.assets.find((asset) => asset.id === scene.reference_asset) ?? null)
             : null;
         const media = createElement("div", "entity-media");
-        media.append(assetNode(reference, false));
+        media.append(
+            assetNode(
+                reference,
+                false,
+                reference !== null
+                    ? {
+                          isReference: true,
+                          onDelete: (button) => {
+                              void deleteStoryAsset("scene", scene.id, null, reference, button);
+                          },
+                      }
+                    : undefined,
+            ),
+        );
         card.append(media);
         const body = createElement("div", "card-body");
         const title = createElement("div", "entity-title-row");
@@ -2579,7 +2682,13 @@ function renderScenes(data) {
         const more = createElement("div", "asset-row");
         for (const asset of scene.assets) {
             if (reference !== null && asset.id === reference.id) continue;
-            more.append(assetNode(asset, true));
+            more.append(
+                assetNode(asset, true, {
+                    onDelete: (button) => {
+                        void deleteStoryAsset("scene", scene.id, null, asset, button);
+                    },
+                }),
+            );
         }
         if (more.childElementCount > 0) body.append(more);
         card.append(body);
@@ -3410,14 +3519,24 @@ function renderShotCard(shot) {
     }
     card.append(actions);
 
-    // 完整提示词
+    // 完整提示词（默认展开，最多 5 行，超出走弹窗）
     const promptDetails = createElement("details", "shot-prompt");
+    promptDetails.open = true;
     const referenceCount = Array.isArray(shot.references) ? shot.references.length : 0;
     promptDetails.append(
         createElement("summary", "", referenceCount > 0 ? `完整提示词 · 参考图 ${referenceCount}` : "完整提示词"),
     );
-    promptDetails.append(renderPromptText(shot));
+    const promptBody = createElement("div", "shot-prompt-body");
+    promptBody.append(renderPromptText(shot));
+    const promptMore = createElement("button", "button ghost shot-prompt-more", "显示全部");
+    promptMore.type = "button";
+    promptMore.hidden = true;
+    promptMore.addEventListener("click", () => openShotPrompt(shot));
+    promptDetails.append(promptBody, promptMore);
     card.append(promptDetails);
+    window.requestAnimationFrame(() => {
+        if (promptBody.scrollHeight > promptBody.clientHeight + 2) promptMore.hidden = false;
+    });
 
     if (shot.notes) card.append(createElement("p", "shot-notes", `备注：${shot.notes}`));
 
@@ -3432,14 +3551,61 @@ function renderShotCard(shot) {
     } else {
         // 定稿稿件排在最前
         const ordered = [...artifacts].sort((a, b) => (a.finalized === true ? 0 : 1) - (b.finalized === true ? 0 : 1));
-        // 产物列表
+        // 只展示一条，其余进弹窗
         const list = createElement("div", "artifact-list");
-        for (const item of ordered) list.append(renderShotArtifactRow(item, artifacts, shot));
+        for (const item of ordered.slice(0, 1)) list.append(renderShotArtifactRow(item, ordered, shot));
         card.append(list);
+        if (ordered.length > 1) {
+            const showAll = createElement("button", "button ghost artifact-more", `查看全部 (${ordered.length})`);
+            showAll.type = "button";
+            showAll.addEventListener("click", () => openArtifactList(shot, ordered));
+            card.append(showAll);
+        }
     }
 
     card.append(renderShotRunHistory(shot));
     return card;
+}
+
+/**
+ * 查看完整提示词。
+ */
+function openShotPrompt(shot) {
+    const full = createElement("div", "prompt-full");
+    full.append(renderPromptText(shot));
+    setModal(`完整提示词 · 镜 ${shot.id}`, full, `${typeof shot.prompt === "string" ? shot.prompt.length : 0} 字`);
+    modalPrev.disabled = true;
+    modalNext.disabled = true;
+}
+
+/**
+ * 查看全部产出物。
+ */
+function openArtifactList(shot, items) {
+    const list = createElement("div", "artifact-list artifact-modal-list");
+    for (const item of items) list.append(renderShotArtifactRow(item, items, shot));
+    setModal(`产出物 · 镜 ${shot.id}`, list, `${items.length} 条`);
+    modalPrev.disabled = true;
+    modalNext.disabled = true;
+}
+
+/**
+ * 删除产出视频（已定稿的后端会先撤销定稿）。
+ */
+async function deleteRunOutput(item, button) {
+    const hint = item.finalized === true ? "该镜头定稿会被一并撤销。" : "删除后不可撤销。";
+    if (!window.confirm(`删除产出 ${item.output.name}？${hint}`)) return;
+    button.disabled = true;
+    try {
+        const data = await postJson(API.runOutputRemove, { run_id: item.run_id, output: item.output.name });
+        const revoked = Array.isArray(data.revoked_shots) && data.revoked_shots.length > 0;
+        showToast(revoked ? `已删除；撤销定稿：${data.revoked_shots.join(" ")}` : "已删除");
+        if (modalRoot.hidden === false) closeModal();
+        await reloadView();
+    } catch (error) {
+        button.disabled = false;
+        showToast(error instanceof Error ? error.message : "删除失败", true);
+    }
 }
 
 /**
@@ -3510,6 +3676,15 @@ function renderShotArtifactRow(item, all, shot) {
         takeButton.type = "button";
         takeButton.addEventListener("click", () => submitTake(shot, item, takeButton));
         actions.append(takeButton);
+    }
+    // 删除产出视频
+    if (output.kind === "video") {
+        const removeButton = createElement("button", "button ghost danger", "删除");
+        removeButton.type = "button";
+        removeButton.addEventListener("click", () => {
+            void deleteRunOutput(item, removeButton);
+        });
+        actions.append(removeButton);
     }
     row.append(actions);
     return row;
@@ -4179,6 +4354,144 @@ function artifactItemFromRun(run, output) {
 }
 
 /**
+ * 合片面版：选剧集、勾选定稿镜头、合成新成片。
+ */
+function renderFinalComposer() {
+    const card = createElement("div", "card final-composer");
+    const copy = createElement("div", "composer-head");
+    copy.append(createElement("h3", "card-title", "合成新成片"));
+    copy.append(createElement("p", "entity-description", "勾选本集已定稿的镜头，按分镜顺序拼接为一条长视频。"));
+    card.append(copy);
+    // 剧集
+    const episodes = Array.isArray(projectSettings.episodes) ? projectSettings.episodes : [];
+    if (episodes.length === 0) {
+        card.append(emptyNode("还没有剧集", "先创建剧集与分镜。"));
+        return card;
+    }
+    // 控件
+    const controls = createElement("div", "composer-controls");
+    const select = document.createElement("select");
+    select.className = "composer-select";
+    for (const episode of episodes) {
+        const option = document.createElement("option");
+        option.value = episode.id;
+        option.textContent = `第 ${episode.number} 集 · ${episode.title}`;
+        select.append(option);
+    }
+    controls.append(select);
+    // 全选
+    const selectAll = createElement("label", "composer-check");
+    const selectAllInput = document.createElement("input");
+    selectAllInput.type = "checkbox";
+    selectAllInput.disabled = true;
+    selectAll.append(selectAllInput, createElement("span", "", "全选"));
+    controls.append(selectAll);
+    // 合成
+    const merge = createElement("button", "button primary composer-merge", "合成成片");
+    merge.type = "button";
+    merge.disabled = true;
+    controls.append(merge);
+    card.append(controls);
+    // 候选列表
+    const list = createElement("div", "composer-list");
+    card.append(list);
+    const status = createElement("p", "composer-status muted", "加载中…");
+    card.append(status);
+    // 状态
+    const state = { shots: [], selected: new Set() };
+    const updateControls = () => {
+        const count = state.selected.size;
+        merge.disabled = count < 2;
+        merge.textContent = count >= 2 ? `合成成片（${count} 镜）` : "合成成片";
+        selectAllInput.checked = state.shots.length > 0 && count === state.shots.length;
+        selectAllInput.disabled = state.shots.length === 0;
+    };
+    const renderCandidates = () => {
+        clearNode(list);
+        for (const shot of state.shots) {
+            const row = createElement("label", `composer-shot${shot.finalized === true ? "" : " disabled"}`);
+            const input = document.createElement("input");
+            input.type = "checkbox";
+            input.value = shot.id;
+            input.checked = state.selected.has(shot.id);
+            input.disabled = shot.finalized !== true;
+            input.addEventListener("change", () => {
+                if (input.checked) state.selected.add(shot.id);
+                else state.selected.delete(shot.id);
+                updateControls();
+            });
+            row.append(input);
+            const info = createElement("div", "composer-shot-info");
+            info.append(createElement("span", "composer-shot-title", shot.title ?? `镜头 ${shot.id}`));
+            info.append(createElement("span", "mono composer-shot-id", shot.id));
+            info.append(
+                createElement(
+                    "span",
+                    "composer-shot-meta",
+                    shot.finalized === true
+                        ? `定稿 ${shortId(shot.run_id ?? "")} · ${shot.output}`
+                        : (shot.stale ?? "未定稿"),
+                ),
+            );
+            row.append(info);
+            list.append(row);
+        }
+    };
+    const loadCandidates = async () => {
+        status.textContent = "加载中…";
+        status.classList.remove("error");
+        clearNode(list);
+        state.shots = [];
+        state.selected.clear();
+        updateControls();
+        try {
+            const data = await requestJson(`${API.finalsCandidates}?episode=${encodeURIComponent(select.value)}`);
+            state.shots = (Array.isArray(data.shots) ? data.shots : []).filter((shot) => shot.finalized === true);
+            for (const shot of state.shots) state.selected.add(shot.id);
+            renderCandidates();
+            status.textContent =
+                state.shots.length === 0
+                    ? "本集还没有定稿镜头；先在剧集详情完成定稿。"
+                    : `已选 ${state.selected.size} / ${state.shots.length} 个定稿镜头。`;
+        } catch (error) {
+            status.textContent = error instanceof Error ? error.message : "加载失败";
+            status.classList.add("error");
+        }
+        updateControls();
+    };
+    selectAllInput.addEventListener("change", () => {
+        state.selected.clear();
+        if (selectAllInput.checked) for (const shot of state.shots) state.selected.add(shot.id);
+        renderCandidates();
+        updateControls();
+    });
+    select.addEventListener("change", () => {
+        void loadCandidates();
+    });
+    merge.addEventListener("click", async () => {
+        const shots = [...state.selected];
+        if (shots.length < 2) return;
+        const label = merge.textContent;
+        merge.disabled = true;
+        merge.textContent = "合成中…";
+        status.textContent = `正在合成 ${shots.length} 个镜头，请稍候…`;
+        status.classList.remove("error");
+        try {
+            const result = await postJson(API.finalsMerge, { episode_id: select.value, shots });
+            showToast(`成片已生成：${result.output}`);
+            await reloadView();
+        } catch (error) {
+            status.textContent = error instanceof Error ? error.message : "合片失败";
+            status.classList.add("error");
+            merge.disabled = false;
+            merge.textContent = label;
+        }
+    });
+    void loadCandidates();
+    return card;
+}
+
+/**
  * 成片页。
  */
 function renderFinals(data) {
@@ -4190,9 +4503,11 @@ function renderFinals(data) {
     const headText = createElement("div");
     headText.append(createElement("p", "eyebrow", "Final cuts"));
     headText.append(createElement("h2", "page-title", "成片"));
-    headText.append(createElement("p", "page-subtitle", "daoyan wrap 生成的 final/cut-* 文件。"));
+    headText.append(createElement("p", "page-subtitle", "选择定稿镜头合成，或播放 / 下载已有 final/cut-*。"));
     head.append(headText);
     viewRoot.append(head);
+    // 合片面板
+    viewRoot.append(renderFinalComposer());
     const summary = createElement("div", "collection-summary");
     summary.append(
         summaryItem("成片版本", items.length, "按时间保留"),
@@ -4205,7 +4520,7 @@ function renderFinals(data) {
     );
     viewRoot.append(summary);
     if (items.length === 0) {
-        viewRoot.append(emptyNode("还没有成片", "完成至少两个镜头后运行 daoyan wrap。"));
+        viewRoot.append(emptyNode("还没有成片", "勾选至少两个已定稿镜头后点「合成成片」。"));
         return;
     }
     // 网格
@@ -4244,6 +4559,7 @@ function renderFinals(data) {
         body.append(createElement("h3", "card-title", item.name));
         // 元信息
         const meta = createElement("div", "card-meta");
+        if (item.episode_id) meta.append(createElement("span", "mono", item.episode_id));
         meta.append(createElement("span", "", item.created_at !== null ? formatTime(item.created_at) : "无 manifest"));
         meta.append(createElement("span", "", formatBytes(item.bytes)));
         meta.append(createElement("span", "", `${item.clips.length} 段`));

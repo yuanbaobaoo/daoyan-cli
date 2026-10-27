@@ -107,6 +107,13 @@ daoyan story asset add --owner <character:id|scene:id|voice:id> [--form <form>] 
 daoyan story asset set-reference --owner <owner> [--form <form>] --id <asset>
 daoyan story asset remove --owner <owner> [--form <form>] --id <asset> [--force]
 daoyan story asset list
+```
+
+参考图删除规则：
+
+- 删除当前主参考会自动改用剩余第一张；
+- 角色 / 场景被任意剧集分镜引用时，至少保留一张图，不允许删空（`--force` 也不放行）；
+- 资产被 `shots.json` 的 `asset_slots` / `scene_asset` 显式绑定时，需要 `--force` 才能删除。
 
 daoyan story shots show --episode <id>
 daoyan story shots set --episode <id> --file <shots.json|->
@@ -206,8 +213,20 @@ daoyan run reassign <run_id> --episode <id> [--shot <镜号>] [--source ai|user]
 - 镜号省略时从原 label `shot:<n>` 推导；label 是自定义值时必须给 `--shot`；
 - 只处理 `episode_id` 为空的 run；已归属其它集的返回 `run_assigned`；归属完全一致时是幂等空操作；
 - 目标镜号必须存在于该集 `shots.json`；
-- `run.json` 默认不可变，这是唯一的显式例外；`task.json` 是历史执行记录，不改写（会在 `warnings` 里说明）；
+- `run.json` 默认不可变，这是显式例外之一（另一个是 `run output remove` 移除产物条目）；`task.json` 是历史执行记录，不改写（会在 `warnings` 里说明）；
 - 迁移后该 run 才能被 `take finalize` 选为该镜定稿稿件，也会出现在该集分镜页；若根目录 `takes.json` 曾引用它，会提示需在新集重新定稿。
+
+### run output remove
+
+```bash
+daoyan run output remove <run_id> <output>
+```
+
+删除 run 的单个产物文件（`runs/<id>/outputs/<output>`），并同步从 `run.json` 的 `outputs` 移除该条：
+
+- 被 `takes.json` 定稿引用的产物会先自动撤销定稿，返回 `revoked_shots`；
+- run 目录与其它产物保留；`task.json` 不改写；
+- 产物不存在返回 `asset_not_found`。
 
 ### shot / retake / batch
 
@@ -241,12 +260,13 @@ daoyan take revoke <镜号> [--episode <id>]
 ### wrap
 
 ```bash
-daoyan wrap [--episode <id>] [--select <镜号>=<run_id> ...] [--allow-incomplete]
+daoyan wrap [--episode <id>] [--shots <镜号,...>] [--select <镜号>=<run_id> ...] [--allow-incomplete]
 ```
 
 按镜头顺序选**定稿稿件**（`--select` 可临时改选，不落台账），ffmpeg concat 到 `final/<episode>/cut-<timestamp>.mp4`（legacy 为 `final/cut-*`），并写 manifest。不占 machine lock。
 
 - 选段优先级：`--select` > 定稿稿件 > 最新成功 run；
+- `--shots` 只合指定镜号（仍按 shots.json 顺序），且要求每镜都有可用定稿稿件；缺稿返回 `take_pending`；
 - `project.story.enforce=strict` 时，有产出但未定稿的镜头阻断合片（`take_pending`）；`--allow-incomplete` 或 `warn` / `off` 回退最新成功 run 并记 warning；
 - 清单 `clips[].source` 记录每段来源：`finalized` / `latest` / `explicit`。
 

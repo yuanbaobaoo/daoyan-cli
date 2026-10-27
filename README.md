@@ -112,13 +112,14 @@ dycli --version
 - `daoyan run <workflow.json|name> [--set nodeId.input=value ...] [--label <label>] [--episode <id>] [--engine <url>] [--request-id <id>] [--wait] [--dry-run] [--timeout <小时>] [--json]` — 执行一个 workflow（默认异步 task；`--wait` 才阻塞）。
 - `daoyan run cancel <task_id> [--json]` — 取消一个 task（worker 执行 interrupt → free → stop → restore）。
 - `daoyan run reassign <run_id> --episode <id> [--shot <镜号>] [--json]` — 把 story 化之前未归属的 run 迁到某集某镜，之后才能定稿与合片。
+- `daoyan run output remove <run_id> <output> [--json]` — 删除 run 的单个产物视频；被定稿引用的会先撤销定稿。
 - `daoyan shot <镜号...> [--episode <id>] [--steps N] [--request-id <id>] [--allow-incomplete] [--wait] [--timeout <小时>] [--json]` — 拍摄指定镜头（一个 task 多个 run；默认异步）。
 - `daoyan retake <镜号...> [--episode <id>] [--steps N] [--request-id <id>] [--allow-incomplete] [--wait] [--timeout <小时>] [--json]` — 强制重拍指定镜头（忽略已有成功 run）。
 - `daoyan batch [--episode <id>] [--request-id <id>] [--allow-incomplete] [--wait] [--timeout <小时>] [--json]` — 连拍全部未完成镜头（已有成功 run 跳过；默认异步）。
 - `daoyan take list [镜号...] [--episode <id>] [--json]` — 列出各镜头的候选稿件与定稿状态。
 - `daoyan take finalize <镜号> --run <run_id> [--output <稿件名>] [--note <文本>] [--source ai|user] [--episode <id>] [--json]` — 把某条产出定为该镜头的定稿稿件；下游接力与合片只用它。
 - `daoyan take revoke <镜号> [--episode <id>] [--json]` — 撤销该镜头的定稿。
-- `daoyan wrap [--episode <id>] [--select <镜号>=<run_id> ...] [--allow-incomplete] [--json]` — 按集用定稿稿件合片，写 `final/<episode>/cut-*.mp4` 与清单。
+- `daoyan wrap [--episode <id>] [--shots <镜号,...>] [--select <镜号>=<run_id> ...] [--allow-incomplete] [--json]` — 按集（或指定镜头）用定稿稿件合片，写 `final/<episode>/cut-*.mp4` 与清单。
 
 ### 运维
 

@@ -1355,7 +1355,7 @@ a:hover {
     min-height: 220px;
     padding: 16px;
     overflow: auto;
-    background: #05070a;
+    overscroll-behavior: contain;
 }
 
 .modal-content video,
@@ -1398,6 +1398,15 @@ a:hover {
     gap: 12px;
     padding: 10px 16px;
     border-top: 1px solid var(--border);
+}
+
+.modal-foot.no-nav {
+    justify-content: center;
+}
+
+html.modal-open,
+body.modal-open {
+    overflow: hidden;
 }
 
 .toast {

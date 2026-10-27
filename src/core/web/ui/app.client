@@ -180,6 +180,8 @@ const modalTitle = document.querySelector("#modal-title");
 const modalContent = document.querySelector("#modal-content");
 // 模态计数
 const modalCounter = document.querySelector("#modal-counter");
+// 模态底栏
+const modalFoot = document.querySelector(".modal-foot");
 // 上一个按钮
 const modalPrev = document.querySelector("#modal-prev");
 // 下一个按钮
@@ -3574,8 +3576,6 @@ function openShotPrompt(shot) {
     const full = createElement("div", "prompt-full");
     full.append(renderPromptText(shot));
     setModal(`完整提示词 · 镜 ${shot.id}`, full, `${typeof shot.prompt === "string" ? shot.prompt.length : 0} 字`);
-    modalPrev.disabled = true;
-    modalNext.disabled = true;
 }
 
 /**
@@ -3585,8 +3585,6 @@ function openArtifactList(shot, items) {
     const list = createElement("div", "artifact-list artifact-modal-list");
     for (const item of items) list.append(renderShotArtifactRow(item, items, shot));
     setModal(`产出物 · 镜 ${shot.id}`, list, `${items.length} 条`);
-    modalPrev.disabled = true;
-    modalNext.disabled = true;
 }
 
 /**
@@ -4671,6 +4669,8 @@ function renderPlayerItem() {
     media.playsInline = true;
     media.src = item.url;
     setModal(item.title, media, `${playerIndex + 1} / ${playerItems.length}`);
+    // 仅多条目时显示切换按钮
+    setModalNav(playerItems.length > 1);
     modalPrev.disabled = playerIndex <= 0;
     modalNext.disabled = playerIndex >= playerItems.length - 1;
 }
@@ -4684,8 +4684,6 @@ function openImageUrl(url, title) {
     image.src = url;
     image.alt = title;
     setModal(title, image, "图片");
-    modalPrev.disabled = true;
-    modalNext.disabled = true;
 }
 
 /**
@@ -4702,8 +4700,6 @@ async function openText(item) {
     // 预览节点
     const pre = createElement("pre", "", "加载中…");
     setModal(item.output.name, pre, "文本预览");
-    modalPrev.disabled = true;
-    modalNext.disabled = true;
     try {
         // 文本响应
         const response = await fetch(item.output.media_url);
@@ -4737,8 +4733,23 @@ function setModal(title, content, counter) {
     clearNode(modalContent);
     modalContent.append(content);
     modalCounter.textContent = counter ?? "";
+    // 默认单条目：隐藏切换按钮并锁定页面滚动
+    setModalNav(false);
+    modalPrev.disabled = true;
+    modalNext.disabled = true;
     modalRoot.hidden = false;
+    document.documentElement.classList.add("modal-open");
+    document.body.classList.add("modal-open");
     modalClose.focus();
+}
+
+/**
+ * 显示 / 隐藏上一个、下一个按钮。
+ */
+function setModalNav(visible) {
+    modalPrev.hidden = !visible;
+    modalNext.hidden = !visible;
+    modalFoot.classList.toggle("no-nav", !visible);
 }
 
 /**
@@ -4749,6 +4760,9 @@ function closeModal() {
     clearNode(modalContent);
     modalTitle.textContent = "预览";
     modalCounter.textContent = "";
+    setModalNav(false);
+    document.documentElement.classList.remove("modal-open");
+    document.body.classList.remove("modal-open");
     playerItems = [];
     playerIndex = 0;
     if (modalPreviousFocus?.isConnected) modalPreviousFocus.focus();

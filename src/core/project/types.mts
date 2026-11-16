@@ -35,6 +35,14 @@ export const BREAKDOWN_FILE = "breakdown.json";
 export const STORY_MAP_FILE = "story-map.json";
 // 镜头定稿台账（story 模式在 episodes/<id>/ 下，legacy 在项目根）
 export const TAKES_FILE = "takes.json";
+// 共享：图片单元根目录
+export const STILLS_DIR = "stills";
+// 共享：图片单元注册表
+export const STILLS_FILE = "stills/stills.json";
+// 共享：图片定稿台账
+export const STILL_TAKES_FILE = "stills/takes.json";
+// 共享：项目图片库（参考图 / 遮罩）
+export const STILLS_REFS_DIR = "stills/refs";
 // 共享：工作流目录
 export const WORKFLOWS_DIR = "workflows";
 // 共享：逻辑输入映射（<name>.bindings.json 与同目录）
@@ -98,22 +106,68 @@ export interface CustomNodeSpec {
 }
 
 /**
- * 项目生产模式：单视频 / 多集。
+ * 项目生产模式：单视频 / 多集 / 纯图片。
  */
-export type ProductionMode = "single" | "series";
+export type ProductionMode = "single" | "series" | "stills";
 
 /**
  * 项目生产配置。
  */
 export interface ProjectProduction {
     /**
-     * 单视频（single）或多集（series）。
+     * 单视频（single）、多集（series）或纯图片（stills）。
      */
     mode?: ProductionMode;
     /**
-     * 是否需要音频；默认 true。
+     * 是否需要音频；默认 true；纯图片项目固定 false。
      */
     audio?: boolean;
+}
+
+/**
+ * 图片操作类型：文生图 / 图生图 / 高清放大 / 局部重绘 / 提示词优化。
+ */
+export type ImageOp = "t2i" | "i2i" | "upscale" | "inpaint" | "prompt";
+
+/**
+ * 单个图片操作的执行配置。
+ */
+export interface ImageOpConfig {
+    /**
+     * 工作流短名或项目内相对路径（prompt 操作在 backend=agent 时可省略）。
+     */
+    workflow?: string;
+    /**
+     * prompt 操作的执行后端；默认 agent。
+     */
+    backend?: "llm" | "agent";
+}
+
+/**
+ * 图片操作配置（project.json 的 image 段）。
+ */
+export interface ProjectImageConfig {
+    /**
+     * 操作 -> 配置。
+     */
+    ops?: Partial<Record<ImageOp, ImageOpConfig>>;
+    /**
+     * 默认尺寸与负向提示词。
+     */
+    defaults?: {
+        /**
+         * 默认宽度。
+         */
+        width?: number;
+        /**
+         * 默认高度。
+         */
+        height?: number;
+        /**
+         * 默认负向提示词。
+         */
+        negative?: string;
+    };
 }
 
 /**
@@ -145,6 +199,10 @@ export interface ProjectConfig {
          */
         enforce?: "strict" | "warn" | "off";
     };
+    /**
+     * 图片操作配置（文生图 / 图生图 / 放大 / 局部重绘 / 提示词优化）。
+     */
+    image?: ProjectImageConfig;
     /**
      * GPU 接管开关（项目级策略，remote 忽略）。
      */
@@ -247,12 +305,33 @@ export interface MachineConfig {
      * 优先级：workflow < machine overrides < --set。
      */
     overrides?: Record<string, Record<string, JsonValue>>;
+    /**
+     * 提示词优化器（OpenAI 兼容；密钥只从环境变量读取）。
+     */
+    prompt_optimizer?: {
+        /**
+         * OpenAI 兼容 base URL（如 http://127.0.0.1:11434/v1）。
+         */
+        base_url: string;
+        /**
+         * 模型名。
+         */
+        model: string;
+        /**
+         * 保存 API Key 的环境变量名；本地 Ollama 可省略。
+         */
+        api_key_env?: string;
+        /**
+         * 单次超时（毫秒；默认 60000）。
+         */
+        timeout_ms?: number;
+    };
 }
 
 /**
- * first_frame 三形态：锚点 key / 接力 / 纯 T2V。
+ * first_frame 形态：锚点 key / 接力 / 图片单元 / 纯 T2V。
  */
-export type FirstFrame = string | { relay: string } | undefined;
+export type FirstFrame = string | { relay: string } | { image: string } | undefined;
 
 /**
  * 角色 / 场景等可复用设定（仅展示与复用，不直接注入 workflow）。
@@ -568,7 +647,7 @@ export type TaskStatus = "queued" | "running" | "succeeded" | "failed" | "cancel
 /**
  * task 类型（决定 worker 如何展开 runs）。
  */
-export type TaskKind = "run" | "shot" | "retake" | "batch" | "metadata";
+export type TaskKind = "run" | "shot" | "retake" | "batch" | "image" | "metadata";
 
 /**
  * task worker 信息。
@@ -604,6 +683,22 @@ export interface TaskOptions {
      * shot/retake 的目标镜号。
      */
     shots?: string[];
+    /**
+     * image 任务的目标图片单元。
+     */
+    stills?: string[];
+    /**
+     * image 任务的图片操作。
+     */
+    op?: ImageOp;
+    /**
+     * image 任务单次覆盖的输入图描述符。
+     */
+    image_source?: string;
+    /**
+     * image 任务单次覆盖的遮罩描述符。
+     */
+    image_mask?: string;
     /**
      * 覆盖采样步数（shot）。
      */
@@ -855,9 +950,13 @@ export interface RunRecord {
      */
     request_id: string | null;
     /**
-     * label（legacy: shot:<id>；多集: ep:<id>:shot:<id>）。
+     * label（legacy: shot:<id>；多集: ep:<id>:shot:<id>；图片: img:<still-id>）。
      */
     label: string | null;
+    /**
+     * 图片操作（仅 image run）。
+     */
+    op?: ImageOp | null;
     /**
      * workflow 快照信息。
      */

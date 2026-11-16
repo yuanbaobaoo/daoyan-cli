@@ -309,6 +309,7 @@ export async function runOutputRemove(ctx: CliContext, args: string[]): Promise<
     }
     say(`已删除产物：${result.run_id}/${result.output}`);
     if (result.revoked_shots.length > 0) say(`已撤销定稿：${result.revoked_shots.join(" ")}`);
+    if (result.revoked_stills.length > 0) say(`已撤销图片定稿：${result.revoked_stills.join(" ")}`);
     return 0;
 }
 

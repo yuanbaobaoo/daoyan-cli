@@ -5,6 +5,7 @@
 // 页面视图
 const VIEWS = [
     { id: "overview", label: "概览", hint: "项目与运行状态", icon: "overview" },
+    { id: "images", label: "图片", hint: "图片单元与图片库", icon: "images" },
     { id: "episodes", label: "剧集", hint: "分集与视频详情", icon: "episodes" },
     { id: "characters", label: "角色", hint: "角色、形态与参考图", icon: "characters" },
     { id: "scenes", label: "场景", hint: "场景与参考图", icon: "scenes" },
@@ -16,13 +17,14 @@ const VIEWS = [
     { id: "workflows", label: "工作流", hint: "图与 bindings", icon: "workflows" },
 ];
 const NAV_SECTIONS = [
-    { label: "创作", views: ["overview", "episodes"] },
+    { label: "创作", views: ["overview", "images", "episodes"] },
     { label: "设定", views: ["characters", "scenes", "voices", "assets"] },
     { label: "制作", views: ["artifacts", "tasks", "finals", "workflows"] },
 ];
 const ICON_PATHS = {
     overview:
         '<rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/>',
+    images: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m5 18 4.5-4.5 3 3L16 13l3 3"/>',
     episodes: '<path d="M4 5.5h16v13H4z"/><path d="m8 3 2 2.5M14 3l2 2.5M10 9l5 3-5 3z"/>',
     characters:
         '<circle cx="9" cy="8" r="3"/><path d="M3.5 19c.6-3.2 2.4-5 5.5-5s4.9 1.8 5.5 5M16 5.5a3 3 0 0 1 0 5.8M17 14c2.2.4 3.4 2 3.8 4.5"/>',
@@ -44,6 +46,7 @@ const DEFAULT_VIEW = "overview";
 // 接口路径
 const API = {
     overview: "/api/overview",
+    images: "/api/images",
     episodes: "/api/episodes",
     characters: "/api/story/characters",
     storyReference: "/api/story/reference",
@@ -66,6 +69,7 @@ const API = {
 // 各视图轮询间隔（毫秒）
 const POLL_MS = {
     overview: 3000,
+    images: 5000,
     episodes: 5000,
     characters: 10000,
     scenes: 10000,
@@ -125,6 +129,7 @@ const TASK_KIND_LABEL = {
     shot: "镜头",
     retake: "重拍",
     batch: "批量",
+    image: "图片",
     metadata: "元数据",
 };
 // 最大播放列表长度
@@ -218,6 +223,14 @@ let mapTab = "graph";
 let mapMode = "character";
 // 图谱筛选（{ kind, id } | null）
 let mapFocus = null;
+// 图片提示词编辑草稿（still id -> 文本）
+const imagePromptEdits = new Map();
+// 图片提示词优化建议（still id -> 结果）
+const imagePromptDrafts = new Map();
+// 正在请求的图片单元（防重复点击）
+const imageBusy = new Set();
+// 已展开入库输入的图片单元
+const imagePromoteOpen = new Set();
 // 只显示关键事件
 let mapOnlyMajor = false;
 // 只显示阻塞事件
@@ -501,7 +514,6 @@ function renderShell() {
                 <nav id="nav" class="nav" aria-label="页面导航"></nav>
                 <div class="sidebar-bottom">
                     <nav id="nav-bottom" class="nav" aria-label="项目管理"></nav>
-                    <p class="sidebar-foot">AI 视频创作操作台</p>
                 </div>
             </aside>
             <button id="nav-backdrop" class="nav-backdrop" type="button" aria-label="关闭导航"></button>
@@ -558,6 +570,7 @@ function renderNav() {
         for (const viewId of section.views) {
             const view = VIEWS.find((item) => item.id === viewId);
             if (view.id === "voices" && !projectSettings.audio) continue;
+            if (projectSettings.mode === "stills" && view.id === "episodes") continue;
             const button = createElement("button", "nav-item");
             button.type = "button";
             button.dataset.view = view.id;
@@ -632,11 +645,16 @@ function setProjectName(name) {
 function applyProjectSettings(data) {
     projectSettings = {
         name: typeof data.name === "string" ? data.name : projectSettings.name,
-        mode: data.mode === "single" ? "single" : "series",
+        mode: data.mode === "single" || data.mode === "stills" ? data.mode : "series",
         audio: data.audio !== false,
         episode_count: typeof data.episode_count === "number" ? data.episode_count : 0,
         episodes: Array.isArray(data.episodes) ? data.episodes : [],
     };
+    // 纯图片项目：离开剧集 / 音色页
+    if (projectSettings.mode === "stills" && (currentView === "episodes" || currentView === "episode")) {
+        currentView = "images";
+        window.location.hash = `${HASH_PREFIX}images`;
+    }
     // 音频关闭时离开音色页
     if (!projectSettings.audio && currentView === "voices") {
         currentView = "overview";
@@ -847,7 +865,7 @@ function onHashChange() {
     // 路径段
     const parts = raw.split("/");
     // 目标视图 / 剧集
-    let view = DEFAULT_VIEW;
+    let view = projectSettings.mode === "stills" ? "images" : DEFAULT_VIEW;
     let episodeId = null;
     if (parts[0] === "episode" && parts[1] !== undefined && parts[1] !== "") {
         try {
@@ -859,9 +877,10 @@ function onHashChange() {
     } else if (raw === "project") {
         view = "project";
     } else {
-        view = VIEW_IDS.has(raw) ? raw : DEFAULT_VIEW;
+        view = VIEW_IDS.has(raw) ? raw : projectSettings.mode === "stills" ? "images" : DEFAULT_VIEW;
     }
-    if (view === "voices" && !projectSettings.audio) view = DEFAULT_VIEW;
+    if (projectSettings.mode === "stills" && (view === "episodes" || view === "episode")) view = "images";
+    if (view === "voices" && !projectSettings.audio) view = projectSettings.mode === "stills" ? "images" : DEFAULT_VIEW;
     currentView = view;
     currentEpisodeId = episodeId;
     episodeSection = "shots";
@@ -945,6 +964,7 @@ function renderView(view, data) {
     if (viewRoot === null) return;
     clearNode(viewRoot);
     if (view === "overview") renderOverview(data);
+    else if (view === "images") renderImages(data);
     else if (view === "episodes") {
         if (data !== null && data.episode !== undefined) renderEpisode(data);
         else renderEpisodes(data);
@@ -2383,10 +2403,11 @@ function renderProject(data) {
     info.append(infoList);
     settingsAside.append(info);
 
-    // 视频模式
+    // 生产模式
     const modePanel = createElement("div", "panel settings-panel");
-    modePanel.append(createElement("h3", "panel-title", "视频模式"));
+    modePanel.append(createElement("h3", "panel-title", "生产模式"));
     const singleDisabled = (data.episode_count ?? 0) > 1;
+    const stillsDisabled = (data.episode_count ?? 0) > 0;
     const modeGroup = createElement("div", "settings-options");
     modeGroup.append(
         modeOption(
@@ -2408,6 +2429,16 @@ function renderProject(data) {
             false,
         ),
     );
+    modeGroup.append(
+        modeOption(
+            "production-mode",
+            "stills",
+            "纯图片",
+            "不建剧集，只管理图片单元与图片库。",
+            data.mode === "stills",
+            stillsDisabled,
+        ),
+    );
     modePanel.append(modeGroup);
     if (singleDisabled) {
         modePanel.append(
@@ -2415,6 +2446,15 @@ function renderProject(data) {
                 "p",
                 "settings-hint text-warn",
                 `当前有 ${data.episode_count} 集，只有一集时才能切换为单视频。请先删除多余剧集。`,
+            ),
+        );
+    }
+    if (stillsDisabled && data.mode !== "stills") {
+        modePanel.append(
+            createElement(
+                "p",
+                "settings-hint text-warn",
+                `当前有 ${data.episode_count} 集，移除剧集后才能切换为纯图片模式。`,
             ),
         );
     }
@@ -2435,6 +2475,24 @@ function renderProject(data) {
     );
     audioOption.append(audioCopy);
     audioPanel.append(audioOption);
+    const stillsAudioHint = createElement(
+        "p",
+        "settings-hint text-warn",
+        "纯图片模式不生成音频，音频由 core 强制关闭。",
+    );
+    stillsAudioHint.hidden = true;
+    audioPanel.append(stillsAudioHint);
+    // 纯图片下 core 强制 audio=false，禁用勾选以免保存后被静默还原
+    const syncAudioAvailability = () => {
+        const selected = modeGroup.querySelector('input[name="production-mode"]:checked');
+        const stills = selected !== null && selected.value === "stills";
+        audioInput.disabled = stills;
+        if (stills) audioInput.checked = false;
+        stillsAudioHint.hidden = !stills;
+        audioOption.classList.toggle("disabled", stills);
+    };
+    modeGroup.addEventListener("change", syncAudioAvailability);
+    syncAudioAvailability();
     settingsMain.append(audioPanel);
 
     // 保存
@@ -2447,7 +2505,12 @@ function renderProject(data) {
         save.textContent = "保存中…";
         // 目标模式
         const checked = viewRoot.querySelector('input[name="production-mode"]:checked');
-        const mode = checked !== null && checked.value === "single" ? "single" : "series";
+        const mode =
+            checked !== null && checked.value === "single"
+                ? "single"
+                : checked !== null && checked.value === "stills"
+                  ? "stills"
+                  : "series";
         try {
             const updated = await postJson(API.projectSettings, { mode, audio: audioInput.checked });
             applyProjectSettings({ ...data, ...updated });
@@ -2795,6 +2858,643 @@ function renderAssets(data) {
 }
 
 /**
+ * 图片缩略图（不可预览时显示占位）。
+ */
+function imageThumb(node, label) {
+    // 按钮
+    const button = createElement("button", "image-thumb");
+    button.type = "button";
+    if (node === null || node === undefined || node.media_url === null || node.media_url === undefined) {
+        button.classList.add("image-thumb-empty");
+        button.disabled = true;
+        button.append(createElement("span", "", label ?? "待生成"));
+        return button;
+    }
+    // 图片
+    const img = document.createElement("img");
+    img.src = node.media_url;
+    img.alt = node.label ?? label ?? "";
+    img.loading = "lazy";
+    button.append(img);
+    button.title = node.label ?? label ?? "预览";
+    button.addEventListener("click", () => openImageUrl(node.media_url, node.label ?? label ?? "图片"));
+    return button;
+}
+
+/**
+ * 图片输入缩略图行。
+ */
+function imageRefRow(items) {
+    // 容器
+    const row = createElement("div", "image-ref-row");
+    for (const item of items) {
+        // 单项
+        const cell = createElement("div", "image-ref-cell");
+        cell.append(imageThumb(item.node, item.label));
+        cell.append(createElement("span", "image-ref-label", item.label));
+        row.append(cell);
+    }
+    return row;
+}
+
+const IMAGE_OP_LABEL = {
+    t2i: "文生图",
+    i2i: "图生图",
+    upscale: "高清放大",
+    inpaint: "局部修复",
+    prompt: "提示词优化",
+};
+
+/**
+ * 图片操作状态。
+ */
+function imageOpStatus(ops, op) {
+    return (Array.isArray(ops) ? ops : []).find((item) => item.op === op) ?? null;
+}
+
+/**
+ * 当前定稿候选。
+ */
+function imageSelectedCandidate(still) {
+    const finalized = still.take !== null && still.take !== undefined ? still.take.finalized : null;
+    if (finalized === null || finalized === undefined) return null;
+    return (
+        (Array.isArray(still.candidates) ? still.candidates : []).find(
+            (item) => item.run_id === finalized.run_id && item.output === finalized.output,
+        ) ?? null
+    );
+}
+
+/**
+ * 生成用主图。
+ */
+function imagePrimaryNode(still) {
+    const selected = imageSelectedCandidate(still);
+    if (selected !== null) return selected;
+    const candidates = Array.isArray(still.candidates) ? still.candidates : [];
+    if (candidates.length > 0) return candidates[0];
+    if (still.source !== null && still.source !== undefined && still.source.media_url !== null) return still.source;
+    const slots = Array.isArray(still.slots) ? still.slots : [];
+    const firstSlot = slots.find((slot) => slot.resolved !== null && slot.resolved.media_url !== null);
+    return firstSlot?.resolved ?? null;
+}
+
+/**
+ * 小按钮。
+ */
+function imageActionButton(text, onClick, disabled, title) {
+    const button = createElement("button", "image-action", text);
+    button.type = "button";
+    button.disabled = disabled === true;
+    if (title !== undefined) button.title = title;
+    button.addEventListener("click", () => {
+        void onClick();
+    });
+    return button;
+}
+
+/**
+ * 触发图片生成。
+ */
+async function requestImageGenerate(still, op, extra) {
+    if (imageBusy.has(still.id)) return;
+    if (still.active_task !== null && still.active_task !== undefined) {
+        showToast("该图片已有任务在运行", true);
+        return;
+    }
+    imageBusy.add(still.id);
+    try {
+        const data = await postJson(`/api/images/${encodeURIComponent(still.id)}/generate`, {
+            op,
+            ...(extra ?? {}),
+        });
+        showToast(`已创建${IMAGE_OP_LABEL[op] ?? op}任务：${data.task_id}`);
+        await reloadView();
+    } catch (error) {
+        showToast(error instanceof Error ? error.message : "生成失败", true);
+    } finally {
+        imageBusy.delete(still.id);
+    }
+}
+
+/**
+ * 定稿 / 撤销。
+ */
+async function finalizeImageCandidate(still, candidate) {
+    if (imageBusy.has(still.id)) return;
+    imageBusy.add(still.id);
+    try {
+        await postJson(`/api/images/${encodeURIComponent(still.id)}/take/finalize`, {
+            run_id: candidate.run_id,
+            output: candidate.output,
+        });
+        showToast("已定稿");
+        await reloadView();
+    } catch (error) {
+        showToast(error instanceof Error ? error.message : "定稿失败", true);
+    } finally {
+        imageBusy.delete(still.id);
+    }
+}
+
+async function revokeImageTake(still) {
+    if (imageBusy.has(still.id)) return;
+    imageBusy.add(still.id);
+    try {
+        await postJson(`/api/images/${encodeURIComponent(still.id)}/take/revoke`, {});
+        showToast("已撤销定稿");
+        await reloadView();
+    } catch (error) {
+        showToast(error instanceof Error ? error.message : "撤销失败", true);
+    } finally {
+        imageBusy.delete(still.id);
+    }
+}
+
+/**
+ * 保存 / 优化提示词。
+ */
+async function saveImagePrompt(still) {
+    const text = imagePromptEdits.get(still.id) ?? still.prompt ?? "";
+    try {
+        await postJson(`/api/images/${encodeURIComponent(still.id)}/prompt`, { text });
+        imagePromptEdits.delete(still.id);
+        showToast("提示词已保存");
+        await reloadView();
+    } catch (error) {
+        showToast(error instanceof Error ? error.message : "保存失败", true);
+    }
+}
+
+async function optimizeImagePrompt(still) {
+    try {
+        const result = await postJson(`/api/images/${encodeURIComponent(still.id)}/prompt/optimize`, {});
+        imagePromptDrafts.set(still.id, result);
+        if (result.mode === "llm" && result.applied === true) {
+            imagePromptEdits.delete(still.id);
+            showToast("提示词已优化并应用");
+        } else if (result.mode === "llm") {
+            showToast("已生成优化建议");
+        } else {
+            showToast("未配置 LLM：请让 Agent 改写提示词");
+        }
+        await reloadView();
+    } catch (error) {
+        showToast(error instanceof Error ? error.message : "优化失败", true);
+    }
+}
+
+async function applyImagePromptDraft(still, draft) {
+    try {
+        await postJson(`/api/images/${encodeURIComponent(still.id)}/prompt`, { text: draft.proposed_prompt });
+        imagePromptDrafts.delete(still.id);
+        imagePromptEdits.delete(still.id);
+        showToast("已采用建议");
+        await reloadView();
+    } catch (error) {
+        showToast(error instanceof Error ? error.message : "采用失败", true);
+    }
+}
+
+/**
+ * 遮罩编辑器（画笔）。
+ */
+function openImageMaskEditor(still) {
+    const primary = imagePrimaryNode(still);
+    const url = primary !== null && primary.media_url !== undefined ? primary.media_url : null;
+    if (url === null) {
+        showToast("没有可用于修复的图片", true);
+        return;
+    }
+    // 容器
+    const wrap = createElement("div", "mask-editor");
+    const stage = createElement("div", "mask-stage");
+    const base = document.createElement("canvas");
+    const overlay = document.createElement("canvas");
+    base.className = "mask-canvas";
+    overlay.className = "mask-canvas mask-overlay";
+    stage.append(base, overlay);
+    wrap.append(stage);
+    // 工具栏
+    const toolbar = createElement("div", "mask-toolbar");
+    const brush = document.createElement("input");
+    brush.type = "range";
+    brush.min = "8";
+    brush.max = "240";
+    brush.value = "60";
+    const brushLabel = createElement("span", "mask-hint", "画笔");
+    const clear = imageActionButton("清除", () => {
+        const ctx = overlay.getContext("2d");
+        ctx.clearRect(0, 0, overlay.width, overlay.height);
+    });
+    const cancel = imageActionButton("取消", () => closeModal());
+    const confirm = imageActionButton("保存并生成", async () => {
+        // 黑白遮罩
+        const out = document.createElement("canvas");
+        out.width = overlay.width;
+        out.height = overlay.height;
+        const ctx = out.getContext("2d");
+        ctx.fillStyle = "#000";
+        ctx.fillRect(0, 0, out.width, out.height);
+        ctx.drawImage(overlay, 0, 0);
+        try {
+            await postJson(`/api/images/${encodeURIComponent(still.id)}/mask`, {
+                data_url: out.toDataURL("image/png"),
+            });
+            closeModal();
+            await requestImageGenerate(still, "inpaint");
+        } catch (error) {
+            showToast(error instanceof Error ? error.message : "遮罩保存失败", true);
+        }
+    });
+    toolbar.append(brushLabel, brush, clear, cancel, confirm);
+    wrap.append(toolbar);
+    setModal(`局部修复 · ${still.id}`, wrap, "画笔涂抹需要重绘的区域");
+    // 图片加载后初始化画布
+    const image = new Image();
+    image.onload = () => {
+        base.width = image.naturalWidth;
+        base.height = image.naturalHeight;
+        overlay.width = image.naturalWidth;
+        overlay.height = image.naturalHeight;
+        base.getContext("2d").drawImage(image, 0, 0);
+    };
+    image.src = url;
+    // 画笔
+    let drawing = false;
+    let last = null;
+    const pointOf = (event) => {
+        const rect = overlay.getBoundingClientRect();
+        return {
+            x: ((event.clientX - rect.left) / Math.max(rect.width, 1)) * overlay.width,
+            y: ((event.clientY - rect.top) / Math.max(rect.height, 1)) * overlay.height,
+        };
+    };
+    const draw = (from, to) => {
+        const ctx = overlay.getContext("2d");
+        const rect = overlay.getBoundingClientRect();
+        const scale = overlay.width / Math.max(rect.width, 1);
+        ctx.strokeStyle = "#fff";
+        ctx.fillStyle = "#fff";
+        ctx.lineWidth = Number(brush.value) * scale;
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.beginPath();
+        ctx.moveTo(from.x, from.y);
+        ctx.lineTo(to.x, to.y);
+        ctx.stroke();
+    };
+    overlay.addEventListener("pointerdown", (event) => {
+        drawing = true;
+        overlay.setPointerCapture(event.pointerId);
+        last = pointOf(event);
+        draw(last, last);
+    });
+    overlay.addEventListener("pointermove", (event) => {
+        if (!drawing) return;
+        const next = pointOf(event);
+        draw(last ?? next, next);
+        last = next;
+    });
+    overlay.addEventListener("pointerup", (event) => {
+        drawing = false;
+        last = null;
+        overlay.releasePointerCapture(event.pointerId);
+    });
+}
+
+/**
+ * 单张图片卡片。
+ */
+function renderImageCard(still, ops, optimizer) {
+    // 卡片
+    const card = createElement("article", "card image-card");
+    // 主图
+    const primary = imagePrimaryNode(still);
+    // 媒体区
+    const media = createElement("div", "image-card-media");
+    media.append(imageThumb(primary, primary === null ? "待生成" : "主图"));
+    // 媒体标记
+    const flags = createElement("div", "image-card-flags");
+    const finalized = still.take !== null && still.take !== undefined ? still.take.finalized : null;
+    flags.append(badge(finalized !== null && finalized !== undefined ? "已定稿" : "未定稿"));
+    if (still.active_task !== null && still.active_task !== undefined) {
+        flags.append(badge(`生成中 ${IMAGE_OP_LABEL[still.active_task.op] ?? ""}`, "status-running"));
+    }
+    if (still.set !== null && still.set !== undefined) flags.append(badge(still.set, "kind-image"));
+    media.append(flags);
+    card.append(media);
+    // 正文
+    const body = createElement("div", "card-body");
+    body.append(createElement("h3", "card-title", still.title ?? still.id));
+    if (still.title !== null && still.title !== undefined) body.append(createElement("p", "entity-id mono", still.id));
+    // 归属 / 位置
+    const meta = createElement("div", "card-meta");
+    if (still.owner !== null) {
+        meta.append(badge(still.owner.name));
+        if (still.owner.form_name !== null) meta.append(badge(still.owner.form_name));
+    } else {
+        meta.append(badge("独立"));
+    }
+    if (still.episode_id !== null && still.episode_id !== undefined) {
+        meta.append(badge(`${still.episode_id}${still.shot_id !== null ? `/${still.shot_id}` : ""}`, "kind-video"));
+    }
+    if (still.seed !== null) meta.append(createElement("span", "mono", `seed ${still.seed}`));
+    if (still.width !== null && still.height !== null) {
+        meta.append(createElement("span", "mono", `${still.width}×${still.height}`));
+    }
+    const revisions = Array.isArray(still.prompt_revisions) ? still.prompt_revisions.length : 0;
+    if (revisions > 0) meta.append(createElement("span", "", `提示词 ${revisions} 版`));
+    body.append(meta);
+    // 提示词编辑
+    const editor = createElement("div", "image-prompt-editor");
+    const promptInput = document.createElement("textarea");
+    promptInput.className = "image-prompt-input";
+    promptInput.rows = 3;
+    promptInput.value = imagePromptEdits.get(still.id) ?? still.prompt ?? "";
+    promptInput.placeholder = "提示词";
+    promptInput.addEventListener("input", () => {
+        imagePromptEdits.set(still.id, promptInput.value);
+    });
+    editor.append(promptInput);
+    const promptActions = createElement("div", "image-prompt-actions");
+    promptActions.append(imageActionButton("保存提示词", () => saveImagePrompt(still)));
+    const llmReady = optimizer !== null && optimizer !== undefined && optimizer.configured === true;
+    promptActions.append(
+        imageActionButton(
+            "优化提示词",
+            () => optimizeImagePrompt(still),
+            false,
+            llmReady ? `由 ${optimizer.model ?? "LLM"} 生成建议` : "未配置本机 LLM：返回 Agent 改写上下文",
+        ),
+    );
+    editor.append(promptActions);
+    body.append(editor);
+    // 优化建议
+    const draft = imagePromptDrafts.get(still.id);
+    if (draft !== undefined) {
+        const panel = createElement("div", "image-draft");
+        if (draft.mode === "agent") {
+            panel.append(
+                createElement("p", "image-draft-text", "未配置本机 LLM：请让 Agent 按上下文改写，或手动编辑提示词。"),
+            );
+            if (typeof draft.context === "string") {
+                const details = createElement("details", "image-draft-context");
+                details.append(createElement("summary", "", "查看上下文"));
+                details.append(createElement("pre", "", draft.context));
+                panel.append(details);
+            }
+            panel.append(
+                imageActionButton("关闭", () => {
+                    imagePromptDrafts.delete(still.id);
+                    void reloadView();
+                }),
+            );
+        } else {
+            panel.append(createElement("p", "image-draft-text", draft.proposed_prompt ?? ""));
+            const actions = createElement("div", "image-prompt-actions");
+            actions.append(imageActionButton("采用", () => applyImagePromptDraft(still, draft)));
+            actions.append(
+                imageActionButton("丢弃", () => {
+                    imagePromptDrafts.delete(still.id);
+                    void reloadView();
+                }),
+            );
+            panel.append(actions);
+        }
+        body.append(panel);
+    }
+    // 候选
+    const candidates = Array.isArray(still.candidates) ? still.candidates : [];
+    if (candidates.length > 0) {
+        const list = createElement("div", "image-candidates");
+        for (const candidate of candidates) {
+            const item = createElement("div", `image-candidate${candidate.selected ? " selected" : ""}`);
+            const thumb = imageThumb(
+                { ...candidate, label: `${IMAGE_OP_LABEL[candidate.op] ?? candidate.op} ` },
+                candidate.output,
+            );
+            thumb.classList.add("image-candidate-thumb");
+            item.append(thumb);
+            const info = createElement("div", "image-candidate-meta");
+            info.append(createElement("span", "", IMAGE_OP_LABEL[candidate.op] ?? candidate.op ?? "图片"));
+            info.append(createElement("span", "mono", candidate.run_id.slice(-8)));
+            item.append(info);
+            if (candidate.selected) {
+                item.append(badge("定稿"));
+                item.append(imageActionButton("撤销", () => revokeImageTake(still)));
+            } else {
+                item.append(imageActionButton("定稿", () => finalizeImageCandidate(still, candidate)));
+            }
+            list.append(item);
+        }
+        body.append(list);
+    }
+    // 操作按钮
+    const actions = createElement("div", "image-actions");
+    const busy = still.active_task !== null && still.active_task !== undefined;
+    const t2i = imageOpStatus(ops, "t2i");
+    const i2i = imageOpStatus(ops, "i2i");
+    const upscale = imageOpStatus(ops, "upscale");
+    const inpaint = imageOpStatus(ops, "inpaint");
+    const hasImage = primary !== null;
+    actions.append(
+        imageActionButton(
+            "生成",
+            () => requestImageGenerate(still, "t2i"),
+            busy || t2i === null || t2i.ready !== true,
+            t2i !== null && t2i.ready !== true ? t2i.issues.join("；") : undefined,
+        ),
+    );
+    actions.append(
+        imageActionButton(
+            "图生图",
+            () => requestImageGenerate(still, "i2i"),
+            busy || !hasImage || i2i === null || i2i.ready !== true,
+            i2i !== null && i2i.ready !== true ? i2i.issues.join("；") : undefined,
+        ),
+    );
+    actions.append(
+        imageActionButton(
+            "放大",
+            () => requestImageGenerate(still, "upscale"),
+            busy || !hasImage || upscale === null || upscale.ready !== true,
+            upscale !== null && upscale.ready !== true ? upscale.issues.join("；") : undefined,
+        ),
+    );
+    actions.append(
+        imageActionButton(
+            "局部修复",
+            () => openImageMaskEditor(still),
+            busy || !hasImage || inpaint === null || inpaint.ready !== true,
+            inpaint !== null && inpaint.ready !== true ? inpaint.issues.join("；") : undefined,
+        ),
+    );
+    body.append(actions);
+    // 入库
+    if (still.owner !== null && finalized !== null && finalized !== undefined) {
+        const promote = createElement("div", "image-promote");
+        if (!imagePromoteOpen.has(still.id)) {
+            promote.append(
+                imageActionButton("入库为主参考资产", () => {
+                    imagePromoteOpen.add(still.id);
+                    void reloadView();
+                }),
+            );
+        } else {
+            const assetInput = document.createElement("input");
+            assetInput.className = "input";
+            assetInput.placeholder = "资产 id（如 front）";
+            const reference = document.createElement("input");
+            reference.type = "checkbox";
+            reference.checked = true;
+            const label = createElement("label", "image-promote-check");
+            label.append(reference, document.createTextNode("设为主参考"));
+            const confirm = imageActionButton("确认入库", async () => {
+                try {
+                    await postJson(`/api/images/${encodeURIComponent(still.id)}/promote`, {
+                        asset_id: assetInput.value,
+                        set_reference: reference.checked,
+                    });
+                    imagePromoteOpen.delete(still.id);
+                    showToast("已入库");
+                    await reloadView();
+                } catch (error) {
+                    showToast(error instanceof Error ? error.message : "入库失败", true);
+                }
+            });
+            promote.append(assetInput, label, confirm);
+        }
+        body.append(promote);
+    }
+    // 输入图 / 遮罩 / 槽位
+    const refs = [];
+    if (still.source !== null && still.source !== undefined) refs.push({ node: still.source, label: "输入" });
+    if (still.mask !== null && still.mask !== undefined) refs.push({ node: still.mask, label: "遮罩" });
+    for (const slot of Array.isArray(still.slots) ? still.slots : []) {
+        if (slot.resolved !== null) refs.push({ node: slot.resolved, label: slot.slot });
+    }
+    if (refs.length > 0) body.append(imageRefRow(refs));
+    card.append(body);
+    return card;
+}
+
+/**
+ * 图片页。
+ */
+function renderImages(data) {
+    // 数据
+    const stills = Array.isArray(data.stills) ? data.stills : [];
+    const sets = Array.isArray(data.sets) ? data.sets : [];
+    const refs = Array.isArray(data.refs) ? data.refs : [];
+    const ops = Array.isArray(data.ops) ? data.ops : [];
+    const summary = data.summary ?? {};
+    // 页头
+    const head = createElement("div", "view-head");
+    const headText = createElement("div");
+    headText.append(createElement("p", "eyebrow", "Images"));
+    headText.append(createElement("h2", "page-title", "图片"));
+    headText.append(
+        createElement(
+            "p",
+            "page-subtitle",
+            "Agent 或 CLI 写入后自动刷新；文生图、图生图、放大、局部重绘与提示词优化共用同一批图片单元。",
+        ),
+    );
+    head.append(headText);
+    viewRoot.append(head);
+    // 统计
+    const stats = createElement("div", "stats-grid");
+    stats.append(statCard("图片单元", summary.stills_total ?? stills.length, `${sets.length} 个图片集`));
+    stats.append(statCard("已定稿", summary.finalized ?? 0, "可直接用于下游"));
+    stats.append(statCard("图片库", summary.refs_total ?? refs.length, "参考图 / 遮罩"));
+    stats.append(statCard("分镜图", summary.by_episode ?? 0, "关联剧集镜头"));
+    viewRoot.append(stats);
+    // 操作就绪状态
+    if (ops.length > 0) {
+        const opRow = createElement("div", "image-op-row");
+        for (const op of ops) {
+            const item = createElement("span", `image-op ${op.ready === true ? "ready" : "missing"}`);
+            item.append(createElement("strong", "", op.op));
+            item.append(document.createTextNode(op.ready === true ? " 就绪" : ` ${op.issues.join("；")}`));
+            opRow.append(item);
+        }
+        viewRoot.append(opRow);
+    }
+    if (stills.length === 0) {
+        viewRoot.append(
+            emptyNode(
+                "还没有图片单元",
+                "用 daoyan image new 创建，或让 Agent 按 Skill 写入提示词与参考图；本页会自动刷新。",
+            ),
+        );
+        return;
+    }
+    // 按图片集分组
+    const groups = new Map();
+    for (const still of stills) {
+        // 分组 key
+        const key = still.set !== null && still.set !== undefined ? still.set : "__none__";
+        // 当前分组
+        const list = groups.get(key) ?? [];
+        list.push(still);
+        groups.set(key, list);
+    }
+    // 已知图片集
+    const setTitles = new Map(sets.map((set) => [set.id, set.title]));
+    for (const [key, list] of groups) {
+        // 分组标题
+        const title = key === "__none__" ? "未分组" : (setTitles.get(key) ?? key);
+        // 分组
+        const section = createElement("section", "image-group");
+        const sectionHead = createElement("div", "section-head");
+        sectionHead.append(createElement("h3", "section-title", title));
+        sectionHead.append(createElement("span", "section-count", String(list.length)));
+        section.append(sectionHead);
+        // 网格
+        const grid = createElement("div", "grid image-grid");
+        for (const still of list) grid.append(renderImageCard(still, ops, data.prompt_optimizer ?? null));
+        section.append(grid);
+        viewRoot.append(section);
+    }
+    // 图片库
+    if (refs.length > 0) {
+        const section = createElement("section", "image-group");
+        const sectionHead = createElement("div", "section-head");
+        sectionHead.append(createElement("h3", "section-title", "图片库"));
+        sectionHead.append(createElement("span", "section-count", String(refs.length)));
+        section.append(sectionHead);
+        // 网格
+        const grid = createElement("div", "grid image-grid");
+        for (const ref of refs) {
+            // 卡片
+            const card = createElement("article", "card image-card image-ref-card");
+            // 媒体
+            const media = createElement("div", "image-card-media");
+            media.append(imageThumb({ ...ref, label: ref.title ?? ref.id }, ref.id));
+            // 媒体标记
+            const flags = createElement("div", "image-card-flags");
+            flags.append(badge(ref.role === "mask" ? "遮罩" : "参考图", "kind-image"));
+            media.append(flags);
+            card.append(media);
+            // 正文
+            const body = createElement("div", "card-body");
+            body.append(createElement("h3", "card-title", ref.title ?? ref.id));
+            body.append(createElement("p", "entity-id mono", ref.id));
+            if (ref.width !== null && ref.height !== null) {
+                body.append(
+                    createElement("p", "card-meta", `${ref.width}×${ref.height} · ${formatBytes(ref.bytes ?? 0)}`),
+                );
+            }
+            card.append(body);
+            grid.append(card);
+        }
+        section.append(grid);
+        viewRoot.append(section);
+    }
+}
+
+/**
  * 概览页。
  */
 function renderOverview(data) {
@@ -2823,11 +3523,15 @@ function renderOverview(data) {
     const openEpisodes = createElement(
         "button",
         "button primary",
-        projectSettings.mode === "single" ? "进入视频制作" : "进入剧集制作",
+        projectSettings.mode === "stills"
+            ? "进入图片管理"
+            : projectSettings.mode === "single"
+              ? "进入视频制作"
+              : "进入剧集制作",
     );
     openEpisodes.type = "button";
     openEpisodes.addEventListener("click", () => {
-        window.location.hash = `${HASH_PREFIX}episodes`;
+        window.location.hash = `${HASH_PREFIX}${projectSettings.mode === "stills" ? "images" : "episodes"}`;
     });
     headActions.append(openEpisodes);
     head.append(headActions);

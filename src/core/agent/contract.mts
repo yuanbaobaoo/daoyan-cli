@@ -24,6 +24,7 @@ export const AGENTS_BLOCK_BODY = [
     "Only one generation task runs per machine; if you get `machine_busy`, inspect the owner and retry later.",
     "For multi-episode projects, use `daoyan story` commands and pass `--episode <id>` to shot/batch/take/wrap; check `story status` before generation.",
     "A shot is usable downstream only after `daoyan take finalize <shot> --run <run_id>`; relay and wrap read the finalized take, never the newest run.",
+    "Images are managed as stills: prepare prompts/references with `daoyan image`, generate only when asked, and finalize with `daoyan image take finalize`; Web refreshes automatically.",
 ].join("\n");
 
 /**
@@ -42,7 +43,8 @@ export function capabilities(): Record<string, unknown> {
         git_friendly_records: true,
         project_skill: true,
         story_lifecycle: "multi-episode",
-        web_ui: "view + take finalize",
+        image_ops: ["t2i", "i2i", "upscale", "inpaint", "prompt"],
+        web_ui: "operations console (story / shot / take / image / wrap / settings)",
         user_level_skill: false,
         http_api: [
             "/system_stats",
@@ -71,11 +73,45 @@ export const PROJECT_SCHEMA: Record<string, unknown> = {
         name: { type: "string", minLength: 1 },
         version: { const: 2 },
         default_workflow: { type: "string" },
+        production: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+                mode: { enum: ["single", "series", "stills"], default: "single" },
+                audio: { type: "boolean", default: true },
+            },
+        },
         story: {
             type: "object",
             additionalProperties: false,
             properties: {
                 enforce: { enum: ["strict", "warn", "off"], default: "strict" },
+            },
+        },
+        image: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+                ops: {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                        t2i: { $ref: "#/$defs/imageOp" },
+                        i2i: { $ref: "#/$defs/imageOp" },
+                        upscale: { $ref: "#/$defs/imageOp" },
+                        inpaint: { $ref: "#/$defs/imageOp" },
+                        prompt: { $ref: "#/$defs/imageOp" },
+                    },
+                },
+                defaults: {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                        width: { type: "integer", minimum: 1 },
+                        height: { type: "integer", minimum: 1 },
+                        negative: { type: "string" },
+                    },
+                },
             },
         },
         gpu: {
@@ -101,6 +137,16 @@ export const PROJECT_SCHEMA: Record<string, unknown> = {
                         },
                     },
                 },
+            },
+        },
+    },
+    $defs: {
+        imageOp: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+                workflow: { type: "string" },
+                backend: { enum: ["llm", "agent"], default: "agent" },
             },
         },
     },
@@ -150,6 +196,18 @@ export const MACHINE_SCHEMA: Record<string, unknown> = {
                 additionalProperties: true,
             },
             description: 'workflow 相对路径 -> { "nodeId.input": value }',
+        },
+        prompt_optimizer: {
+            type: "object",
+            required: ["base_url", "model"],
+            additionalProperties: false,
+            properties: {
+                base_url: { type: "string", pattern: "^https?://" },
+                model: { type: "string", minLength: 1 },
+                api_key_env: { type: "string", minLength: 1 },
+                timeout_ms: { type: "integer", minimum: 1 },
+            },
+            description: "image prompt 的 llm 后端；密钥只从 api_key_env 指向的环境变量读取。",
         },
     },
 };
@@ -273,7 +331,7 @@ export const TASK_SCHEMA: Record<string, unknown> = {
     required: ["task_id", "kind", "machine_id", "status", "mode", "runs", "created_at", "next_actions", "options"],
     properties: {
         task_id: { type: "string" },
-        kind: { enum: ["run", "shot", "retake", "batch", "metadata"] },
+        kind: { enum: ["run", "shot", "retake", "batch", "image", "metadata"] },
         machine_id: { type: "string" },
         request_id: { type: ["string", "null"] },
         status: { enum: ["queued", "running", "succeeded", "failed", "cancelled", "interrupted"] },
@@ -296,6 +354,10 @@ export const TASK_SCHEMA: Record<string, unknown> = {
                 sets: { type: "object" },
                 label: { type: "string" },
                 shots: { type: "array", items: { type: "string" } },
+                stills: { type: "array", items: { type: "string" } },
+                op: { enum: ["t2i", "i2i", "upscale", "inpaint"] },
+                image_source: { type: "string" },
+                image_mask: { type: "string" },
                 steps: { type: "integer" },
                 timeout_ms: { type: "integer" },
                 engine_url: { type: "string" },

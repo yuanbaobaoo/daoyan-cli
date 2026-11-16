@@ -8,7 +8,8 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
-import type { MachineConfig, ProjectConfig, TaskOptions } from "../project/types.mts";
+import type { ImageOp, MachineConfig, ProjectConfig, TaskOptions } from "../project/types.mts";
+import { STILLS_DIR } from "../project/types.mts";
 import { loadMachineIfExists, readProjectAt } from "../project/config.mts";
 import { buildAccessUrls, isLoopbackHost, normalizeHost, type AccessUrls } from "./addresses.mts";
 import type { SkillCommand } from "../agent/skill.mts";
@@ -24,7 +25,14 @@ import {
     listTasksView,
     listWorkflows,
 } from "./data.mts";
-import { resolveEpisodeFinalMedia, resolveRunMedia, resolveStoryMedia, serveMedia } from "./media.mts";
+import {
+    resolveEpisodeFinalMedia,
+    resolveRunMedia,
+    resolveStillsMedia,
+    resolveStoryMedia,
+    serveMedia,
+} from "./media.mts";
+import { buildImagesView } from "./image-data.mts";
 import {
     buildStoryEpisodeView,
     buildStorySeriesView,
@@ -34,9 +42,12 @@ import {
     listStoryVoicesView,
 } from "./story-data.mts";
 import { listEpisodeMetas, resolveEpisodeContext } from "../story/paths.mts";
-import { parseAssetOwner, referenceAssetOf, removeAsset, setReferenceAsset } from "../story/assets.mts";
+import { parseAssetOwner, addAsset, referenceAssetOf, removeAsset, setReferenceAsset } from "../story/assets.mts";
 import { productionOf } from "../project/production.mts";
 import { updateProduction } from "../story/mode.mts";
+import { finalizeStillTake, revokeStillTake, stillTakeSummary } from "../story/image-takes.mts";
+import { optimizePrompt } from "../story/prompt-optimizer.mts";
+import { addStillRefBytes, imageOpsStatus, loadStills, parseStillOwner, updateStill } from "../story/stills.mts";
 import { checkStoryGate, gateError, loadContextShots } from "../story/production.mts";
 import { approveScript } from "../story/store.mts";
 import { finalizedTakeOf, finalizeTake, revokeTake, takesRelPath } from "../story/takes.mts";
@@ -81,7 +92,7 @@ export interface WebTaskStartOptions {
     /**
      * 任务类型。
      */
-    kind: "shot" | "retake";
+    kind: "shot" | "retake" | "image";
     /**
      * 触发命令（展示用）。
      */
@@ -272,7 +283,7 @@ const REVISION_IGNORED_DIRS = new Set([".git", "node_modules", ".idea", "dist", 
 // 变更扫描的根文件
 const REVISION_ROOT_FILES = ["project.json", "shots.json", "takes.json", ".dycli/machine.json"];
 // 变更扫描的目录
-const REVISION_WATCH_DIRS = ["story", "episodes", "workflows", "final"];
+const REVISION_WATCH_DIRS = ["story", STILLS_DIR, "episodes", "workflows", "final"];
 // run / task 记录浅扫描
 const REVISION_RECORD_FILES: ReadonlyArray<readonly [string, string]> = [
     ["runs", "run.json"],
@@ -285,6 +296,12 @@ const URL_BASE = "http://127.0.0.1";
 const ALLOWED_METHODS = "GET, HEAD, POST";
 // 定稿写接口路径
 const TAKE_WRITE_PATHS = new Set(["/api/takes/finalize", "/api/takes/revoke"]);
+// 图片操作写接口
+const IMAGE_ACTION_RE = /^\/api\/images\/([^/]+)\/(generate|mask|promote)$/;
+// 图片定稿写接口
+const IMAGE_TAKE_RE = /^\/api\/images\/([^/]+)\/take\/(finalize|revoke)$/;
+// 图片提示词写接口（optimize 可选）
+const IMAGE_PROMPT_RE = /^\/api\/images\/([^/]+)\/prompt(?:\/(optimize))?$/;
 // 剧本确认路径
 const SCRIPT_APPROVE_PATH = "/api/script/approve";
 // 角色形态主参考路径
@@ -810,8 +827,8 @@ async function handleProjectSettings(
         const body = await requireWriteBody(req);
         // 模式
         const mode = body.mode;
-        if (mode !== undefined && mode !== "single" && mode !== "series") {
-            throw new WriteRequestError(400, "bad_request", "mode 只能是 single / series");
+        if (mode !== undefined && mode !== "single" && mode !== "series" && mode !== "stills") {
+            throw new WriteRequestError(400, "bad_request", "mode 只能是 single / series / stills");
         }
         // 音频
         const audio = body.audio;
@@ -823,7 +840,7 @@ async function handleProjectSettings(
         }
         // 更新
         const updated = updateProduction(ctx.root, {
-            ...(mode !== undefined ? { mode: mode as "single" | "series" } : {}),
+            ...(mode !== undefined ? { mode: mode as "single" | "series" | "stills" } : {}),
             ...(audio !== undefined ? { audio: audio as boolean } : {}),
         });
         ctx.project = updated;
@@ -864,6 +881,222 @@ async function handleScriptApprove(
         cache.at = 0;
         cache.data = null;
         sendJson(res, 200, { episode_id: episodeId, script });
+    } catch (e) {
+        sendWriteError(res, e);
+    }
+}
+
+/**
+ * 图片生成 / 遮罩 / 入库写接口。
+ */
+async function handleImageAction(
+    req: IncomingMessage,
+    res: ServerResponse,
+    ctx: RouteContext,
+    cache: OverviewCache,
+    id: string,
+    action: "generate" | "mask" | "promote",
+): Promise<void> {
+    try {
+        // 图片单元
+        const still = loadStills(ctx.root).stills.find((item) => item.id === id);
+        if (still === undefined) throw new WriteRequestError(404, "image_not_found", `未找到图片单元 ${id}`);
+        const body = await requireWriteBody(req);
+        if (action === "generate") {
+            // 操作
+            const op = stringField(body.op);
+            if (op !== "t2i" && op !== "i2i" && op !== "upscale" && op !== "inpaint") {
+                throw new WriteRequestError(400, "bad_request", "op 只能是 t2i / i2i / upscale / inpaint");
+            }
+            // 操作就绪
+            const status = imageOpsStatus(ctx.root, ctx.project, ctx.machine).find((item) => item.op === op);
+            if (status === undefined || !status.ready) {
+                throw new WriteRequestError(
+                    400,
+                    "image_op_not_ready",
+                    `操作 ${op} 未就绪：${status?.issues.join("；") ?? "未配置"}`,
+                );
+            }
+            // 本机
+            const machine = ctx.machine ?? loadMachineIfExists(ctx.root);
+            if (machine === null) throw new WriteRequestError(400, "machine_missing", "本机未初始化");
+            // 覆盖
+            const source = stringField(body.source);
+            const mask = stringField(body.mask);
+            const sets = body.sets;
+            if (sets !== undefined && (typeof sets !== "object" || sets === null || Array.isArray(sets))) {
+                throw new WriteRequestError(400, "bad_request", "sets 必须是对象");
+            }
+            // 任务
+            const created = await ctx.taskStarter({
+                root: ctx.root,
+                project: ctx.project,
+                machine,
+                kind: "image",
+                command: `image gen ${id} --op ${op}`,
+                episodeId: null,
+                options: {
+                    stills: [id],
+                    op: op as ImageOp,
+                    force: true,
+                    ...(source !== undefined ? { image_source: source } : {}),
+                    ...(mask !== undefined ? { image_mask: mask } : {}),
+                    ...(sets !== undefined ? { sets: sets as TaskOptions["sets"] } : {}),
+                },
+            });
+            cache.at = 0;
+            cache.data = null;
+            sendJson(res, 202, {
+                still_id: id,
+                op,
+                task_id: created.task_id,
+                status: created.status,
+                deduplicated: created.deduplicated,
+            });
+            return;
+        }
+        if (action === "mask") {
+            // data URL
+            const dataUrl = stringField(body.data_url);
+            const matched = dataUrl === undefined ? null : /^data:image\/png;base64,(.+)$/.exec(dataUrl);
+            if (matched === null || matched[1] === undefined) {
+                throw new WriteRequestError(400, "bad_request", "data_url 必须是 PNG data URL");
+            }
+            // 字节
+            const bytes = new Uint8Array(Buffer.from(matched[1], "base64"));
+            if (bytes.byteLength === 0) throw new WriteRequestError(400, "bad_request", "遮罩为空");
+            if (bytes.byteLength > 20 * 1024 * 1024) {
+                throw new WriteRequestError(400, "bad_request", "遮罩超过 20 MiB");
+            }
+            // 入库
+            const ref = addStillRefBytes({
+                root: ctx.root,
+                bytes,
+                id: `mask-${id}-${Date.now().toString(36)}`,
+                role: "mask",
+                title: `${id} 遮罩`,
+            });
+            const updated = updateStill(ctx.root, id, { mask: `ref:${ref.id}` }, { source: "user" });
+            cache.at = 0;
+            cache.data = null;
+            sendJson(res, 200, { still_id: id, ref, mask: `ref:${ref.id}`, still: updated });
+            return;
+        }
+        // promote
+        const assetId = stringField(body.asset_id);
+        if (assetId === undefined) throw new WriteRequestError(400, "bad_request", "缺少 asset_id");
+        if (still.owner === undefined || still.owner === null || still.owner === "") {
+            throw new WriteRequestError(400, "image_invalid", "图片单元没有 owner");
+        }
+        const summary = stillTakeSummary(ctx.root, id);
+        if (summary.finalized === null || summary.stale !== null) {
+            throw new WriteRequestError(400, "take_pending", "图片尚未定稿，不能入库");
+        }
+        // owner
+        const owner = parseStillOwner(still.owner, still.form);
+        const result = addAsset({
+            root: ctx.root,
+            owner: parseAssetOwner(`${owner.kind}:${owner.id}`, owner.form ?? undefined),
+            assetId,
+            fromRun: summary.finalized.run_id,
+            output: summary.finalized.output,
+            setReference: body.set_reference === true,
+            replace: body.replace === true,
+        });
+        cache.at = 0;
+        cache.data = null;
+        sendJson(res, 200, {
+            still_id: id,
+            asset: result.asset,
+            reference_set: result.reference_set,
+            warning: result.warning,
+        });
+    } catch (e) {
+        sendWriteError(res, e);
+    }
+}
+
+/**
+ * 图片定稿写接口。
+ */
+async function handleImageTakeWrite(
+    req: IncomingMessage,
+    res: ServerResponse,
+    ctx: RouteContext,
+    cache: OverviewCache,
+    id: string,
+    action: "finalize" | "revoke",
+): Promise<void> {
+    try {
+        const body = await requireWriteBody(req);
+        if (action === "finalize") {
+            // run
+            const runId = stringField(body.run_id);
+            if (runId === undefined) throw new WriteRequestError(400, "bad_request", "缺少 run_id");
+            const result = finalizeStillTake({
+                root: ctx.root,
+                stillId: id,
+                runId,
+                ...(stringField(body.output) !== undefined ? { output: stringField(body.output) as string } : {}),
+                ...(stringField(body.note) !== undefined ? { note: stringField(body.note) as string } : {}),
+                source: "user",
+            });
+            cache.at = 0;
+            cache.data = null;
+            sendJson(res, 200, {
+                still_id: id,
+                run_id: result.entry.run_id,
+                output: result.entry.output,
+                changed: result.changed,
+                replaced: result.replaced,
+                take: result.entry,
+            });
+            return;
+        }
+        const result = revokeStillTake({ root: ctx.root, stillId: id, source: "user" });
+        cache.at = 0;
+        cache.data = null;
+        sendJson(res, 200, { still_id: id, changed: result.changed, revoked: result.revoked });
+    } catch (e) {
+        sendWriteError(res, e);
+    }
+}
+
+/**
+ * 图片提示词写接口（set / optimize）。
+ */
+async function handleImagePrompt(
+    req: IncomingMessage,
+    res: ServerResponse,
+    ctx: RouteContext,
+    cache: OverviewCache,
+    id: string,
+    optimize: boolean,
+): Promise<void> {
+    try {
+        const body = await requireWriteBody(req);
+        if (!optimize) {
+            // 手动设置
+            const text = stringField(body.text);
+            if (text === undefined) throw new WriteRequestError(400, "bad_request", "缺少 text");
+            const still = updateStill(ctx.root, id, { prompt: text }, { source: "user" });
+            cache.at = 0;
+            cache.data = null;
+            sendJson(res, 200, {
+                still,
+                revision: still.prompt_revisions?.[still.prompt_revisions.length - 1] ?? null,
+            });
+            return;
+        }
+        const result = await optimizePrompt({
+            root: ctx.root,
+            stillId: id,
+            machine: loadMachineIfExists(ctx.root),
+            apply: body.apply === true,
+        });
+        cache.at = 0;
+        cache.data = null;
+        sendJson(res, 200, result);
     } catch (e) {
         sendWriteError(res, e);
     }
@@ -1195,8 +1428,43 @@ async function handleRequest(
         // API 请求先刷新磁盘上的项目上下文（免重启）
         if (pathname.startsWith(API_PREFIX)) refreshContext(ctx);
 
-        // 写接口（定稿 / 剧本确认 / 镜头生成 / 主参考 / 删除 / 合片）
+        // 写接口（定稿 / 剧本确认 / 镜头生成 / 主参考 / 删除 / 合片 / 图片）
         if (isWrite) {
+            // 图片操作
+            const imageAction = IMAGE_ACTION_RE.exec(pathname);
+            if (imageAction !== null) {
+                const id = decodePathSegment(imageAction[1]);
+                const action = imageAction[2];
+                if (id === null || (action !== "generate" && action !== "mask" && action !== "promote")) {
+                    sendJsonError(res, 400, "bad_request", "图片路径非法", headOnly);
+                    return;
+                }
+                await handleImageAction(req, res, ctx, cache, id, action);
+                return;
+            }
+            // 图片定稿
+            const imageTake = IMAGE_TAKE_RE.exec(pathname);
+            if (imageTake !== null) {
+                const id = decodePathSegment(imageTake[1]);
+                const action = imageTake[2];
+                if (id === null || (action !== "finalize" && action !== "revoke")) {
+                    sendJsonError(res, 400, "bad_request", "图片定稿路径非法", headOnly);
+                    return;
+                }
+                await handleImageTakeWrite(req, res, ctx, cache, id, action);
+                return;
+            }
+            // 图片提示词
+            const imagePrompt = IMAGE_PROMPT_RE.exec(pathname);
+            if (imagePrompt !== null) {
+                const id = decodePathSegment(imagePrompt[1]);
+                if (id === null) {
+                    sendJsonError(res, 400, "bad_request", "图片提示词路径非法", headOnly);
+                    return;
+                }
+                await handleImagePrompt(req, res, ctx, cache, id, imagePrompt[2] === "optimize");
+                return;
+            }
             if (TAKE_WRITE_PATHS.has(pathname)) {
                 await handleTakeWrite(req, res, ctx, cache, pathname);
                 return;
@@ -1389,6 +1657,12 @@ async function handleRequest(
             return;
         }
 
+        // 图片单元 / 图片库 / 操作状态
+        if (pathname === "/api/images") {
+            sendJson(res, 200, buildImagesView(ctx.root, ctx.project, ctx.machine), headOnly);
+            return;
+        }
+
         // 产物
         if (pathname === "/api/artifacts") {
             sendJson(
@@ -1530,6 +1804,31 @@ async function handleRequest(
             }
             // 媒体目标
             const target = resolveStoryMedia(ctx.root, decoded.join("/"));
+            if (target === null) {
+                sendJsonError(res, 404, "not_found", "媒体不存在", headOnly);
+                return;
+            }
+            await serveMedia(req, res, target, url.searchParams.get("download") === "1");
+            return;
+        }
+
+        // 图片库媒体
+        if (pathname.startsWith(`${MEDIA_PREFIX}/stills/`)) {
+            // 路径段（stills/ 下相对路径）
+            const segments = pathname.split("/").slice(3);
+            // 解码后的路径段
+            const decoded: string[] = [];
+            for (const segment of segments) {
+                // 解码后的路径段
+                const value = decodeSegment(segment);
+                if (value === null) {
+                    sendJsonError(res, 400, "bad_request", "媒体路径非法", headOnly);
+                    return;
+                }
+                decoded.push(value);
+            }
+            // 媒体目标
+            const target = resolveStillsMedia(ctx.root, decoded.join("/"));
             if (target === null) {
                 sendJsonError(res, 404, "not_found", "媒体不存在", headOnly);
                 return;

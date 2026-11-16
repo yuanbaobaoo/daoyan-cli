@@ -57,6 +57,12 @@ export function reassignRunToEpisode(opts: {
 }): ReassignResult {
     // 现有记录
     const run = requireRun(opts.root, opts.runId);
+    if (run.op !== undefined && run.op !== null) {
+        throw new DaoyanCliError({
+            code: "image_invalid",
+            message: `run ${run.run_id} 是图片 run（${run.op}），不能迁移到镜头；图片用 image take finalize`,
+        });
+    }
     // 迁移前归属
     const priorLabel = run.label;
     // 迁移前剧集

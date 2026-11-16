@@ -22,6 +22,8 @@ import {
 
 // 视频类产物扩展名（定稿稿件 / 接力尾帧 / 合片选段的唯一声明处）
 const VIDEO_OUTPUT_RE = /\.(mp4|webm|mkv|mov|gif)$/i;
+// 图片类产物扩展名（图片定稿 / 候选的唯一声明处）
+const IMAGE_OUTPUT_RE = /\.(png|jpe?g|webp)$/i;
 
 /**
  * 生成 run id：<timestamp>-<machine>-<suffix>。
@@ -204,6 +206,20 @@ export function runOutputAbs(root: string, record: RunRecord, output: RunOutput)
  */
 export function isVideoOutput(name: string): boolean {
     return VIDEO_OUTPUT_RE.test(name);
+}
+
+/**
+ * 判断产物名是否为图片。
+ */
+export function isImageOutput(name: string): boolean {
+    return IMAGE_OUTPUT_RE.test(name);
+}
+
+/**
+ * 选出 run 的图片产物（图片定稿 / 候选）。
+ */
+export function pickImageOutput(record: RunRecord): RunOutput | null {
+    return record.outputs.find((o) => isImageOutput(o.name)) ?? null;
 }
 
 /**

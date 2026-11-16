@@ -286,12 +286,6 @@ a:hover {
     overflow: visible;
 }
 
-.sidebar-foot {
-    margin: 12px 12px 0;
-    color: var(--text-muted);
-    font-size: 10px;
-}
-
 .icon-button.nav-toggle,
 .nav-backdrop {
     display: none;
@@ -352,7 +346,8 @@ a:hover {
     cursor: pointer;
 }
 
-.settings-option.disabled {
+.settings-option.disabled,
+.settings-check.disabled {
     opacity: 0.55;
     cursor: not-allowed;
 }
@@ -751,6 +746,343 @@ a:hover {
     flex-wrap: wrap;
     gap: 8px;
     margin-top: 16px;
+}
+
+/* 图片页 */
+.image-grid {
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+}
+
+.image-group {
+    margin-top: 8px;
+}
+
+.section-count {
+    color: var(--text-muted);
+    font-size: 12px;
+}
+
+.image-card {
+    display: flex;
+    flex-direction: column;
+}
+
+.image-card-media {
+    position: relative;
+    aspect-ratio: 4 / 3;
+    overflow: hidden;
+    background: var(--bg-soft);
+}
+
+.image-card-media .image-thumb {
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+}
+
+.image-card-media img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.image-thumb {
+    display: block;
+    padding: 0;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-soft);
+    cursor: pointer;
+}
+
+.image-thumb img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.image-thumb-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    font-size: 12px;
+    cursor: default;
+}
+
+.image-card-flags {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.image-card-prompt {
+    display: -webkit-box;
+    margin: 10px 0 0;
+    overflow: hidden;
+    color: var(--text-soft);
+    font-size: 12px;
+    line-height: 1.6;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 4;
+}
+
+.image-ref-row {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+    padding-bottom: 2px;
+    overflow-x: auto;
+}
+
+.image-ref-cell {
+    display: flex;
+    flex: 0 0 64px;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+}
+
+.image-ref-cell .image-thumb {
+    width: 64px;
+    height: 64px;
+}
+
+.image-ref-label {
+    max-width: 64px;
+    overflow: hidden;
+    color: var(--text-muted);
+    font-size: 10px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.image-op-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 18px 0 4px;
+}
+
+.image-op {
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--text-muted);
+    font-size: 11px;
+}
+
+.image-op.ready {
+    border-color: var(--green);
+    background: var(--green-soft);
+    color: var(--green);
+}
+
+.image-op.missing {
+    border-color: var(--amber);
+    background: var(--amber-soft);
+    color: var(--amber);
+}
+
+.image-prompt-editor {
+    margin-top: 12px;
+}
+
+.image-prompt-input {
+    width: 100%;
+    min-height: 64px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-elevated);
+    color: var(--text);
+    font: inherit;
+    font-size: 12px;
+    line-height: 1.6;
+    resize: vertical;
+}
+
+.image-prompt-input:focus {
+    border-color: var(--accent);
+    outline: none;
+}
+
+.image-prompt-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.image-action {
+    padding: 5px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-elevated);
+    color: var(--text-soft);
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.image-action:hover:not(:disabled) {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.image-action:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.image-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 12px;
+}
+
+.image-candidates {
+    display: flex;
+    gap: 10px;
+    margin-top: 14px;
+    padding-bottom: 4px;
+    overflow-x: auto;
+}
+
+.image-candidate {
+    display: flex;
+    flex: 0 0 auto;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 6px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-soft);
+}
+
+.image-candidate.selected {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+}
+
+.image-candidate .image-thumb {
+    width: 88px;
+    height: 88px;
+}
+
+.image-candidate-meta {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    color: var(--text-muted);
+    font-size: 10px;
+}
+
+.image-draft {
+    margin-top: 10px;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-soft);
+}
+
+.image-draft-text {
+    margin: 0;
+    color: var(--text-soft);
+    font-size: 12px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+}
+
+.image-draft-context {
+    margin-top: 8px;
+    color: var(--text-muted);
+    font-size: 11px;
+}
+
+.image-draft-context pre {
+    max-height: 180px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.image-promote {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.image-promote .input {
+    width: 120px;
+    padding: 5px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-elevated);
+    color: var(--text);
+    font-size: 11px;
+}
+
+.image-promote-check {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--text-muted);
+    font-size: 11px;
+}
+
+.mask-editor {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+}
+
+.mask-stage {
+    position: relative;
+    display: inline-block;
+    max-width: 100%;
+}
+
+.mask-canvas {
+    display: block;
+    max-width: 100%;
+    max-height: 62vh;
+    border-radius: var(--radius-sm);
+}
+
+.mask-overlay {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    cursor: crosshair;
+    opacity: 0.7;
+    touch-action: none;
+}
+
+.mask-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+}
+
+.mask-hint {
+    color: var(--text-muted);
+    font-size: 11px;
 }
 
 .artifact-card {

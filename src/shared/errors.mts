@@ -31,6 +31,12 @@ export const ERROR_CODES = [
     "feature_disabled",
     "asset_not_found",
     "asset_invalid",
+    // 图片单元
+    "image_not_found",
+    "image_invalid",
+    "image_source_invalid",
+    "image_conflict",
+    "image_failed",
     // 引擎
     "engine_not_ready",
     "engine_start_failed",
@@ -174,6 +180,27 @@ export const ERROR_META: Record<ErrCode, ErrorMeta> = {
     asset_invalid: {
         retryable: false,
         hint: "检查文件类型、大小、路径与哈希；重新生成或转换格式后重试。",
+    },
+    image_not_found: {
+        retryable: false,
+        hint: "用 daoyan image list 查看当前项目已有的图片单元与图片库条目。",
+    },
+    image_invalid: {
+        retryable: false,
+        hint: "按 details 修正 image 单元字段；写入统一走 daoyan image set。",
+    },
+    image_source_invalid: {
+        retryable: false,
+        hint: "图片输入用 asset:<owner>@<asset> / ref:<id> / still:<id> / run:<run>/<output> 描述符。",
+    },
+    image_conflict: {
+        retryable: true,
+        retryAfterMs: 500,
+        hint: "文件已被其他写入者更新；重新读取 image show 后再提交。",
+    },
+    image_failed: {
+        retryable: false,
+        hint: "看 details.failures 与 image ops；修正 workflow / 输入图 / 遮罩后重试。",
     },
 
     engine_not_ready: { retryable: true, retryAfterMs: 5_000, hint: "确认引擎可达后再执行任务。" },

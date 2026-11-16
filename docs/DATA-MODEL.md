@@ -56,7 +56,7 @@ final/<episode-id>/cut-*          单集成片
 }
 ```
 
-- `mode`: `single`（只能一集）/ `series`（1..N 集）；旧 story 项目缺失时按 `series` 兼容；
+- `mode`: `single`（只能一集）/ `series`（1..N 集）/ `stills`（纯图片，无剧集）；旧 story 项目缺失时按 `series` 兼容；
 - `audio`: `false` 时隐藏并忽略音色 / 语音槽位，数据保留；
 - `single → series` 直接允许；`series → single` 仅当只有一集。
 
@@ -68,6 +68,20 @@ final/<episode-id>/cut-*          单集成片
 - task/run 的 `episode_id` 指向所属剧集；独立 `run` 可为 null；镜头 label 固定为 `ep:<id>:shot:<shot-id>`；
 - `run` 可选 `--episode` 归属；`shot` / `batch` / `retake` / `wrap` 多集必须显式；
 - 完整需求和契约见 [REQUIREMENTS.md](REQUIREMENTS.md)。
+
+#### 图片单元（stills/）
+
+```text
+stills/stills.json        图片单元、图片集、图片库（参考图 / 遮罩）
+stills/takes.json         图片定稿台账（每张图至多一份定稿）
+stills/refs/**            图片库文件（LFS）
+```
+
+- 一个 still 是图片主题；`t2i` / `i2i` / `upscale` / `inpaint` / `prompt` 都是它的操作，每次执行落成一个 run；
+- 图片输入统一用描述符：`asset:<owner>@<asset>` / `ref:<id>` / `still:<id>` / `run:<run_id>/<output>`；共享记录不写绝对路径；
+- 提示词修订写入 `still.prompt_revisions`，不自动覆盖当前提示词；
+- 候选产物从 `runs/` 按 label `img:<still-id>` 实时推导，`stills/takes.json` 只记定稿决定；
+- `production.mode=stills` 为纯图片项目：不建剧集，保留 `story/characters.json` 与 `story/scenes.json` 作为设定集。
 
 #### story-map.json（可选叙事标注）
 
@@ -170,6 +184,7 @@ final/<episode-id>/cut-*          单集成片
 | `version` | 是 | 固定 `2` |
 | `default_workflow` | 否 | shot recipe 的兜底 workflow |
 | `story.enforce` | 否 | story 门禁策略：`strict`（默认）/ `warn` / `off` |
+| `image.ops` | 否 | 图片操作配置：`t2i` / `i2i` / `upscale` / `inpaint` / `prompt` 的 workflow 或后端 |
 | `gpu.takeover` | 否 | 项目级 GPU 接管开关，默认 false |
 | `comfyui.version` | 否 | local 部署/切换的 ComfyUI pin |
 | `comfyui.custom_nodes` | 否 | 安装到 `engine/ComfyUI/custom_nodes/` |
@@ -211,7 +226,8 @@ remote：
 - `free_after_task`：`always` / `when_idle`（默认）/ `never`；
 - `overrides` 按 workflow 相对路径索引，值形如 `"nodeId.input": value`；
 - 优先级：workflow 文件 < machine overrides < `--set`；
-- `comfyui_dir` / `venv_dir` 可省略，默认 `engine/ComfyUI` / `engine/.venv`。
+- `comfyui_dir` / `venv_dir` 可省略，默认 `engine/ComfyUI` / `engine/.venv`；
+- `prompt_optimizer`（可选）：`{ base_url, model, api_key_env?, timeout_ms? }`，OpenAI 兼容接口；密钥只从 `api_key_env` 指向的环境变量读取。
 
 ## 4. 工作流图
 
@@ -308,7 +324,7 @@ shot/batch 必须有 bindings，至少映射 `prompt` 与 `seed`；`run` 不强�
 
 - workflow 选择：单镜 `workflow` > 文件级 `workflow` > `project.default_workflow`；
 - 逻辑值（prompt/seed/width/height/...）通过 bindings 注入；镜头可覆盖 `steps/cfg/length/width/height`，`params` 可追加逻辑输入；
-- 首帧：锚点 key 或接力（取上游镜头**定稿稿件**的尾帧；未定稿时按 `project.story.enforce` 回退最新成功 run 或阻断）；
+- 首帧：锚点 key / 接力（取上游镜头**定稿稿件**的尾帧）/ 图片单元（`{ "image": "<still-id>" }`，取该图定稿；未定稿时按 `project.story.enforce` 回退或阻断）；
 - `meta.characters` / `meta.scenes` 是可选的故事设定，仅用于展示与复用，不注入 workflow；
 - 人物/场景可以是字符串或对象；对象支持 `id`、`name`、`description`、`reference`（项目内相对路径）；
 - 镜头用 `characters: ["lin"]` / `scene: "city"` 引用 id 或名称；也支持 `cast` / `roles` 与 `location` 别名；
@@ -413,6 +429,7 @@ shot/batch 必须有 bindings，至少映射 `prompt` 与 `seed`；`run` 不强�
 约束：
 
 - story 模式额外字段 `episode_id`；label 使用 `ep:<episode-id>:shot:<shot-id>`；
+- 图片任务 label 为 `img:<still-id>`，`op` 记录本次操作（t2i / i2i / upscale / inpaint）；
 - `inputs.assets` 记录工作流资产槽位实际使用的资产（slot / owner / path / sha256 / bytes）；
 - 不含绝对路径；
 - `workflow.json` 是上传/覆盖后、实际提交的图；

@@ -7,7 +7,7 @@ import { createReadStream, existsSync, realpathSync, statSync } from "node:fs";
 import { basename, extname, join, sep } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { pipeline } from "node:stream/promises";
-import { FINAL_DIR, RUNS_DIR, STORY_ASSETS_DIR } from "../project/types.mts";
+import { FINAL_DIR, RUNS_DIR, STILLS_DIR, STORY_ASSETS_DIR } from "../project/types.mts";
 import { readRun, runDir } from "../run/store.mts";
 import { STORY_ID_RE } from "../story/paths.mts";
 
@@ -169,6 +169,30 @@ export function resolveStoryMedia(root: string, relPath: string): MediaTarget | 
     if (base === null || !isWithin(projectRoot, base)) return null;
     // 文件真实路径
     const abs = safeRealpath(join(root, STORY_ASSETS_DIR, relPath));
+    if (abs === null || !isWithin(base, abs)) return null;
+    try {
+        // 文件状态
+        const stat = statSync(abs);
+        if (!stat.isFile()) return null;
+        return makeTarget(abs, basename(abs), `"${stat.size}-${stat.mtimeMs}"`);
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * 解析图片库文件（stills/refs/... 等 stills/ 下白名单）。
+ */
+export function resolveStillsMedia(root: string, relPath: string): MediaTarget | null {
+    if (relPath === "" || relPath.startsWith("/") || relPath.includes("..") || relPath.includes("\\")) return null;
+    // 项目根真实路径
+    const projectRoot = safeRealpath(root);
+    if (projectRoot === null) return null;
+    // stills 根真实路径
+    const base = safeRealpath(join(root, STILLS_DIR));
+    if (base === null || !isWithin(projectRoot, base)) return null;
+    // 文件真实路径
+    const abs = safeRealpath(join(root, STILLS_DIR, relPath));
     if (abs === null || !isWithin(base, abs)) return null;
     try {
         // 文件状态

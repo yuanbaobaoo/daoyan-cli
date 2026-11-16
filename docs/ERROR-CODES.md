@@ -55,6 +55,11 @@
 | `story_gate_failed` | 否 | — | 拍摄门禁未通过；看 `details.blockers` / `details.stage` |
 | `asset_not_found` | 否 | — | owner / 资产 / run 产物不存在 |
 | `asset_invalid` | 否 | — | 资产类型、大小、路径、哈希或 LFS 状态不合法 |
+| `image_not_found` | 否 | — | 图片单元 / 图片库条目不存在；`image list` |
+| `image_invalid` | 否 | — | 图片单元字段、归属或引用结构非法 |
+| `image_source_invalid` | 否 | — | 图片输入描述符或遮罩非法（asset/ref/still/run） |
+| `image_conflict` | 是 | 500 | `--base-updated-at` 不匹配；重新读取后重试 |
+| `image_failed` | 否 | — | 图片 task / 提示词优化失败；看 `details.failures` 与 `image ops` |
 | `engine_not_ready` | 是 | 5000 | 引擎未就绪 |
 | `engine_start_failed` | 否 | — | local 启动失败/就绪超时；看 `logs/engine-*.log` |
 | `engine_stop_failed` | 是 | 10000 | local 停止失败；下次任务回收 |

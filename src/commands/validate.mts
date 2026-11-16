@@ -31,6 +31,7 @@ import { skillState } from "../core/agent/skill.mts";
 import { inspectMachineLock } from "../core/machine/lock.mts";
 import { VERSION } from "../shared/version.mts";
 import { validateStory } from "../core/story/validate.mts";
+import { validateStills } from "../core/story/stills-validate.mts";
 
 // 尺寸建议（warning，不阻断）
 const DIM_MULTIPLE = 32;
@@ -260,6 +261,17 @@ export async function runValidate(ctx: CliContext): Promise<number> {
     validateWorkflows(root, machine, issues);
     // 校验分集剧本 / 设定集 / 拆解 / 分镜
     for (const item of validateStory(root)) {
+        issues.push({
+            path: item.path,
+            episode_id: item.episode_id,
+            code: item.code,
+            severity: item.severity === "error" ? "error" : "warning",
+            message: item.message,
+            hint: item.hint,
+        });
+    }
+    // 校验图片单元 / 图片库 / 操作配置 / 定稿台账
+    for (const item of validateStills(root, project, machine)) {
         issues.push({
             path: item.path,
             episode_id: item.episode_id,

@@ -631,7 +631,7 @@ export interface WebShotItem {
     /**
      * 首帧类型。
      */
-    first_frame_kind: "anchor" | "relay" | "none";
+    first_frame_kind: "anchor" | "relay" | "image" | "none";
     /**
      * 该镜 workflow（未覆盖时为文件级）。
      */
@@ -1697,8 +1697,13 @@ export function buildShotsView(
             firstFrame = shot.first_frame;
             firstFrameKind = "anchor";
         } else if (shot.first_frame !== undefined && typeof shot.first_frame === "object") {
-            firstFrame = `接力 ${shot.first_frame.relay}`;
-            firstFrameKind = "relay";
+            if ("image" in shot.first_frame) {
+                firstFrame = `图片 ${shot.first_frame.image}`;
+                firstFrameKind = "image";
+            } else {
+                firstFrame = `接力 ${shot.first_frame.relay}`;
+                firstFrameKind = "relay";
+            }
         }
         // 帧数
         const length = shot.length ?? shots.defaults.length ?? null;

@@ -31,6 +31,15 @@ export function assertModeSwitch(root: string, mode: ProductionMode): void {
     // 当前剧集
     const metas = listEpisodeMetas(root);
     if (mode === "series") return;
+    if (mode === "stills") {
+        if (metas.length === 0) return;
+        throw new DaoyanCliError({
+            code: "mode_conflict",
+            message: `项目当前有 ${metas.length} 集，不能切换为纯图片模式`,
+            details: { episodes: metas.map((meta) => meta.id) },
+            hint: "先移除剧集，或保持 single / series。",
+        });
+    }
     if (metas.length === 0) {
         throw new DaoyanCliError({
             code: "story_invalid",
@@ -89,7 +98,9 @@ export function updateProduction(root: string, patch: { mode?: ProductionMode; a
     // 目标模式
     const mode = patch.mode ?? current.mode;
     if (patch.mode !== undefined) assertModeSwitch(root, patch.mode);
-    return saveProduction(root, { mode, audio: patch.audio ?? current.audio });
+    // 纯图片项目没有音色
+    const audio = mode === "stills" ? false : (patch.audio ?? current.audio);
+    return saveProduction(root, { mode, audio });
 }
 
 /**

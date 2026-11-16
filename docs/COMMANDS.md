@@ -1,4 +1,4 @@
-# 命令参考（v0.1）
+# 命令参考
 
 > 机器可读权威：`daoyan help --json`。非 TTY 默认输出 JSON 信封；`--no-json` 强制人类文本。
 
@@ -26,7 +26,7 @@
 
 ## 异步协议
 
-`run` / `shot` / `retake` / `batch` 默认异步：
+`run` / `shot` / `retake` / `batch` / `image gen` 默认异步：
 
 ```bash
 daoyan run t2v --json
@@ -48,12 +48,14 @@ daoyan run cancel <task_id> --json
 ### init
 
 ```bash
-daoyan init --mode=local [--production single|series] [--modelpath <路径>] [--version <tag>] \
+daoyan init --mode=local [--production single|series|stills] [--modelpath <路径>] [--version <tag>] \
     [--mirror <镜像>] [--fallback-mirror <镜像|none>] [--torch-index <url>] [--torch-cuda <cuXXX>] [--torch-cpu] [--no-cache] [--no-skill] [--no-git]
-daoyan init --mode=remote --url <url> [--production single|series] [--no-skill] [--no-git]
+daoyan init --mode=remote --url <url> [--production single|series|stills] [--no-skill] [--no-git]
 ```
 
-- `--mode` 必填；在当前目录工作，不接收项目名；`--production` 默认 `single`，可选 `series`；
+- `--mode` 必填；在当前目录工作，不接收项目名；`--production` 默认 `single`，可选 `series`（多集）或 `stills`（纯图片）；
+- `stills` 不创建 `episodes/ep01`，`production.audio` 强制 `false`（音色数据保留但不启用），保留 `story/characters.json` 与 `story/scenes.json` 作为设定集；workflow 占位为 `workflows/image-t2i.json`，其它模式为 `t2v.json`；
+- 所有模式都创建 `stills/` 与 `stills/refs/`，并把 `stills/refs/**` 纳入 `.gitattributes` 的 LFS 规则；
 - 默认维护 `.gitignore` 受管块并初始化 Git 仓库；位于父级仓库内时跳过嵌套初始化，不自动 commit；`--no-git` 只跳过仓库初始化；
 - local 在创建骨架前检查 git / python3 >= 3.10 / ensurepip，缺失时明确报错，不留下半成品；
 - local 部署 `engine/`（venv + ComfyUI + custom nodes）并生成 `extra_model_paths.yaml`；只部署不启动；
@@ -83,7 +85,7 @@ daoyan skill update --json
 
 ## 剧本与设定（story）
 
-story 布局：所有项目都使用 `story/` + `episodes/<id>/`。`production.mode=single` 只能一集，`series` 可多集。
+story 布局：所有项目都使用 `story/` + `episodes/<id>/`。`production.mode=single` 只能一集，`series` 可多集，`stills` 没有剧集（只用 `story/characters.json` / `scenes.json` 当设定集，分镜与剧集命令返回 `story_invalid`）。
 
 ```bash
 daoyan story series show|set [--title <t>] [--synopsis <s>] [--genre <g>]
@@ -115,6 +117,7 @@ daoyan story asset list
 - 角色 / 场景被任意剧集分镜引用时，至少保留一张图，不允许删空（`--force` 也不放行）；
 - 资产被 `shots.json` 的 `asset_slots` / `scene_asset` 显式绑定时，需要 `--force` 才能删除。
 
+```bash
 daoyan story shots show --episode <id>
 daoyan story shots set --episode <id> --file <shots.json|->
 
@@ -133,8 +136,8 @@ daoyan story validate [--episode <id>] [--verify-hashes]
 - 拆解是单集制作范围与允许清单；分镜只能使用拆解声明的角色 / 形态 / 场景 / 音色；
 - 参考图 / 音频必须显式指定主参考（`--set-reference` 或 `asset set-reference`），不会自动取第一张；
 - `production.audio=false` 时音色命令返回 `feature_disabled`，语音槽位会被忽略；
-- `production.mode=single` 禁止 `story episode add`；多集切单视频前需先删到一集；
-- 多集项目 `script sync` / `breakdown set` / `shots set` / `script show` / `breakdown show` / `shot` / `retake` / `batch` / `wrap` 必须带 `--episode`；单集可省略；legacy 不接受；
+- `production.mode=single` 禁止 `story episode add`；多集切单视频前需先删到一集；切 `stills` 要求项目没有任何剧集，否则 `mode_conflict`；
+- 多集项目 `script sync` / `breakdown set` / `shots set` / `script show` / `breakdown show` / `shot` / `retake` / `batch` / `wrap` 必须带 `--episode`；单集可省略；
 - `story status` 输出 stage / blockers / next_actions；`shot` / `batch` / `retake` 在 strict 模式按 blockers 阻断；
 - `run` 不受剧情门禁限制，可用 `--episode` 只做归属标记；
 - 工作流资产槽位见 `workflows/<name>.assets.json`，slot 的 `asset` 取 `reference` 或具体 asset id。
@@ -155,6 +158,99 @@ daoyan story map clear --episode <id> [--json]
 - `set`：校验并写入叙事标注；未知 `shot_id` / 未知关系端点会报 `story_invalid`；
 - `clear`：删除标注文件，回到纯自动推导；
 - 标注事件字段：`shot_id`、`title`、`summary`、`importance`（`major|normal|minor`）、`story_time`、`note`；关系字段：`from`、`to`、`kind`、`label`、`note`。
+
+## 图片（image）
+
+一个 **still（图片单元）** 是一个图片主题：角色 / 场景设定图、分镜图 / 首帧、独立成品图（海报 / 封面 / 插画）。`t2i` / `i2i` / `upscale` / `inpaint` / `prompt` 都是它的操作，每次执行落成一个 run（label `img:<still-id>`）。图片不引入第二个项目类型，纯图片项目用 `production.mode=stills`。
+
+数据落在 `stills/stills.json`（单元 / 图片集 / 图片库）、`stills/takes.json`（图片定稿台账）与 `stills/refs/**`（图片库文件，LFS）。
+
+### 操作配置
+
+```json
+// project.json
+"image": {
+    "ops": {
+        "t2i": { "workflow": "image-t2i" },
+        "i2i": { "workflow": "image-i2i" },
+        "upscale": { "workflow": "image-upscale" },
+        "inpaint": { "workflow": "image-inpaint" },
+        "prompt": { "backend": "agent" }
+    },
+    "defaults": { "width": 1024, "height": 1024, "negative": "低质量" }
+}
+```
+
+- 出图操作（`t2i` / `i2i` / `upscale` / `inpaint`）必须配 `workflow`（短名或项目内相对路径），并按 [工作流](#工作流) 建好 bindings；
+- `prompt` 的 `backend` 只有 `llm` 与 `agent`（默认 `agent`）：`llm` 走本机 `.dycli/machine.json` 的 `prompt_optimizer`（`{base_url, model, api_key_env?, timeout_ms?}`，OpenAI 兼容接口），`agent` 只返回改写上下文、不调用外部服务；密钥只从 `api_key_env` 指向的环境变量读取；
+- `init` 只写空 `image.ops`，所以新项目五种操作都未就绪；`image ops` 逐项给出 `configured` / `ready` / `issues`，未配置的操作不要猜测 workflow。
+
+### 图片单元与图片库
+
+```bash
+daoyan image new <id> [--title <t>] [--set <set>] [--owner <character:id|scene:id> --form <form>]
+    [--episode <id> --shot <镜号>] [--prompt <文本>|--prompt-file <file|->]
+    [--seed <n>] [--width <n>] [--height <n>] [--workflow <name>]
+    [--source <描述符>] [--mask <描述符>] [--json]
+daoyan image list [--set <set>] [--owner <owner>] [--episode <id>] [--shot <镜号>] [--json]
+daoyan image show <id> [--json]
+daoyan image set <id> [--title <t>] [--set <set>] [--owner <owner> --form <form>]
+    [--prompt <文本>|--prompt-file <file|->] [--negative <t>] [--seed <n>] [--width <n>] [--height <n>]
+    [--workflow <name>] [--source <描述符>|--clear-source] [--mask <描述符>|--clear-mask]
+    [--file <patch.json|->] [--base-updated-at <iso>] [--by ai|user] [--json]
+daoyan image remove <id> [--force] [--json]
+
+daoyan image ref add <file> [--id <id>] [--role reference|mask] [--title <t>] [--json]
+daoyan image ref list [--json]
+daoyan image ref remove <id> [--force] [--json]
+```
+
+- 输入图与遮罩统一用**描述符**，共享记录里不写绝对路径：`asset:<owner>@<asset>` / `ref:<id>` / `still:<id>` / `run:<run_id>/<output>`；
+- 参考图与遮罩必须先 `image ref add` 入库（遮罩用 `--role mask`），不要直接复制文件到 `stills/`；
+- `--owner` 把图片挂到角色 / 场景形态，`--episode` + `--shot` 把图片挂到分镜；两者都可省略（独立成品图）；
+- `image set --file` 只接受白名单字段（`title` / `set` / `owner` / `form` / `episode_id` / `shot_id` / `prompt` / `negative` / `seed` / `width` / `height` / `workflow` / `source` / `mask` / `asset_slots` / `params` / `notes`）；
+- 并发写入带 `--base-updated-at`（取自 `image show --json` 的 `updated_at`），不匹配返回 `image_conflict`；
+- 删除被下游引用的单元或图片库条目需要 `--force`。
+
+### 生成与定稿
+
+```bash
+daoyan image ops [--json]
+daoyan image gen <id...> --op t2i|i2i|upscale|inpaint [--source <描述符>] [--mask <描述符>]
+    [--steps N] [--set key=value ...] [--request-id <id>] [--engine <url>] [--wait] [--timeout <小时>] [--json]
+daoyan image mask add <still> --box x,y,w,h [--width W --height H] [--json]
+
+daoyan image take list [id...] [--json]
+daoyan image take finalize <id> --run <run_id> [--output <产物>] [--note <文本>] [--by ai|user] [--json]
+daoyan image take revoke <id> [--by ai|user] [--json]
+daoyan image promote <id> --asset <asset-id> [--set-reference] [--replace] [--json]
+```
+
+- `image gen` 默认异步 task（`kind=image`），协议与 `run` 一致：`status --task` / `logs --task` / `run cancel`，同一设备只允许一个 generation task；
+- `--source` / `--mask` 单次覆盖单元记录，不回写；`inpaint` 必须有遮罩；
+- `image mask add` 生成矩形 PNG 遮罩并设为该图默认遮罩；复杂遮罩用画笔导出 PNG 后 `image ref add --role mask`，再 `image set --mask ref:<id>`；
+- 候选稿件从 `runs/` 按 label 实时推导，`stills/takes.json` 只记定稿决定；每张图至多一份定稿；
+- `image promote` 要求单元有 `owner` 且已定稿（未定稿返回 `take_pending`），把定稿产物入库为角色 / 场景资产，`--set-reference` 同时设主参考；
+- 视频镜头首帧可写 `first_frame: { "image": "<still-id>" }`；strict 门禁下图片未定稿会阻断拍摄；
+- `run output remove` 删除被图片定稿引用的产物时，先自动撤销图片定稿，返回 `revoked_stills`。
+
+### 提示词
+
+```bash
+daoyan image prompt optimize <id...>|--all [--apply] [--json]
+daoyan image prompt set <id> (--text <文本>|--file <file|->) [--by ai|user] [--json]
+daoyan image prompt list <id> [--json]
+```
+
+- 提示词变化一律追加 `prompt_revisions`，不覆盖历史；`image prompt list` 读修订；
+- `optimize` 在 `backend=llm` 且本机配好 `prompt_optimizer` 时返回建议，`--apply` 才写盘；`backend=agent`（或未配 LLM）只返回改写上下文，由 Agent 用自己的文本 `image prompt set`；
+- 不要手改 `stills/stills.json`。
+
+### 与 Web / Agent 的关系
+
+- Web 图片页与 CLI 复用同一 core：生成 / 图生图 / 放大 / 局部修复（画笔遮罩）、提示词编辑与优化、定稿 / 撤销、入库都能在页面完成；
+- Agent 或 CLI 写入 `stills/` 后，Web 约 1 秒内通过 SSE 热更新，不需要重启；
+- Agent 默认只准备提示词与参考资源，用户明确要求才消耗算力生成；项目内 Skill 的 `reference/images.md` 是同一套契约的自描述版本。
 
 ## 工作流
 
@@ -214,7 +310,7 @@ daoyan run reassign <run_id> --episode <id> [--shot <镜号>] [--source ai|user]
 - 只处理 `episode_id` 为空的 run；已归属其它集的返回 `run_assigned`；归属完全一致时是幂等空操作；
 - 目标镜号必须存在于该集 `shots.json`；
 - `run.json` 默认不可变，这是显式例外之一（另一个是 `run output remove` 移除产物条目）；`task.json` 是历史执行记录，不改写（会在 `warnings` 里说明）；
-- 迁移后该 run 才能被 `take finalize` 选为该镜定稿稿件，也会出现在该集分镜页；若根目录 `takes.json` 曾引用它，会提示需在新集重新定稿。
+- 迁移后该 run 才能被 `take finalize` 选为该镜定稿稿件，也会出现在该集分镜页。
 
 ### run output remove
 
@@ -224,7 +320,7 @@ daoyan run output remove <run_id> <output>
 
 删除 run 的单个产物文件（`runs/<id>/outputs/<output>`），并同步从 `run.json` 的 `outputs` 移除该条：
 
-- 被 `takes.json` 定稿引用的产物会先自动撤销定稿，返回 `revoked_shots`；
+- 被 `takes.json` 定稿引用的产物会先自动撤销定稿，返回 `revoked_shots`；被图片定稿（`stills/takes.json`）引用的产物同样先撤销，返回 `revoked_stills`；
 - run 目录与其它产物保留；`task.json` 不改写；
 - 产物不存在返回 `asset_not_found`。
 
@@ -240,7 +336,7 @@ daoyan batch [--episode <id>] [--request-id <id>] [--allow-incomplete] [--wait] 
 - 一个 task 多个 run，共享一次引擎会话与一把机器锁；
 - 已有成功 run 的镜头跳过；`retake` 强制；
 - 需要 `workflows/<name>.bindings.json`（至少映射 `prompt`、`seed`）；
-- 首帧：锚点 key（`meta.anchors`）或 `{"relay":"01"}`（自动抽上游镜头**定稿稿件**的尾帧；未定稿时按 `story.enforce` 回退或阻断）；
+- 首帧：锚点 key（`meta.anchors`）、`{"relay":"01"}`（自动抽上游镜头**定稿稿件**的尾帧）或 `{"image":"<still-id>"}`（取图片单元定稿）；未定稿时按 `story.enforce` 回退或阻断；
 - 中途 OOM / 引擎崩溃 / 不可达：中断整个 task；普通业务错误继续后续镜头，最终 task `failed`。
 
 ### take（镜头定稿）
@@ -263,7 +359,7 @@ daoyan take revoke <镜号> [--episode <id>]
 daoyan wrap [--episode <id>] [--shots <镜号,...>] [--select <镜号>=<run_id> ...] [--allow-incomplete]
 ```
 
-按镜头顺序选**定稿稿件**（`--select` 可临时改选，不落台账），ffmpeg concat 到 `final/<episode>/cut-<timestamp>.mp4`（legacy 为 `final/cut-*`），并写 manifest。不占 machine lock。
+按镜头顺序选**定稿稿件**（`--select` 可临时改选，不落台账），ffmpeg concat 到 `final/<episode>/cut-<timestamp>.mp4`，并写 manifest。不占 machine lock。
 
 - 选段优先级：`--select` > 定稿稿件 > 最新成功 run；
 - `--shots` 只合指定镜号（仍按 shots.json 顺序），且要求每镜都有可用定稿稿件；缺稿返回 `take_pending`；
@@ -297,15 +393,16 @@ daoyan logs [-f] [-n N] [--src daoyan-cli|engine|worker|all]
 daoyan web [--port <n>] [--host <addr>] [--open] [--json]
 ```
 
-启动 Web UI（默认 `0.0.0.0` + 系统随机端口，局域网可访问；仅本机访问传 `--host 127.0.0.1`），查看项目档案、分镜、人物/场景、任务、工作流、run 产出物与 final 成片；视频支持拖动进度。
+启动 Web 操作台（默认 `0.0.0.0` + 系统随机端口，局域网可访问；仅本机访问传 `--host 127.0.0.1`）。页面本身不启动 ComfyUI、不占 machine lock；生成操作创建异步 task，由 detached worker 执行。
 
-- story 模式：系列概览、剧集切换、单集剧本/拆解/分镜/成片、全局角色/场景/音色/资产；
-- legacy 模式：镜头/人物/场景/产出统计、剧情简介与分镜一览；
-- 分镜页展示每镜内容、人物、场景、生成参数、全部历史产物与 run 历史，并支持筛选；定稿稿件置顶并标记；
-- 不启动引擎、不占 machine lock、不触发任何生成；唯一的写能力是镜头定稿（`POST /api/takes/finalize|revoke`，只写 `takes.json`），分镜页每条视频稿件可点「定稿 / 撤销定稿」；
+- 页面：概览、图片、剧集 / 剧集详情、角色、场景、音色、设定资产、成片、分镜 / 产出物 / 任务 / 工作流；侧栏底部是项目管理；
+- `production.mode` 决定形态：`single` 直接展示唯一视频并隐藏剧情图谱，`series` 展示系列与剧集，`stills` 默认进入图片页并隐藏剧集与音色；
+- 写操作复用 CLI 同一 core：确认剧本、按镜头生成 / 重新生成、镜头与图片定稿 / 撤销、删除参考图与 run 产出、勾选单集已定稿镜头合片、图片四种出图操作与提示词优化、定稿入库、项目模式与音频开关；
+- 图片页提供候选预览、提示词修订与局部修复的画笔遮罩；分镜页产出物默认折叠 1 条、提示词默认展开 5 行，其余走「查看全部」弹窗；
+- 项目与任务事件通过 SSE 推送：CLI / Agent 写盘后约 1 秒热更新，不需要重启；
 - `Ctrl+C` / `SIGTERM` 优雅关闭；`--json` 输出一次启动信封后继续驻留；
 - `.dycli/machine.json` 缺失时仍可查看共享数据；
-- 媒体仅从 `run.outputs`、`final/` 与 `story/assets/` 白名单读取，支持 HTTP Range；
+- 媒体仅从 `run.outputs`、`final/`、`story/assets/` 与 `stills/` 白名单读取，支持 HTTP Range；
 - 详细 API/安全说明见 [WEB.md](WEB.md)。
 
 ## 引擎

@@ -6,6 +6,7 @@
 
 - 页面本身不启动 ComfyUI；生成操作会创建异步 task，由 detached worker 执行；
 - 剧集页可「确认剧本」；分镜卡可「生成 / 重新生成」；分镜页每条视频稿件可「定稿 / 撤销定稿」；
+- 图片页可生成 / 图生图 / 放大 / 局部修复（画笔遮罩）、编辑或优化提示词、定稿 / 撤销、定稿入库；Agent 写入后页面通过 SSE 自动刷新；
 - 默认监听 `0.0.0.0`（局域网可访问），端口由系统分配；仅本机访问请传 `--host 127.0.0.1`；
 - `Ctrl+C` / `SIGTERM` 关闭服务；
 - 前端资源内嵌在 `dist/cli.mjs`，不依赖 CDN 或外部静态目录。
@@ -66,21 +67,23 @@ daoyan web · demo · local
 
 ## 2. 页面
 
-### 项目模式（single / series）
+### 项目模式（single / series / stills）
 
 所有项目都使用 story 布局；`project.json.production.mode` 决定页面形态：
 
 - `single`：单视频，直接展示唯一视频；隐藏剧集列表与剧情图谱；
-- `series`：多集，展示系列、剧集与剧情图谱。
+- `series`：多集，展示系列、剧集与剧情图谱；
+- `stills`：纯图片项目，不建剧集；默认进入图片页，隐藏剧集与音色。
 
-左侧底部「项目管理」可切换模式与音频开关。`series → single` 仅当项目只有一集。
+左侧底部「项目管理」可切换模式与音频开关。`series → single` 仅当项目只有一集；切 `stills` 要求项目没有任何剧集，否则选项禁用并给出提示。
 
 | 页面 | 内容 |
 |---|---|
 | 概览 | 项目统计、引擎与机器运行环境、最近产出与任务（不再展示视频/剧集） |
+| 图片 | 图片单元、图片集、图片库、提示词修订与操作就绪状态；生成 / 图生图 / 放大 / 局部修复（画笔遮罩）、提示词编辑与优化、定稿 / 撤销、入库；Agent / CLI 写入后 SSE 热更新 |
 | 剧集 | series：分集列表，点击卡片进入详情；single：直接展示唯一视频详情（含剧本、拆解、分镜；隐藏剧情图谱） |
 | 剧集详情 | 单集剧本、拆解、分镜、本集任务与成片；series 含剧情图谱；hash 路由 `#/episode/<id>`。分镜产出物默认只展示 1 条，其余「查看全部」弹窗；提示词默认展开并截断 5 行，超出显示「显示全部」 |
-| 项目管理 | 视频模式（single / series）、音频开关；保存后热更新导航与页面 |
+| 项目管理 | 生产模式（single / series / stills）、音频开关；多集时禁用单视频，有剧集时禁用纯图片；`stills` 的音频由 core 强制关闭；保存后热更新导航与页面 |
 | 角色 | 全局角色、形态、主参考图与其它资产；可删除单张图（被分镜引用时至少保留一张，删主参考会自动切换） |
 | 场景 | 全局场景与参考图；删除规则同角色 |
 | 音色 | 音频开启时显示；关闭后隐藏 |
@@ -156,6 +159,14 @@ AI 通过 `daoyan story map show --episode <id> --json` 获取同一份生成上
 | GET | `/api/episodes/:id/map` | 剧情图谱 + 生成上下文（workflow 候选 / 槽位 / 连续性 / 渲染状态 / 缺口） |
 | GET | `/api/episodes/:id/{script,breakdown,shots,tasks,runs,artifacts,finals}` | 单集子资源 |
 | GET | `/api/story/{characters,scenes,voices,assets}` | 全局设定与资产 |
+| GET | `/api/images` | 图片单元、图片集、图片库与图片操作就绪状态 |
+| POST | `/api/images/:id/generate` | 生成图片；body `{op, source?, mask?, sets?}`，创建异步 task |
+| POST | `/api/images/:id/take/finalize` | 图片定稿；body `{run_id, output?, note?}` |
+| POST | `/api/images/:id/take/revoke` | 撤销图片定稿 |
+| POST | `/api/images/:id/prompt` | 手动设置提示词；body `{text}` |
+| POST | `/api/images/:id/prompt/optimize` | 提示词优化；body `{apply?}`；未配置 LLM 时返回 Agent 上下文 |
+| POST | `/api/images/:id/mask` | 上传 PNG 遮罩；body `{data_url}`，写入图片库并设为默认遮罩 |
+| POST | `/api/images/:id/promote` | 定稿图入库；body `{asset_id, set_reference?}` |
 | GET | `/api/artifacts?limit=&label=&status=&kind=&search=` | 扁平化产物列表 |
 | GET | `/api/runs/:run_id` | run 详情、inputs、outputs、task 事件 |
 | GET | `/api/tasks` | 任务列表 |
@@ -168,6 +179,7 @@ AI 通过 `daoyan story map show --episode <id> --json` 获取同一份生成上
 | POST | `/api/runs/outputs/remove` | 删除 run 产出视频；body `{run_id, output}` |
 | GET | `/api/workflows` | 工作流列表 |
 | GET/HEAD | `/media/run/:run_id/:name` | run 产出物流 |
+| GET/HEAD | `/media/stills/:path` | 图片库（参考图 / 遮罩）流 |
 | GET/HEAD | `/media/final/:episode/:name` | 成片流 |
 | POST | `/api/takes/finalize` | 镜头定稿；body `{shot_id, run_id, output?, note?, episode_id?}` |
 | POST | `/api/takes/revoke` | 撤销定稿；body `{shot_id, episode_id?}` |

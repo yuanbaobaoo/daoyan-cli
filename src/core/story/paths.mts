@@ -227,6 +227,13 @@ export function resolveEpisodeContext(root: string, episodeId?: string): Episode
     }
     // 生产模式
     const production = productionOf(project);
+    if (production.mode === "stills") {
+        throw new DaoyanCliError({
+            code: "story_invalid",
+            message: "纯图片项目没有剧集",
+            hint: "使用 daoyan image 命令管理图片单元，或把 production.mode 切回 single / series。",
+        });
+    }
     // 全部剧集
     const metas = listEpisodeMetas(root);
     if (metas.length === 0) {

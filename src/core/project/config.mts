@@ -88,7 +88,7 @@ function readProject(file: string): ProjectConfig {
             code: "config_invalid",
             message:
                 `${file} 不是合法的 project.json v2（需要 name / version:2；` +
-                `可选 default_workflow / gpu.takeover / comfyui.version / comfyui.custom_nodes），` +
+                `可选 default_workflow / production / image / gpu.takeover / comfyui.version / comfyui.custom_nodes），` +
                 "见 docs/DATA-MODEL.md。旧版项目不兼容，请重新 init。",
         });
     }
@@ -109,8 +109,36 @@ function isProjectConfig(v: unknown): v is ProjectConfig {
         if (typeof o.production !== "object" || o.production === null) return false;
         // 生产配置宽松视图
         const p = o.production as Record<string, unknown>;
-        if (p.mode !== undefined && p.mode !== "single" && p.mode !== "series") return false;
+        if (p.mode !== undefined && p.mode !== "single" && p.mode !== "series" && p.mode !== "stills") return false;
         if (p.audio !== undefined && typeof p.audio !== "boolean") return false;
+    }
+    if (o.image !== undefined) {
+        if (typeof o.image !== "object" || o.image === null) return false;
+        // image 段宽松视图
+        const image = o.image as Record<string, unknown>;
+        if (image.ops !== undefined) {
+            if (typeof image.ops !== "object" || image.ops === null) return false;
+            // 操作配置
+            const ops = image.ops as Record<string, unknown>;
+            for (const [name, value] of Object.entries(ops)) {
+                if (name !== "t2i" && name !== "i2i" && name !== "upscale" && name !== "inpaint" && name !== "prompt") {
+                    return false;
+                }
+                if (typeof value !== "object" || value === null) return false;
+                // 单个操作配置
+                const op = value as Record<string, unknown>;
+                if (op.workflow !== undefined && typeof op.workflow !== "string") return false;
+                if (op.backend !== undefined && op.backend !== "llm" && op.backend !== "agent") return false;
+            }
+        }
+        if (image.defaults !== undefined) {
+            if (typeof image.defaults !== "object" || image.defaults === null) return false;
+            // 默认值
+            const defaults = image.defaults as Record<string, unknown>;
+            if (defaults.width !== undefined && typeof defaults.width !== "number") return false;
+            if (defaults.height !== undefined && typeof defaults.height !== "number") return false;
+            if (defaults.negative !== undefined && typeof defaults.negative !== "string") return false;
+        }
     }
     if (o.story !== undefined) {
         if (typeof o.story !== "object" || o.story === null) return false;
@@ -205,6 +233,17 @@ export function isMachineConfig(v: unknown): v is MachineConfig {
     // 顶层字段的宽松视图
     const o = v as Record<string, unknown>;
     if (typeof o.machine_id !== "string" || o.machine_id === "") return false;
+    if (o.prompt_optimizer !== undefined) {
+        if (typeof o.prompt_optimizer !== "object" || o.prompt_optimizer === null) return false;
+        // 提示词优化器
+        const p = o.prompt_optimizer as Record<string, unknown>;
+        if (typeof p.base_url !== "string" || p.base_url === "") return false;
+        if (typeof p.model !== "string" || p.model === "") return false;
+        if (p.api_key_env !== undefined && typeof p.api_key_env !== "string") return false;
+        if (p.timeout_ms !== undefined && (!Number.isInteger(p.timeout_ms) || (p.timeout_ms as number) <= 0)) {
+            return false;
+        }
+    }
     if (typeof o.engine !== "object" || o.engine === null) return false;
     // engine 段的宽松视图
     const e = o.engine as Record<string, unknown>;

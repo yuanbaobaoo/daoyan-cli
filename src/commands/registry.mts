@@ -19,6 +19,7 @@ import { runRun, runCancel, runReassign, runOutputRemove } from "./run.mts";
 import { runSkill } from "./skill.mts";
 import { runWeb } from "./web.mts";
 import { runStory } from "./story.mts";
+import { runImage } from "./image.mts";
 
 /**
  * 位置参数说明。
@@ -157,9 +158,9 @@ export const COMMANDS: CommandMeta[] = [
         group: "project",
         summary: "在当前目录立项：local 部署项目专属 ComfyUI，remote 绑定外部服务",
         usage:
-            "daoyan init --mode=local|remote [--production single|series] [--modelpath <路径>] [--version <tag>] " +
+            "daoyan init --mode=local|remote [--production single|series|stills] [--modelpath <路径>] [--version <tag>] " +
             "[--mirror <镜像>] [--fallback-mirror <镜像|none>] [--torch-index <url>] [--torch-cuda <cuXXX>] [--torch-cpu] [--no-cache] [--no-skill] [--no-git]\n" +
-            "daoyan init --mode=remote --url <url> [--production single|series] [--no-skill] [--no-git]",
+            "daoyan init --mode=remote --url <url> [--production single|series|stills] [--no-skill] [--no-git]",
         flags: [
             {
                 name: "--mode",
@@ -170,10 +171,10 @@ export const COMMANDS: CommandMeta[] = [
             },
             {
                 name: "--production",
-                type: "single|series",
+                type: "single|series|stills",
                 default: "single",
-                enum: ["single", "series"],
-                description: "生产模式：单视频 / 多集（默认 single）",
+                enum: ["single", "series", "stills"],
+                description: "生产模式：单视频 / 多集 / 纯图片（默认 single）",
             },
             { name: "--modelpath", type: "path", description: "local：外部模型根目录（已存在）" },
             { name: "--url", type: "url", description: "remote：外部 ComfyUI base URL（必填）" },
@@ -406,6 +407,301 @@ export const COMMANDS: CommandMeta[] = [
         run: (ctx, args) => runStory(ctx, ["validate", ...args]),
     },
 
+    // ---- 图片 ----
+    {
+        name: "image new",
+        group: "image",
+        summary: "新建图片单元（提示词、归属、输入图与工作流）",
+        usage:
+            "daoyan image new <id> [--title <t>] [--set <set>] [--owner <character:id|scene:id> --form <form>]\n" +
+            "                      [--episode <id> --shot <镜号>] [--prompt <文本>|--prompt-file <file|->]\n" +
+            "                      [--seed <n>] [--width <n>] [--height <n>] [--workflow <name>]\n" +
+            "                      [--source <描述符>] [--mask <描述符>] [--json]",
+        args: [{ name: "id", type: "string", required: true, description: "图片单元 id（小写字母/数字/-）" }],
+        flags: [
+            { name: "--title", type: "string", description: "展示名" },
+            { name: "--set", type: "string", description: "图片集 id；不存在时自动创建" },
+            { name: "--set-title", type: "string", description: "新图片集的展示名" },
+            { name: "--owner", type: "string", description: "归属：character:<id> 或 scene:<id>" },
+            { name: "--form", type: "string", description: "角色形态 id（character owner 必填）" },
+            { name: "--episode", type: "string", description: "关联剧集 id（分镜图 / 首帧）" },
+            { name: "--shot", type: "string", description: "关联镜号（需要 --episode）" },
+            { name: "--prompt", type: "string", description: "正向提示词" },
+            { name: "--prompt-file", type: "path|-", description: "从文件或 stdin 读取提示词" },
+            { name: "--negative", type: "string", description: "负向提示词" },
+            { name: "--seed", type: "integer", description: "随机种子" },
+            { name: "--width", type: "integer", description: "生成宽度" },
+            { name: "--height", type: "integer", description: "生成高度" },
+            { name: "--workflow", type: "string", description: "覆盖本次使用的 workflow" },
+            {
+                name: "--source",
+                type: "描述符",
+                description: "输入图：asset:<owner>@<asset> / ref:<id> / still:<id> / run:<run>/<output>",
+            },
+            { name: "--mask", type: "描述符", description: "局部重绘遮罩（ref:<id>）" },
+            { name: "--notes", type: "string", description: "制作备注" },
+        ],
+        examples: [
+            'daoyan image new lin-base-front --owner character:lin --form base --prompt "人物三视图" --json',
+            'daoyan image new ep01-03-keyframe --episode ep01 --shot 03 --prompt "雨夜街角" --json',
+        ],
+        implemented: true,
+        jsonShape: { still: "object", stills_file: "string" },
+        run: (ctx, args) => runImage(ctx, ["new", ...args]),
+    },
+    {
+        name: "image list",
+        group: "image",
+        summary: "列出图片单元、图片集与图片库",
+        usage: "daoyan image list [--set <set>] [--owner <owner>] [--episode <id>] [--shot <镜号>] [--json]",
+        flags: [
+            { name: "--set", type: "string", description: "按图片集过滤" },
+            { name: "--owner", type: "string", description: "按 owner 过滤（character:<id> / scene:<id>）" },
+            { name: "--episode", type: "string", description: "按剧集过滤" },
+            { name: "--shot", type: "string", description: "按镜号过滤" },
+        ],
+        implemented: true,
+        jsonShape: { stills: "object[]", total: "number", sets: "object[]", refs: "object[]" },
+        run: (ctx, args) => runImage(ctx, ["list", ...args]),
+    },
+    {
+        name: "image show",
+        group: "image",
+        summary: "查看单个图片单元（含输入图 / 遮罩 / 定稿的解析结果）",
+        usage: "daoyan image show <id> [--json]",
+        args: [{ name: "id", type: "string", required: true, description: "图片单元 id" }],
+        implemented: true,
+        jsonShape: { still: "object", stills_file: "string", updated_at: "string" },
+        run: (ctx, args) => runImage(ctx, ["show", ...args]),
+    },
+    {
+        name: "image set",
+        group: "image",
+        summary: "修改图片单元；提示词变化会追加一条修订",
+        usage:
+            "daoyan image set <id> [--title <t>] [--set <set>] [--owner <owner> --form <form>]\n" +
+            "                      [--episode <id>] [--shot <镜号>] [--prompt <文本>|--prompt-file <file|->]\n" +
+            "                      [--negative <t>] [--seed <n>] [--width <n>] [--height <n>]\n" +
+            "                      [--workflow <name>] [--source <描述符>|--clear-source]\n" +
+            "                      [--mask <描述符>|--clear-mask] [--file <patch.json|->]\n" +
+            "                      [--base-updated-at <iso>] [--by ai|user] [--json]",
+        args: [{ name: "id", type: "string", required: true, description: "图片单元 id" }],
+        flags: [
+            { name: "--title", type: "string", description: "展示名" },
+            { name: "--set", type: "string", description: "图片集 id" },
+            { name: "--owner", type: "string", description: "归属：character:<id> 或 scene:<id>" },
+            { name: "--form", type: "string", description: "角色形态 id" },
+            { name: "--episode", type: "string", description: "关联剧集 id" },
+            { name: "--shot", type: "string", description: "关联镜号" },
+            { name: "--prompt", type: "string", description: "正向提示词（变化时追加修订）" },
+            { name: "--prompt-file", type: "path|-", description: "从文件或 stdin 读取提示词" },
+            { name: "--negative", type: "string", description: "负向提示词" },
+            { name: "--seed", type: "integer", description: "随机种子" },
+            { name: "--width", type: "integer", description: "生成宽度" },
+            { name: "--height", type: "integer", description: "生成高度" },
+            { name: "--workflow", type: "string", description: "覆盖本次使用的 workflow" },
+            { name: "--source", type: "描述符", description: "输入图描述符" },
+            { name: "--clear-source", type: "boolean", description: "清空输入图" },
+            { name: "--mask", type: "描述符", description: "遮罩描述符" },
+            { name: "--clear-mask", type: "boolean", description: "清空遮罩" },
+            { name: "--file", type: "path|-", description: "JSON 补丁（asset_slots / params 等复杂字段）" },
+            { name: "--base-updated-at", type: "string", description: "并发校验：期望的 stills.json updated_at" },
+            {
+                name: "--by",
+                type: "ai|user",
+                enum: ["ai", "user"],
+                default: "ai",
+                description: "操作者来源（写入提示词修订）",
+            },
+            { name: "--notes", type: "string", description: "制作备注" },
+        ],
+        examples: [
+            'daoyan image set lin-base-front --prompt "正面全身，白底" --by ai --json',
+            "daoyan image set ep01-03-keyframe --source ref:mood-01 --json",
+        ],
+        implemented: true,
+        jsonShape: { still: "object", stills_file: "string" },
+        run: (ctx, args) => runImage(ctx, ["set", ...args]),
+    },
+    {
+        name: "image remove",
+        group: "image",
+        summary: "删除图片单元（被其他单元引用时需 --force）",
+        usage: "daoyan image remove <id> [--force] [--json]",
+        args: [{ name: "id", type: "string", required: true, description: "图片单元 id" }],
+        flags: [{ name: "--force", type: "boolean", description: "忽略引用检查强制删除" }],
+        implemented: true,
+        jsonShape: { removed: "object" },
+        run: (ctx, args) => runImage(ctx, ["remove", ...args]),
+    },
+    {
+        name: "image ref",
+        group: "image",
+        summary: "图片库入库 / 列表 / 删除（参考图与遮罩）",
+        usage:
+            "daoyan image ref add <file> [--id <id>] [--role reference|mask] [--title <t>] [--json]\n" +
+            "daoyan image ref list [--json]\n" +
+            "daoyan image ref remove <id> [--force] [--json]",
+        args: [{ name: "add|list|remove", type: "string", required: true, description: "子命令" }],
+        flags: [
+            { name: "--id", type: "string", description: "add：图片库 id；省略用文件名" },
+            {
+                name: "--role",
+                type: "reference|mask",
+                enum: ["reference", "mask"],
+                default: "reference",
+                description: "add：参考图或遮罩",
+            },
+            { name: "--title", type: "string", description: "add：展示名" },
+            { name: "--force", type: "boolean", description: "remove：忽略引用检查强制删除" },
+        ],
+        implemented: true,
+        jsonShape: { ref: "object", refs: "object[]", total: "number" },
+        run: (ctx, args) => runImage(ctx, ["ref", ...args]),
+    },
+    {
+        name: "image take",
+        group: "image",
+        summary: "列出图片候选、定稿或撤销定稿（一图至多一份定稿）",
+        usage:
+            "daoyan image take list [id...] [--json]\n" +
+            "daoyan image take finalize <id> --run <run_id> [--output <产物>] [--note <文本>] [--by ai|user] [--json]\n" +
+            "daoyan image take revoke <id> [--by ai|user] [--json]",
+        args: [{ name: "list|finalize|revoke", type: "string", required: true, description: "子命令" }],
+        flags: [
+            { name: "--run", type: "string", description: "finalize：定稿的 run id" },
+            { name: "--output", type: "string", description: "finalize：产物文件名；省略取图片主产物" },
+            { name: "--note", type: "string", description: "finalize：定稿备注" },
+            {
+                name: "--by",
+                type: "ai|user",
+                enum: ["ai", "user"],
+                default: "ai",
+                description: "操作者来源",
+            },
+        ],
+        implemented: true,
+        jsonShape: { stills: "object[]", still_id: "string", finalized: "object|null" },
+        run: (ctx, args) => runImage(ctx, ["take", ...args]),
+    },
+    {
+        name: "image prompt",
+        group: "image",
+        summary: "优化 / 设置 / 查看提示词修订（LLM 或 Agent 改写）",
+        usage:
+            "daoyan image prompt optimize <id...>|--all [--apply] [--json]\n" +
+            "daoyan image prompt set <id> (--text <文本>|--file <file|->) [--by ai|user] [--json]\n" +
+            "daoyan image prompt list <id> [--json]",
+        args: [{ name: "optimize|set|list", type: "string", required: true, description: "子命令" }],
+        flags: [
+            { name: "--apply", type: "boolean", description: "optimize：直接应用 LLM 建议" },
+            { name: "--all", type: "boolean", description: "optimize：处理全部图片单元" },
+            { name: "--text", type: "string", description: "set：提示词文本" },
+            { name: "--file", type: "path|-", description: "set：从文件或 stdin 读取提示词" },
+            {
+                name: "--by",
+                type: "ai|user",
+                enum: ["ai", "user"],
+                default: "ai",
+                description: "set：操作者来源",
+            },
+        ],
+        detail: [
+            "未配置本机 prompt_optimizer 时，optimize 返回 Agent 改写所需的上下文，不写盘。",
+            "配置 LLM 后由 image.ops.prompt 的 backend 决定；密钥只从 api_key_env 指向的环境变量读取。",
+        ],
+        implemented: true,
+        jsonShape: { results: "object[]", still_id: "string", revisions: "object[]" },
+        run: (ctx, args) => runImage(ctx, ["prompt", ...args]),
+    },
+    {
+        name: "image promote",
+        group: "image",
+        summary: "把定稿图入库为角色 / 场景资产，可设为主参考",
+        usage: "daoyan image promote <id> --asset <asset-id> [--set-reference] [--replace] [--json]",
+        args: [{ name: "id", type: "string", required: true, description: "图片单元 id" }],
+        flags: [
+            { name: "--asset", type: "string", required: true, description: "资产 id" },
+            { name: "--set-reference", type: "boolean", description: "同时设为主参考" },
+            { name: "--replace", type: "boolean", description: "覆盖同名资产" },
+        ],
+        implemented: true,
+        jsonShape: { asset: "object", reference_set: "boolean", warning: "string|null" },
+        run: (ctx, args) => runImage(ctx, ["promote", ...args]),
+    },
+    {
+        name: "image mask",
+        group: "image",
+        summary: "生成矩形遮罩并登记到图片库（局部重绘用）",
+        usage:
+            "daoyan image mask add <still> --box x,y,w,h [--width W --height H] [--json]\n" +
+            "（复杂遮罩用 image ref add <mask.png> --role mask 后 image set --mask ref:<id>）",
+        args: [{ name: "add", type: "string", required: true, description: "子命令" }],
+        flags: [
+            { name: "--box", type: "x,y,w,h", required: true, description: "重绘区域（像素）" },
+            { name: "--width", type: "integer", description: "遮罩宽度；省略从输入图推断" },
+            { name: "--height", type: "integer", description: "遮罩高度；省略从输入图推断" },
+        ],
+        implemented: true,
+        jsonShape: { ref: "object", still_id: "string", mask: "string", width: "number", height: "number" },
+        run: (ctx, args) => runImage(ctx, ["mask", ...args]),
+    },
+    {
+        name: "image ops",
+        group: "image",
+        summary: "查看图片操作配置与就绪状态（t2i / i2i / upscale / inpaint / prompt）",
+        usage: "daoyan image ops [--json]",
+        implemented: true,
+        jsonShape: { ops: "object[]", ready: "number", total: "number" },
+        run: (ctx, args) => runImage(ctx, ["ops", ...args]),
+    },
+    {
+        name: "image gen",
+        group: "image",
+        summary: "执行图片操作（文生图 / 图生图 / 放大 / 局部重绘；默认异步）",
+        usage:
+            "daoyan image gen <id...> --op t2i|i2i|upscale|inpaint [--source <描述符>] [--mask <描述符>]\n" +
+            "                      [--steps N] [--set key=value ...] [--request-id <id>]\n" +
+            "                      [--engine <url>] [--wait] [--timeout <小时>] [--json]",
+        args: [
+            {
+                name: "id",
+                type: "string",
+                required: true,
+                variadic: true,
+                description: "图片单元 id",
+            },
+        ],
+        flags: [
+            {
+                name: "--op",
+                type: "t2i|i2i|upscale|inpaint",
+                required: true,
+                enum: ["t2i", "i2i", "upscale", "inpaint"],
+                description: "图片操作",
+            },
+            {
+                name: "--source",
+                type: "描述符",
+                description: "单次覆盖输入图（asset/ref/still/run）；省略用现图或当前定稿",
+            },
+            { name: "--mask", type: "描述符", description: "单次覆盖遮罩（inpaint）" },
+            { name: "--steps", type: "integer", description: "覆盖采样步数" },
+            { name: "--set", type: "key=value", description: "覆盖节点输入或 bindings 逻辑名（可重复）" },
+            { name: "--request-id", type: "string", description: "幂等键" },
+            { name: "--engine", type: "url", description: "单次 remote 覆盖 URL" },
+            { name: "--wait", type: "boolean", description: "前台等待到终态" },
+            { name: "--timeout", type: "number", description: "任务等待上限（小时，默认 3）" },
+        ],
+        examples: [
+            "daoyan image gen cover-main --op t2i --wait --json",
+            "daoyan image gen lin-base-front --op upscale --source still:lin-base-front --json",
+        ],
+        implemented: true,
+        jsonShape: TASK_START_SHAPE,
+        run: (ctx, args) => runImage(ctx, ["gen", ...args]),
+    },
+
     // ---- 工作流 ----
     {
         name: "workflow new",
@@ -609,6 +905,7 @@ export const COMMANDS: CommandMeta[] = [
             path: "string",
             bytes: "number",
             revoked_shots: "string[]",
+            revoked_stills: "string[]",
         },
         run: (ctx, args) => runOutputRemove(ctx, args),
     },

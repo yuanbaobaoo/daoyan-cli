@@ -22,6 +22,8 @@ import { readJsonIfExists, sha256 } from "../../shared/fs.mts";
 import { isDaoyanCliError } from "../../shared/errors.mts";
 import { resolveWorkflowAssets } from "./workflow-assets.mts";
 import { listAssets, isLfsPointerFile } from "./assets.mts";
+import { loadStills } from "./stills.mts";
+import { stillTakeSummary } from "./image-takes.mts";
 import {
     charactersPath,
     episodeDir,
@@ -2132,6 +2134,7 @@ export function validateStory(root: string, episodeId?: string, verifyHashes = f
                 script.sha256,
                 issues,
             );
+            checkImageFirstFrames(root, meta.id, shots, issues);
         }
         // 覆盖检查（拆解使用时缺主参考 -> error）
         for (const item of coverageBlockers(root, breakdown, characters, scenes, voices, shots)) {
@@ -2208,6 +2211,49 @@ export function checkBreakdownForWrite(root: string, episodeId: string, doc: Bre
 }
 
 /**
+ * 校验 first_frame 引用的图片单元。
+ */
+function checkImageFirstFrames(root: string, episodeId: string, shots: ShotsFile, issues: StoryIssue[]): void {
+    // 图片单元
+    const stills = loadStills(root).stills;
+    for (const shot of shots.shots) {
+        // 首帧
+        const first = shot.first_frame;
+        if (first === undefined || typeof first === "string") continue;
+        if (!("image" in first)) continue;
+        // 目标图片
+        const still = stills.find((item) => item.id === first.image);
+        if (still === undefined) {
+            issues.push(
+                issue(
+                    episodeId,
+                    `${SHOTS_FILE}#${shot.id}.first_frame`,
+                    "image_not_found",
+                    "error",
+                    `镜 ${shot.id} 引用的图片单元 ${first.image} 不存在`,
+                    "用 daoyan image new/list 创建或修正 first_frame.image。",
+                ),
+            );
+            continue;
+        }
+        // 定稿状态
+        const summary = stillTakeSummary(root, still.id);
+        if (summary.finalized === null || summary.stale !== null) {
+            issues.push(
+                issue(
+                    episodeId,
+                    `${SHOTS_FILE}#${shot.id}.first_frame`,
+                    "take_pending",
+                    "warning",
+                    `镜 ${shot.id} 的图片单元 ${still.id} 尚未定稿`,
+                    "用 daoyan image take finalize 定稿；strict 门禁会阻断拍摄。",
+                ),
+            );
+        }
+    }
+}
+
+/**
  * 写入前检查单集分镜。
  */
 export function checkShotsForWrite(root: string, episodeId: string, shots: ShotsFile): StoryIssue[] {
@@ -2228,6 +2274,7 @@ export function checkShotsForWrite(root: string, episodeId: string, shots: Shots
         script.sha256,
         issues,
     );
+    checkImageFirstFrames(root, episodeId, shots, issues);
     return issues;
 }
 

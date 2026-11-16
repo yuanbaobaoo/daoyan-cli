@@ -247,6 +247,8 @@ function skillMd(version: string, commands: readonly SkillCommand[]): string {
         "daoyan init --mode=local --production single --modelpath /data/models",
         "# 或连接已有 ComfyUI",
         "daoyan init --mode=remote --production series --url http://gpu-box:8188",
+        "# 纯图片项目（无剧集）",
+        "daoyan init --mode=local --production stills",
         "",
         "# 查节点",
         "daoyan workflow nodes --filter KSampler --json",
@@ -276,7 +278,7 @@ function skillMd(version: string, commands: readonly SkillCommand[]): string {
         "init --production single|series → 全局角色/场景/音色 → 单集剧本 sync/approve → 单集 breakdown → 参考资产 → 单集 shots → 分镜工作流 → shot/batch --episode → take finalize → wrap --episode",
         "```",
         "",
-        "- 所有项目统一使用 story 布局；`project.json.production.mode` 为 `single` 或 `series`；",
+        "- 所有项目统一使用 story 布局；`project.json.production.mode` 为 `single` / `series` / `stills`；",
         "- `single` 只能有一集，禁止 `story episode add`；`series` 可加集；加集前确认模式；",
         "- `production.audio=false` 时不要写音色 / voice 资产，音色命令会返回 `feature_disabled`；",
         "- 全局设定集在 `story/`，跨集共享；每集数据在 `episodes/<id>/`；",
@@ -287,6 +289,25 @@ function skillMd(version: string, commands: readonly SkillCommand[]): string {
         "- `shot` / `batch` / `retake` 有剧情门禁；`run` 不受限，用于生成参考图或试验。",
         "",
         "完整流程、模板与恢复见 `reference/story.md`。",
+        "",
+        "## 图片单元",
+        "",
+        "```text",
+        "image ref add → image new / image set（提示词与输入图）→ 用户或 Agent 触发操作 → image take finalize → 入库或作首帧",
+        "```",
+        "",
+        "- 一个 still 是图片主题，五种操作都作用在它上面：`t2i` / `i2i` / `upscale` / `inpaint` / `prompt`；",
+        "- 图片输入统一用描述符：`asset:<owner>@<asset>` / `ref:<id>` / `still:<id>` / `run:<run>/<output>`；",
+        "- 参考图与遮罩必须先 `image ref add` 入库，不要在记录里写文件路径；",
+        "- 改提示词走 `image set --prompt` 或 `image prompt set`，会自动追加修订；不要手改 `stills/stills.json`；",
+        "- 先运行 `image ops --json` 确认哪些操作已配置；未配置的 workflow 不要猜测；",
+        "- 出图用 `image gen <id> --op t2i|i2i|upscale|inpaint --wait --json`；定稿用 `image take finalize`；",
+        "- 提示词优化用 `image prompt optimize`；未配置 LLM 时会返回 Agent 改写上下文；",
+        "- 定稿图入库用 `image promote`；视频首帧可写 `first_frame: { image: <still-id> }`；",
+        "- 默认只准备提示词与资源，不擅自触发生成；用户明确要求时才执行；",
+        "- Agent 写入后 Web 约 1 秒内自动刷新，不需要重启 `daoyan web`。",
+        "",
+        "完整操作说明见 `reference/images.md`。",
         "",
         "## 异步协议（摘要）",
         "",
@@ -334,6 +355,7 @@ function skillMd(version: string, commands: readonly SkillCommand[]): string {
         "- `reference/errors.md`：错误码与恢复矩阵",
         "- `reference/protocol.md`：Agent 异步协议（start/poll/wait/cancel/retry）",
         "- `reference/story.md`：多集剧本、拆解、设定资产、分镜门禁与剧集生命周期",
+        "- `reference/images.md`：图片单元、图片库、五种操作与 Web 实时协作",
         "- `reference/recipes.md`：shot / batch / wrap / 首帧与接力",
         "",
     ].join("\n");
@@ -942,6 +964,7 @@ daoyan batch --json
 
 - \`first_frame\`: 锚点 key -> \`meta.anchors\` 文件；
 - \`{"relay":"01"}\`: 取上游镜头**定稿稿件**的产物尾帧（\`relay_frames/\` 按来源 run 缓存）；未定稿时按 \`project.story.enforce\` 回退最新成功 run（warn/off）或阻断（strict）；
+- \`{"image":"<still-id>"}\`: 取图片单元定稿（未定稿时同 relay 策略）；图片用 \`image take finalize\` 定稿；
 - bindings 必须有 \`first_frame\` 映射（LoadImage.image 等）；
 - 上传走 \`/upload/image\`，不写引擎 input 目录。
 
@@ -977,6 +1000,98 @@ daoyan run runs/<run_id>/workflow.json --set seed=999 --wait
 
 Git 管理工作流历史；run 快照不可变，重拍不覆盖。
 `;
+}
+
+/**
+ * 生成 reference/images.md —— 图片单元与五种操作。
+ */
+function imagesMd(): string {
+    return [
+        "# 图片单元",
+        "",
+        "一个图片单元（still）是图片主题；文生图 / 图生图 / 放大 / 局部重绘 / 提示词优化都是对它的操作。",
+        "dycli 只负责准备、执行与留档；具体算法在 ComfyUI 工作流里。",
+        "",
+        "## 数据位置",
+        "",
+        "```text",
+        "stills/stills.json        图片单元、图片集、图片库（参考图 / 遮罩）",
+        "stills/takes.json         图片定稿台账（候选从 runs/ 实时推导）",
+        "stills/refs/              图片库文件（LFS）",
+        "```",
+        "",
+        "## 五种操作",
+        "",
+        "- `t2i`：文生图；需要 prompt + seed；",
+        "- `i2i`：图生图；需要 source + prompt + seed；",
+        "- `upscale`：高清放大；需要 source；",
+        "- `inpaint`：局部重绘修复；需要 source + mask，prompt 可选；",
+        "- `prompt`：提示词优化；产物是新的提示词修订，不自动应用，也不产生图片。",
+        "",
+        "先运行 `daoyan image ops --json` 查看项目配置了哪些操作、缺哪个 binding。未配置的操作不要猜测 workflow。",
+        "",
+        "## 图片输入描述符",
+        "",
+        "- `asset:character:lin/base@front` — 角色形态资产；`asset:scene:city@establishing` — 场景资产；",
+        "- `ref:<id>` — 图片库条目（参考图 / 遮罩）；",
+        "- `still:<id>` — 该图片单元已定稿的产物；",
+        "- `run:<run_id>/<output>` — 精确指定某次 run 产物。",
+        "",
+        "不要写绝对路径，也不要直接复制文件到 `stills/`；新增图片先 `image ref add`。",
+        "",
+        "## 闭环",
+        "",
+        "```bash",
+        "# 1. 参考图 / 遮罩入库（外部图片必须入库，不写路径）",
+        "daoyan image ref add ./mood.png --id mood-01 --json",
+        "daoyan image ref add ./mask.png --id fix-mask --role mask --json",
+        "",
+        "# 2. 建图片单元并填提示词 / 输入",
+        'daoyan image new lin-base-front --owner character:lin --form base --prompt "人物三视图，白底" --json',
+        "daoyan image set lin-base-front --source ref:mood-01 --json",
+        "",
+        "# 3. 执行操作（默认异步；--wait 阻塞）",
+        "daoyan image gen lin-base-front --op t2i --wait --json",
+        "daoyan image gen lin-base-front --op upscale --source still:lin-base-front --wait --json",
+        "daoyan image mask add lin-base-front --box 64,64,256,256 --json",
+        "daoyan image gen lin-base-front --op inpaint --mask ref:<mask-id> --wait --json",
+        "",
+        "# 4. 看候选并定稿",
+        "daoyan image take list lin-base-front --json",
+        "daoyan image take finalize lin-base-front --run <run_id> --json",
+        "",
+        "# 5. 入库或作为视频首帧",
+        "daoyan image promote lin-base-front --asset front --set-reference --json",
+        "```",
+        "",
+        "视频镜头可用 `first_frame: { image: <still-id> }` 引用图片定稿；strict 门禁下必须已定稿。",
+        "",
+        "## 提示词优化",
+        "",
+        "- `daoyan image prompt optimize <id> --json`：本机配置了 `prompt_optimizer` 时返回建议；否则返回 Agent 改写上下文，不写盘；",
+        "- 应用建议：`daoyan image prompt optimize <id> --apply --json`（仅 LLM 路径）；Agent 改写后用自己的文本 `image prompt set <id> --text ... --json`；",
+        "- 手动编辑提示词也走 `image prompt set`，会追加修订；",
+        "- 密钥只从 `.dycli/machine.json` 的 `prompt_optimizer.api_key_env` 指向的环境变量读取，不要写进仓库。",
+        "",
+        "Web 与 Agent 共用同一份数据：Agent 写入 `stills/stills.json` 后，`daoyan web` 会在约 1 秒内自动刷新图片页。",
+        "不要要求用户重启 Web，也不要手工编辑台账。",
+        "",
+        "## 协作约束",
+        "",
+        "- 默认只准备提示词与参考资源，不擅自消耗算力生成；用户明确要求时才执行；",
+        "- 修改提示词只用 `image set --prompt` / `--prompt-file`，会自动追加修订；",
+        "- 并发写入时带 `--base-updated-at`（来自 `image show --json` 的 `updated_at`），冲突返回 `image_conflict`；",
+        "- 删除被引用的图片单元或图片库条目需要先解除引用；`--force` 只用于确认无下游；",
+        "- 纯图片项目 `production.mode=stills` 没有剧集；不要调用 shot / take / wrap。",
+        "",
+        "## 常见错误",
+        "",
+        "- `image_not_found`：先 `image list` 看现有 id；",
+        "- `image_source_invalid`：检查描述符类型与 id；遮罩必须是 `image ref add --role mask`；",
+        "- `image_conflict`：重新 `image show` 取最新 `updated_at` 后重试；",
+        "- `workflow_invalid`：`image ops --json` 看缺哪个 workflow / binding。",
+        "",
+    ].join("\n");
 }
 
 /**
@@ -1182,6 +1297,7 @@ export function generateSkillFiles(version: string, commands: readonly SkillComm
     files.set("reference/errors.md", errorsMd());
     files.set("reference/protocol.md", protocolMd());
     files.set("reference/story.md", storyMd());
+    files.set("reference/images.md", imagesMd());
     files.set("reference/recipes.md", recipesMd());
     return files;
 }

@@ -2133,6 +2133,7 @@ function relayOf(shot: ShotSpec): string | null {
     // 首帧
     const first = shot.first_frame;
     if (first === undefined || typeof first === "string") return null;
+    if (!("relay" in first)) return null;
     return typeof first.relay === "string" && first.relay !== "" ? first.relay : null;
 }
 

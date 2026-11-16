@@ -67,12 +67,12 @@ dycli --version
 
 ### 项目
 
-- `daoyan init --mode=local [--production single|series] [--modelpath <路径>] [--version <tag>] [--mirror <镜像>] [--fallback-mirror <镜像|none>] [--torch-index <url>] [--torch-cuda <cuXXX>] [--torch-cpu] [--no-cache] [--no-skill] [--no-git]` — 在当前目录立项并部署项目专属 ComfyUI。
-- `daoyan init --mode=remote --url <url> [--production single|series] [--no-skill] [--no-git]` — 在当前目录立项并绑定外部 ComfyUI。
+- `daoyan init --mode=local [--production single|series|stills] [--modelpath <路径>] [--version <tag>] [--mirror <镜像>] [--fallback-mirror <镜像|none>] [--torch-index <url>] [--torch-cuda <cuXXX>] [--torch-cpu] [--no-cache] [--no-skill] [--no-git]` — 在当前目录立项并部署项目专属 ComfyUI。
+- `daoyan init --mode=remote --url <url> [--production single|series|stills] [--no-skill] [--no-git]` — 在当前目录立项并绑定外部 ComfyUI。
 - `daoyan validate [--json]` — 项目级离线校验（配置 / workflows / bindings / overrides / shots / 引擎目录 / Skill）。
 - `daoyan skill update [--json]` — 重新生成项目内 Agent Skill 与 `AGENTS.md` 管理块。
 
-`init` 默认维护 `.gitignore` 受管块并初始化 Git 仓库；位于父级仓库内时跳过嵌套初始化，不自动 commit。`--no-git` 只跳过仓库初始化。新项目默认 `--production single`（单视频），可用 `--production series` 创建多集项目；所有项目都使用 story 布局。
+`init` 默认维护 `.gitignore` 受管块并初始化 Git 仓库；位于父级仓库内时跳过嵌套初始化，不自动 commit。`--no-git` 只跳过仓库初始化。新项目默认 `--production single`（单视频），可用 `--production series` 创建多集项目，或用 `--production stills` 创建无剧集的纯图片项目；所有项目都使用 story 布局（纯图片项目保留设定集，不建剧集）。
 
 ### 剧本与设定
 
@@ -94,6 +94,21 @@ dycli --version
 - `daoyan story map build|set|clear --episode <id> ...` — 生成标注骨架、写入叙事标注或清除标注。
 - `daoyan story status [--episode <id>] [--json]` — 系列概览；指定剧集时查看阶段、stale、blockers 与 next_actions。
 - `daoyan story validate [--episode <id>] [--verify-hashes] [--json]` — 完整校验剧本、设定集、拆解、分镜、资产与引用。
+
+### 图片
+
+- `daoyan image new <id> [--title <t>] [--set <set>] [--owner <character:id|scene:id> --form <form>] [--episode <id> --shot <镜号>] [--prompt <文本>|--prompt-file <file|->] [--seed <n>] [--width <n>] [--height <n>] [--workflow <name>] [--source <描述符>] [--mask <描述符>] [--json]` — 新建图片单元（提示词、归属、输入图与工作流）。
+- `daoyan image list [--set <set>] [--owner <owner>] [--episode <id>] [--shot <镜号>] [--json]` — 列出图片单元、图片集与图片库。
+- `daoyan image show <id> [--json]` — 查看单个图片单元，含输入图、遮罩与定稿的解析结果。
+- `daoyan image set <id> [--title <t>] [--set <set>] [--prompt <文本>|--prompt-file <file|->] [--source <描述符>|--clear-source] [--mask <描述符>|--clear-mask] [--file <patch.json|->] [--base-updated-at <iso>] [--by ai|user] [--json]` — 修改图片单元；提示词变化会追加修订。
+- `daoyan image remove <id> [--force] [--json]` — 删除图片单元（被引用时需 `--force`）。
+- `daoyan image ref add <file> [--id <id>] [--role reference|mask] [--title <t>] [--json]`、`daoyan image ref list [--json]`、`daoyan image ref remove <id> [--force] [--json]` — 图片库（参考图 / 遮罩）入库、列表与删除。
+- `daoyan image ops [--json]` — 查看图片操作配置与就绪状态（t2i / i2i / upscale / inpaint / prompt）。
+- `daoyan image gen <id...> --op t2i|i2i|upscale|inpaint [--source <描述符>] [--mask <描述符>] [--steps N] [--set key=value ...] [--engine <url>] [--wait] [--timeout <小时>] [--json]` — 执行图片操作，默认异步 task。
+- `daoyan image take list [id...] [--json]`、`daoyan image take finalize <id> --run <run_id> [--output <产物>] [--by ai|user] [--json]`、`daoyan image take revoke <id> [--json]` — 图片候选、定稿与撤销。
+- `daoyan image prompt optimize <id...>|--all [--apply] [--json]`、`daoyan image prompt set <id> (--text <文本>|--file <file|->) [--by ai|user] [--json]`、`daoyan image prompt list <id> [--json]` — 提示词优化、设置与修订历史。
+- `daoyan image promote <id> --asset <asset-id> [--set-reference] [--replace] [--json]` — 把定稿图入库为角色 / 场景资产。
+- `daoyan image mask add <still> --box x,y,w,h [--width W --height H] [--json]` — 生成矩形遮罩并设为该图的默认遮罩。
 
 ### 工作流
 

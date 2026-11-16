@@ -1,6 +1,8 @@
 /** Story 数据模型 —— 系列级设定集、分集剧本/拆解、资产与状态。
  *  共享记录不含绝对路径；所有文件写入都经 story/store 的原子写。 */
 
+import type { JsonValue } from "../project/types.mts";
+
 /**
  * 资产 owner 类型。
  */
@@ -1229,4 +1231,267 @@ export interface TakesFile {
      * 各镜定稿记录（只保留有历史或有定稿的镜号）。
      */
     shots: ShotTakeRecord[];
+}
+
+/**
+ * 图片库条目类型：普通参考图或局部重绘遮罩。
+ */
+export type StillRefRole = "reference" | "mask";
+
+/**
+ * 一条提示词修订。
+ */
+export interface PromptRevision {
+    /**
+     * 递增修订号（从 1 开始）。
+     */
+    revision: number;
+    /**
+     * 完整提示词文本。
+     */
+    text: string;
+    /**
+     * 来源：Agent / 用户 / LLM / 工作流 / 导入。
+     */
+    source: "agent" | "user" | "llm" | "workflow" | "import";
+    /**
+     * 产生该修订的 run id（工作流或 LLM 执行时）。
+     */
+    run_id?: string | null;
+    /**
+     * 修订时间。
+     */
+    at: string;
+    /**
+     * 允许扩展字段。
+     */
+    [k: string]: unknown;
+}
+
+/**
+ * 图片库条目（stills/refs/ 下的图片，含遮罩）。
+ */
+export interface StillReference {
+    /**
+     * 库内唯一 id。
+     */
+    id: string;
+    /**
+     * 项目内相对路径（stills/refs/<id>.<ext>）。
+     */
+    path: string;
+    /**
+     * 图片或遮罩。
+     */
+    role: StillRefRole;
+    /**
+     * 展示名。
+     */
+    title?: string;
+    /**
+     * 内容 SHA-256。
+     */
+    sha256: string;
+    /**
+     * 字节数。
+     */
+    bytes: number;
+    /**
+     * MIME 类型。
+     */
+    content_type: string;
+    /**
+     * 图片宽度（可选）。
+     */
+    width?: number;
+    /**
+     * 图片高度（可选）。
+     */
+    height?: number;
+    /**
+     * 入库时间。
+     */
+    created_at: string;
+    /**
+     * 允许扩展字段。
+     */
+    [k: string]: unknown;
+}
+
+/**
+ * 图片集（图片页分组）。
+ */
+export interface StillSet {
+    /**
+     * 集 id。
+     */
+    id: string;
+    /**
+     * 展示名。
+     */
+    title: string;
+    /**
+     * 备注。
+     */
+    note?: string;
+    /**
+     * 允许扩展字段。
+     */
+    [k: string]: unknown;
+}
+
+/**
+ * 一个图片单元（主题），三种操作都作用在它上面。
+ */
+export interface StillSpec {
+    /**
+     * 单元 id（项目内唯一）。
+     */
+    id: string;
+    /**
+     * 展示名。
+     */
+    title?: string;
+    /**
+     * 所属图片集 id。
+     */
+    set?: string | null;
+    /**
+     * 归属：character:<id> 或 scene:<id>；独立成品图为 null。
+     */
+    owner?: string | null;
+    /**
+     * 角色形态 id（owner 为 character 时）。
+     */
+    form?: string | null;
+    /**
+     * 关联剧集 id（分镜图 / 首帧）。
+     */
+    episode_id?: string | null;
+    /**
+     * 关联镜号（分镜图 / 首帧）。
+     */
+    shot_id?: string | null;
+    /**
+     * 正向提示词；纯放大任务可为空。
+     */
+    prompt?: string;
+    /**
+     * 负向提示词。
+     */
+    negative?: string;
+    /**
+     * 随机种子。
+     */
+    seed?: number;
+    /**
+     * 生成宽度。
+     */
+    width?: number;
+    /**
+     * 生成高度。
+     */
+    height?: number;
+    /**
+     * 使用的 workflow；缺省用 stills.json 的 workflow 或 project.image.ops。
+     */
+    workflow?: string;
+    /**
+     * 图生图 / 放大 / 局部重绘的输入图片描述符。
+     */
+    source?: string | null;
+    /**
+     * 局部重绘遮罩描述符（ref:<id>）。
+     */
+    mask?: string | null;
+    /**
+     * 工作流资产槽位映射（slot -> owner 或 owner@asset）。
+     */
+    asset_slots?: Record<string, string>;
+    /**
+     * 额外的逻辑输入。
+     */
+    params?: Record<string, JsonValue>;
+    /**
+     * 提示词修订历史（最近 N 条）。
+     */
+    prompt_revisions?: PromptRevision[];
+    /**
+     * 制作备注。
+     */
+    notes?: string;
+    /**
+     * 允许扩展字段。
+     */
+    [k: string]: unknown;
+}
+
+/**
+ * 图片单元注册表（stills/stills.json）。
+ */
+export interface StillsFile {
+    /**
+     * schema 版本。
+     */
+    version: 1;
+    /**
+     * 最后更新时间。
+     */
+    updated_at: string;
+    /**
+     * 文件级默认 workflow（可被单图覆盖）。
+     */
+    workflow?: string;
+    /**
+     * 图片集。
+     */
+    sets: StillSet[];
+    /**
+     * 图片库（参考图 / 遮罩）。
+     */
+    refs: StillReference[];
+    /**
+     * 图片单元。
+     */
+    stills: StillSpec[];
+}
+
+/**
+ * 单张图片的定稿记录。
+ */
+export interface StillTakeRecord {
+    /**
+     * 图片单元 id。
+     */
+    still_id: string;
+    /**
+     * 当前定稿产物；null 表示未定稿。
+     */
+    finalized: FinalizedTake | null;
+    /**
+     * 变更历史（尾部追加，条数有上限）。
+     */
+    history: TakeHistoryEntry[];
+    /**
+     * 允许扩展字段。
+     */
+    [k: string]: unknown;
+}
+
+/**
+ * 图片定稿台账（stills/takes.json）。
+ */
+export interface StillTakesFile {
+    /**
+     * schema 版本。
+     */
+    version: 1;
+    /**
+     * 最后更新时间。
+     */
+    updated_at: string;
+    /**
+     * 各图片单元的定稿记录。
+     */
+    stills: StillTakeRecord[];
 }

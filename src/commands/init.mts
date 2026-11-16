@@ -111,8 +111,8 @@ function parseArgs(args: string[]): InitFlags {
         if (name === "--production") {
             // 生产模式取值
             const { value, skip } = takeValue(args, i, inline, "--production");
-            if (value !== "single" && value !== "series") {
-                usageError(`--production 仅接受 single / series（收到 ${value}）`);
+            if (value !== "single" && value !== "series" && value !== "stills") {
+                usageError(`--production 仅接受 single / series / stills（收到 ${value}）`);
             }
             flags.production = value;
             i += skip;

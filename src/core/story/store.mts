@@ -279,6 +279,7 @@ export function appendStoryLfsRules(root: string): boolean {
     const required = [
         "story/assets/**        filter=lfs diff=lfs merge=lfs -text",
         "episodes/**/anchors/** filter=lfs diff=lfs merge=lfs -text",
+        "stills/refs/**         filter=lfs diff=lfs merge=lfs -text",
     ];
     // 现有行
     const lines = current.split("\n").filter((line) => line !== "");
@@ -294,7 +295,16 @@ export function appendStoryLfsRules(root: string): boolean {
 /**
  * 初始化 story 骨架（幂等）。
  */
-export function initStory(root: string, projectName: string): { created: string[] } {
+export function initStory(
+    root: string,
+    projectName: string,
+    options?: {
+        /**
+         * 是否创建默认 ep01；纯图片项目传 false。
+         */
+        firstEpisode?: boolean;
+    },
+): { created: string[] } {
     // 已创建文件 / 目录
     const created: string[] = [];
     // 目录
@@ -340,7 +350,7 @@ export function initStory(root: string, projectName: string): { created: string[
     // LFS 规则
     if (appendStoryLfsRules(root)) created.push(".gitattributes");
     // 默认 ep01
-    if (listEpisodeMetas(root).length === 0) {
+    if ((options?.firstEpisode ?? true) && listEpisodeMetas(root).length === 0) {
         // 系列标题（init 刚写入）
         const series = readSeries(root);
         // 默认标题

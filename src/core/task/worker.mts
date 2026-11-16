@@ -26,7 +26,7 @@ import {
     updateTask,
 } from "./store.mts";
 import { appendEvent } from "./events.mts";
-import { planShotRuns, planSingleRun, type RunPlan } from "./plans.mts";
+import { planImageRuns, planShotRuns, planSingleRun, type RunPlan } from "./plans.mts";
 import { createEngineSession, type EngineSession } from "../engine/session.mts";
 import { fetchCatalog } from "../workflow/preflight.mts";
 import {
@@ -127,7 +127,7 @@ function aggregateFailure(
         return { code: "run_failed", message: "任务失败", details: {} };
     }
     // 单 run 直接透传首个错误
-    if (kind === "run" && failures.length === 1) {
+    if ((kind === "run" || kind === "image") && failures.length === 1) {
         // 首个失败
         const f = failures[0] as { run_id: string; code: string; message: string };
         return {
@@ -137,7 +137,7 @@ function aggregateFailure(
         };
     }
     return {
-        code: kind === "run" ? "run_failed" : "shot_failed",
+        code: kind === "run" ? "run_failed" : kind === "image" ? "image_failed" : "shot_failed",
         message: `完成 ${completed} 个 run，失败 ${failures.length} 个`,
         details: { failures, completed },
     };
@@ -231,6 +231,8 @@ export async function runWorker(opts: WorkerOptions): Promise<number> {
         const deadline = Date.now() + timeoutMs;
         // 单 run 计划（启动引擎前解析，尽早暴露 workflow 错误）
         let runPlan: RunPlan | null = null;
+        // image 队列（逐图构建计划）
+        let imagePlans: RunPlan[] | null = null;
         // shot 队列（逐镜构建计划，接力镜头依赖上游刚完成的 run）
         let shotsFile: import("../project/types.mts").ShotsFile | null = null;
         let shotQueue: string[] = [];
@@ -254,6 +256,26 @@ export async function runWorker(opts: WorkerOptions): Promise<number> {
                 sets: o.sets ?? {},
                 ...(o.label !== undefined ? { label: o.label } : {}),
             });
+        } else if (task.kind === "image") {
+            // 图片任务：一个 task 内逐图串行
+            const o = task.options;
+            if (o.op === undefined) {
+                throw new DaoyanCliError({ code: "usage", message: "image task 缺少 op", exit: 2 });
+            }
+            if (o.stills === undefined || o.stills.length === 0) {
+                throw new DaoyanCliError({ code: "usage", message: "image task 缺少 stills", exit: 2 });
+            }
+            imagePlans = planImageRuns({
+                root,
+                project,
+                machine,
+                stillIds: o.stills,
+                op: o.op,
+                ...(o.image_source !== undefined ? { source: o.image_source } : {}),
+                ...(o.image_mask !== undefined ? { mask: o.image_mask } : {}),
+                ...(o.sets !== undefined ? { sets: o.sets } : {}),
+                log: say,
+            }).plans;
         } else {
             // 剧集上下文；story 模式必须已有 episode_id
             const context = resolveEpisodeContext(root, task.episode_id ?? undefined);
@@ -369,6 +391,11 @@ export async function runWorker(opts: WorkerOptions): Promise<number> {
 
         if (runPlan !== null) {
             await executeOne(runPlan);
+        } else if (imagePlans !== null) {
+            for (const plan of imagePlans) {
+                if (controller.signal.aborted) throw new RunCancelledError();
+                await executeOne(plan);
+            }
         } else {
             // shot / retake / batch：逐镜构建计划（接力可看到上游刚完成的 run）
             for (const id of shotQueue) {

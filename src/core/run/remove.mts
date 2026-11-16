@@ -2,6 +2,7 @@
 import { existsSync, rmSync } from "node:fs";
 import { DaoyanCliError } from "../../shared/errors.mts";
 import { revokeTakesUsingOutput } from "../story/takes.mts";
+import { revokeStillTakesUsingOutput } from "../story/image-takes.mts";
 import { requireRun, runOutputAbs, writeRun } from "./store.mts";
 
 /**
@@ -28,6 +29,10 @@ export interface RemoveRunOutputResult {
      * 因该产物删除而撤销定稿的镜号。
      */
     revoked_shots: string[];
+    /**
+     * 因该产物删除而撤销定稿的图片单元。
+     */
+    revoked_stills: string[];
 }
 
 /**
@@ -47,11 +52,20 @@ export function removeRunOutput(root: string, runId: string, outputName: string)
     }
     // 定稿台账先撤销，避免指向已删除文件
     const revoked = revokeTakesUsingOutput(root, runId, output.name);
+    // 图片定稿同样撤销
+    const revokedStills = revokeStillTakesUsingOutput(root, runId, output.name);
     // 文件
     const abs = runOutputAbs(root, run, output);
     if (existsSync(abs)) rmSync(abs, { force: true });
     // 记录（显式例外：产物删除后同步移除 run.json 中的条目）
     run.outputs = run.outputs.filter((o) => o.name !== output.name);
     writeRun(root, run);
-    return { run_id: runId, output: output.name, path: output.path, bytes: output.bytes, revoked_shots: revoked };
+    return {
+        run_id: runId,
+        output: output.name,
+        path: output.path,
+        bytes: output.bytes,
+        revoked_shots: revoked,
+        revoked_stills: revokedStills,
+    };
 }

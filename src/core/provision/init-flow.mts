@@ -18,12 +18,15 @@ import {
     PROJECT_FILE,
     RELAY_DIR,
     SHOTS_FILE,
+    STILLS_DIR,
+    STILLS_REFS_DIR,
     WORKFLOWS_DIR,
     type CustomNodeSpec,
     type ProductionMode,
     type ProjectConfig,
 } from "../project/types.mts";
 import { initStory } from "../story/store.mts";
+import { initStills } from "../story/stills.mts";
 import { episodeDir } from "../story/paths.mts";
 import {
     DEFAULT_PIP_MIRROR,
@@ -138,10 +141,13 @@ export interface ToolchainSummary {
  * 生成 project.json v2 骨架内容。
  */
 export function projectTemplate(name: string, mode: ProductionMode): ProjectConfig {
+    // 纯图片项目
+    const stills = mode === "stills";
     return {
         name,
         version: 2,
-        production: { mode, audio: true },
+        production: { mode, audio: !stills },
+        ...(stills ? { image: { ops: {} } } : {}),
         gpu: { takeover: false },
         comfyui: {
             custom_nodes: [],
@@ -156,7 +162,7 @@ export function scaffoldProject(root: string, name: string, mode: ProductionMode
     // 已创建文件
     const created: string[] = [];
     // 目录
-    for (const d of [WORKFLOWS_DIR, INPUTS_DIR, FINAL_DIR, LOG_DIR, RELAY_DIR]) {
+    for (const d of [WORKFLOWS_DIR, INPUTS_DIR, FINAL_DIR, LOG_DIR, RELAY_DIR, STILLS_DIR, STILLS_REFS_DIR]) {
         ensureDir(join(root, d));
     }
     // project.json
@@ -165,12 +171,15 @@ export function scaffoldProject(root: string, name: string, mode: ProductionMode
         writeFileAtomically(projectFile, JSON.stringify(projectTemplate(name, mode), null, 2) + "\n");
         created.push(PROJECT_FILE);
     }
-    // story 骨架（含默认 ep01）
-    const story = initStory(root, name);
+    // story 骨架（纯图片项目不建默认剧集）
+    const story = initStory(root, name, { firstEpisode: mode !== "stills" });
     created.push(...story.created);
-    // 首集分镜模板（只填充空分镜）
+    // 图片骨架
+    const stills = initStills(root);
+    created.push(...stills.created);
+    // 首集分镜模板（只填充空分镜；纯图片项目没有剧集）
     const firstShots = join(episodeDir(root, "ep01"), SHOTS_FILE);
-    if (existsSync(firstShots)) {
+    if (mode !== "stills" && existsSync(firstShots)) {
         try {
             // 当前分镜
             const current = JSON.parse(readFileSync(firstShots, "utf8")) as { shots?: unknown[] };
@@ -183,10 +192,11 @@ export function scaffoldProject(root: string, name: string, mode: ProductionMode
         }
     }
     // 空 workflow 占位（workflow new/import 可直接替换空图）
-    const wf = join(root, WORKFLOWS_DIR, "t2v.json");
+    const wfName = mode === "stills" ? "image-t2i.json" : "t2v.json";
+    const wf = join(root, WORKFLOWS_DIR, wfName);
     if (!existsSync(wf)) {
         writeFileAtomically(wf, "{}\n");
-        created.push(`${WORKFLOWS_DIR}/t2v.json`);
+        created.push(`${WORKFLOWS_DIR}/${wfName}`);
     }
     // .gitattributes（LFS）
     const attrs = join(root, ".gitattributes");
@@ -198,6 +208,7 @@ export function scaffoldProject(root: string, name: string, mode: ProductionMode
                 "runs/**/inputs/**  filter=lfs diff=lfs merge=lfs -text",
                 "inputs/**          filter=lfs diff=lfs merge=lfs -text",
                 "final/**           filter=lfs diff=lfs merge=lfs -text",
+                "stills/refs/**     filter=lfs diff=lfs merge=lfs -text",
                 "",
             ].join("\n"),
         );
